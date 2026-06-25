@@ -46,7 +46,7 @@ else
     echo -e "${GREEN}✅ git 已安装${NC}"
 fi
 
-REPO_URL="https://github.com/andy0715888/accounting-system.git"
+REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
 INSTALL_DIR="accounting-system"
 
 if [ -d "$INSTALL_DIR" ]; then
@@ -66,10 +66,10 @@ if [ "$USE_GIT" = true ]; then
     git clone "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 else
-    TAR_URL="https://github.com/andy0715888/accounting-system/archive/main.tar.gz"
+    TAR_URL="https://github.com/andy0715888/accounting-system-full-latest/archive/main.tar.gz"
     curl -L -o temp.tar.gz "$TAR_URL"
     tar -xzf temp.tar.gz
-    mv accounting-system-main "$INSTALL_DIR"
+    mv accounting-system-full-latest-main "$INSTALL_DIR"
     rm temp.tar.gz
     cd "$INSTALL_DIR"
 fi
