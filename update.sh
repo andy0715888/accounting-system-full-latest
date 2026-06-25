@@ -3,6 +3,7 @@
 set -e
 
 REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
+TAR_URL="https://github.com/andy0715888/accounting-system-full-latest/archive/main.tar.gz"
 INSTALL_DIR="accounting-system"
 DB_FILE="data/accounting.db"
 UPLOADS_DIR="uploads"
@@ -114,11 +115,33 @@ update_code() {
         git remote set-url origin "$REPO_URL" 2>/dev/null || true
         git fetch origin
         git reset --hard origin/main
-        echo "✅ 代码已更新"
+        echo "✅ 代码已更新 (git)"
     else
-        echo "❌ 当前目录不是 git 项目，无法直接 git 更新"
-        echo "请确认你当前目录是 /root/accounting-system"
-        exit 1
+        echo "⚠️ 当前目录不是 git 项目，改用源码包覆盖更新..."
+        TMP_DIR="/tmp/accounting_update_$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$TMP_DIR"
+
+        if ! command -v curl >/dev/null 2>&1; then
+            echo "❌ 系统未安装 curl，无法下载源码包"
+            exit 1
+        fi
+        if ! command -v tar >/dev/null 2>&1; then
+            echo "❌ 系统未安装 tar，无法解压源码包"
+            exit 1
+        fi
+
+        curl -L -o "$TMP_DIR/latest.tar.gz" "$TAR_URL"
+        tar -xzf "$TMP_DIR/latest.tar.gz" -C "$TMP_DIR"
+        SRC_DIR=$(find "$TMP_DIR" -maxdepth 1 -type d -name "accounting-system-full-latest-*" | head -n 1)
+        if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+            echo "❌ 源码包解压失败"
+            rm -rf "$TMP_DIR"
+            exit 1
+        fi
+
+        cp -a "$SRC_DIR"/. "$PROJECT_DIR"/
+        rm -rf "$TMP_DIR"
+        echo "✅ 代码已更新 (源码包)"
     fi
 }
 
