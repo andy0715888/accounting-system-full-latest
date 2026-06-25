@@ -145,6 +145,46 @@ router.post('/', requireAuth, async (req, res) => {
     }
 });
 
+router.post('/batch', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { settings } = req.body;
+        if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+            return res.status(400).json({ error: '设置数据格式错误' });
+        }
+
+        const entries = Object.entries(settings);
+        if (entries.length === 0) return res.status(400).json({ error: '没有需要保存的设置' });
+
+        for (const [key, value] of entries) {
+            if (!key) continue;
+
+            if (key === 'allow_register') {
+                if (userId !== SYSTEM_USER_ID) {
+                    return res.status(403).json({ error: '只有管理员可以修改注册开关' });
+                }
+                await saveSettingValue(SYSTEM_USER_ID, key, value);
+                continue;
+            }
+
+            if (key === 'background') {
+                const bg = normalizeBackground(value);
+                if (!bg) return res.status(400).json({ error: '背景设置格式错误' });
+                await removeStoredBackgroundFile();
+                await saveSettingValue(SYSTEM_USER_ID, key, bg);
+                continue;
+            }
+
+            await saveSettingValue(userId, key, value);
+        }
+
+        res.json({ success: true, message: '设置已保存' });
+    } catch (err) {
+        console.error('批量保存设置错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 router.delete('/background', requireAuth, async (req, res) => {
     try {
         await removeStoredBackgroundFile();
