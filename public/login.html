@@ -16,10 +16,12 @@
                     <span class="logo-icon">📊</span>
                     <h1>记账系统</h1>
                 </div>
-                <p class="subtitle">个人财务管理助手</p>
+                <p class="subtitle" id="subtitle">个人财务管理助手</p>
             </div>
-            <div class="login-body">
-                <div class="error-msg" id="errorMsg"></div>
+            <div class="error-msg" id="errorMsg"></div>
+
+            <!-- 登录表单 -->
+            <div id="loginForm">
                 <div class="input-group">
                     <label for="username">用户名</label>
                     <div class="input-wrapper">
@@ -39,25 +41,27 @@
                     <span>还没有账号？</span>
                     <a href="#" id="showRegister">立即注册</a>
                 </div>
-                <div class="register-form" id="registerForm" style="display:none;">
-                    <div class="input-group">
-                        <label for="regUsername">用户名</label>
-                        <div class="input-wrapper">
-                            <span class="input-icon">👤</span>
-                            <input type="text" id="regUsername" placeholder="请输入用户名">
-                        </div>
+            </div>
+
+            <!-- 注册表单（默认隐藏） -->
+            <div id="registerForm" style="display:none;">
+                <div class="input-group">
+                    <label for="regUsername">用户名</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">👤</span>
+                        <input type="text" id="regUsername" placeholder="请输入用户名">
                     </div>
-                    <div class="input-group">
-                        <label for="regPassword">密码</label>
-                        <div class="input-wrapper">
-                            <span class="input-icon">🔒</span>
-                            <input type="password" id="regPassword" placeholder="至少6位">
-                        </div>
+                </div>
+                <div class="input-group">
+                    <label for="regPassword">密码</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input type="password" id="regPassword" placeholder="至少6位">
                     </div>
-                    <button id="registerBtn" class="login-btn register-btn">注 册</button>
-                    <div class="login-footer">
-                        <a href="#" id="showLogin">返回登录</a>
-                    </div>
+                </div>
+                <button id="registerBtn" class="login-btn register-btn">注 册</button>
+                <div class="login-footer">
+                    <a href="#" id="showLogin">返回登录</a>
                 </div>
             </div>
         </div>
