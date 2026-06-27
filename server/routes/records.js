@@ -14,12 +14,43 @@ router.get('/', requireAuth, async (req, res) => {
         const { tabId } = req.query;
         if (!tabId) return res.status(400).json({ error: '缺少 tabId' });
 
-        const records = await query(
-            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY created_at DESC',
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const pageSize = Math.min(1000, Math.max(1, parseInt(req.query.pageSize) || 50));
+
+        const countResult = await queryOne(
+            'SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?',
             [userId, tabId]
         );
-        const parsed = records.map(r => ({ ...r, data: JSON.parse(r.data || '{}') }));
-        res.json(parsed);
+        const total = countResult ? countResult.cnt : 0;
+        const totalPages = Math.ceil(total / pageSize);
+        const offset = (page - 1) * pageSize;
+
+        const records = await query(
+            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            [userId, tabId, pageSize, offset]
+        );
+        const parsed = records.map(r => {
+            try { return { ...r, data: JSON.parse(r.data || '{}') }; }
+            catch { return { ...r, data: {} }; }
+        });
+
+        // Also get income totals for each record on this page
+        const recordIds = parsed.map(r => r.id);
+        let incomeMap = {};
+        if (recordIds.length > 0) {
+            const placeholders = recordIds.map(() => '?').join(',');
+            const incomeRows = await query(
+                `SELECT record_id, SUM(amount) as total FROM income_records WHERE record_id IN (${placeholders}) GROUP BY record_id`,
+                recordIds
+            );
+            incomeRows.forEach(row => { incomeMap[row.record_id] = row.total; });
+        }
+
+        parsed.forEach(r => {
+            r._incomeTotal = incomeMap[r.id] || 0;
+        });
+
+        res.json({ records: parsed, total, page, pageSize, totalPages });
     } catch (err) {
         console.error('获取记录错误:', err);
         res.status(500).json({ error: '服务器错误' });
