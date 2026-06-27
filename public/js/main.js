@@ -29,7 +29,9 @@ document.addEventListener('DOMContentLoaded', function() {
         incomeRecordId: null,
         incomeRecords: [],
         // 行管理模式
-        rowManageMode: false
+        rowManageMode: false,
+        // 待保存记录追踪
+        pendingSaves: new Set()
     };
 
     // DOM 引用
@@ -349,6 +351,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadTabs() { state.tabs = await API.get('/tabs'); return state.tabs; }
     async function loadColumns(tabId) { state.columns = await API.get('/columns?tabId=' + tabId); return state.columns; }
     async function loadRecords(tabId) {
+        await flushPendingSaves();
         const result = await API.get('/records?tabId=' + tabId + '&page=' + state.page + '&pageSize=' + state.pageSize);
         state.records = result.records || [];
         state.total = result.total || 0;
@@ -1241,8 +1244,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 display.style.display = 'inline';
                 td.classList.remove('editing-cell');
 
-                if (record._saveTimeout) clearTimeout(record._saveTimeout);
-                record._saveTimeout = setTimeout(() => saveRecord(record), 300);
+                saveRecord(record);
                 updateFilterOptionsForCol('expense');
                 renderTable(false);
             };
@@ -1315,20 +1317,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (colKey === 'ip_address') record.data.ip_info = val;
 
-        if (record._saveTimeout) clearTimeout(record._saveTimeout);
-        record._saveTimeout = setTimeout(() => saveRecord(record), 300);
+        saveRecord(record);
         renderTable(false);
     }
 
-    function saveRecord(record) {
-        if (!record._updated) return;
+    async function saveRecord(record) {
+        if (!record || !record._updated) return;
         record._updated = false;
-        API.put('/records/' + record.id, { data: record.data })
-            .then(() => {
-                updateTabCache(state.currentTabId);
-                setStatus('✅ 保存成功');
-            })
-            .catch(err => { setStatus('❌ 保存失败: ' + err.message); record._updated = true; });
+        state.pendingSaves.add(record.id);
+        try {
+            await API.put('/records/' + record.id, { data: record.data });
+            updateTabCache(state.currentTabId);
+            setStatus('保存成功');
+        } catch (err) {
+            setStatus('保存失败: ' + err.message);
+            record._updated = true;
+        } finally {
+            state.pendingSaves.delete(record.id);
+        }
+    }
+
+    async function flushPendingSaves() {
+        if (state.pendingSaves.size === 0) return;
+        setStatus('保存中...');
+        // 找出所有标记为_updated但不在pendingSaves中的记录也一起保存
+        const recordsToSave = state.records.filter(r => r._updated && !state.pendingSaves.has(r.id));
+        const pendingIds = Array.from(state.pendingSaves);
+        // 等待已经在进行中的保存
+        let waited = 0;
+        while (state.pendingSaves.size > 0 && waited < 50) {
+            await new Promise(r => setTimeout(r, 100));
+            waited++;
+        }
+        // 保存剩余未保存的
+        for (const rec of recordsToSave) {
+            await saveRecord(rec);
+        }
     }
 
     function updateRowSelection() {
@@ -1706,17 +1730,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- 全标签财务统计 ---
     async function getAllTabRecordsForStats() {
+        await flushPendingSaves();
         const all = [];
         for (const tab of state.tabs) {
             let records;
-            if (tab.id === state.currentTabId) {
-                records = state.records;
-            } else {
-                try {
-                    records = await API.get('/records?tabId=' + tab.id + '&pageSize=1000');
-                    records = records.records || records;
-                } catch { records = []; }
-            }
+            try {
+                const result = await API.get('/records?tabId=' + tab.id + '&pageSize=1000');
+                records = result.records || result || [];
+            } catch { records = []; }
             records.forEach(record => all.push({ ...record, tabId: tab.id, tabName: tab.name }));
         }
         // Also load all income records per tab
