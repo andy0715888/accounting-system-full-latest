@@ -2,6 +2,17 @@
 
 set -e
 
+# === 最开始就加载 nvm ===
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo "❌ 未找到 Node.js/npm，请先安装"
+    echo "执行: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
+    echo "然后重新运行此更新脚本"
+    exit 1
+fi
+echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
+
 REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
 TAR_URL="https://github.com/andy0715888/accounting-system-full-latest/archive/main.tar.gz"
 INSTALL_DIR="accounting-system"
@@ -168,14 +179,31 @@ restore_data() {
     fi
 }
 
+ensure_node_env() {
+    if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+        echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
+        return
+    fi
+    echo "❌ npm 丢失，尝试重新加载 nvm..."
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+        echo "❌ 未找到 node/npm，请先安装"
+        exit 1
+    fi
+    echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
+}
+
 install_deps() {
     echo "➜ 安装/更新依赖..."
+    ensure_node_env
     npm install --registry=https://registry.npmmirror.com
     echo "✅ 依赖安装完成"
 }
 
 start_service() {
     echo "➜ 启动服务..."
+    ensure_node_env
 
     if command -v fuser >/dev/null 2>&1; then
         PORT_PIDS=$(fuser "$PORT/tcp" 2>/dev/null || true)
