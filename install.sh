@@ -92,15 +92,42 @@ if [ ! -f "public/images/default-bg.jpg" ]; then
     echo -e "${GREEN}✅ 默认背景图已创建${NC}"
 fi
 
-echo -e "${YELLOW}➜ 启动服务...${NC}"
-nohup npm start > server.log 2>&1 &
-SERVER_PID=$!
-echo $SERVER_PID > server.pid
-sleep 2
-if ps -p $SERVER_PID > /dev/null; then
-    echo -e "${GREEN}✅ 服务已启动 (PID: $SERVER_PID)${NC}"
+echo -e "${YELLOW}➜ 启动服务并配置开机自启...${NC}"
+NODE_PATH=$(which node)
+PROJECT_DIR=$(pwd)
+
+SERVICE_FILE="/etc/systemd/system/accounting.service"
+cat > "$SERVICE_FILE" <<SERVICEEOF
+[Unit]
+Description=Accounting System
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${PROJECT_DIR}
+ExecStart=${NODE_PATH} server/index.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PATH=${PATH}
+StandardOutput=append:${PROJECT_DIR}/server.log
+StandardError=append:${PROJECT_DIR}/server.log
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+systemctl daemon-reload
+systemctl enable accounting
+systemctl start accounting
+sleep 3
+
+if systemctl is-active --quiet accounting; then
+    echo -e "${GREEN}✅ 服务已启动（systemd 开机自启已开启）${NC}"
 else
-    echo -e "${RED}❌ 服务启动失败，请查看 server.log${NC}"
+    echo -e "${RED}❌ 服务启动失败，请查看日志：${NC}"
+    tail -n 20 server.log || true
+    systemctl status accounting --no-pager || true
     exit 1
 fi
 
@@ -113,16 +140,16 @@ echo "  🎉 安装完成！"
 echo "==========================================${NC}"
 echo ""
 echo -e "🌐 访问地址: http://${IP_ADDR}:3000"
-echo -e "📝 默认账号: ${GREEN}admin${NC} / ${GREEN}admin123${NC}"
-echo ""
-echo -e "${YELLOW}⚠️  首次登录后请及时修改密码！${NC}"
+echo -e "📝 默认账号: ${GREEN}andy${NC} / ${GREEN}andy0715${NC}"
 echo ""
 echo -e "📂 安装目录: $(pwd)"
 echo -e "📄 服务日志: $(pwd)/server.log"
 echo ""
 echo -e "🔧 管理命令："
-echo "   停止服务: kill \$(cat server.pid)"
-echo "   重启服务: kill \$(cat server.pid) && npm start"
+echo "   查看状态: systemctl status accounting"
+echo "   停止服务: systemctl stop accounting"
+echo "   启动服务: systemctl start accounting"
+echo "   重启服务: systemctl restart accounting"
 echo "   查看日志: tail -f server.log"
 echo ""
 echo -e "${GREEN}==========================================${NC}"
