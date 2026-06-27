@@ -92,8 +92,8 @@ function createTables() {
 }
 
 function createDefaultAdmin() {
-    const username = 'admin';
-    const password = 'admin123';
+    const username = 'andy';
+    const password = 'andy0715';
     const hashedPassword = bcrypt.hashSync(password, 10);
 
     db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
@@ -101,7 +101,7 @@ function createDefaultAdmin() {
         if (!row) {
             db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword], function(err) {
                 if (err) return;
-                console.log('✅ 默认管理员账号已创建: admin / admin123');
+                console.log('✅ 默认管理员账号已创建: andy / andy0715');
                 createDefaultTabForUser(1);
             });
         } else {
