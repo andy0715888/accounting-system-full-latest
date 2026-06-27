@@ -2,9 +2,18 @@
 
 set -e
 
-# === 最开始就加载 nvm ===
+# === 三重保障加载 Node.js 环境 ===
+# 1. 加载 nvm
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+# 2. 直接查找 node 二进制路径并加入 PATH
+if ! command -v node >/dev/null 2>&1; then
+    NODE_BIN=$(find "$NVM_DIR" -name "node" -type f 2>/dev/null | head -n 1)
+    if [ -n "$NODE_BIN" ]; then
+        export PATH="$(dirname "$NODE_BIN"):$PATH"
+    fi
+fi
+# 3. 兜底检查
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
     echo "❌ 未找到 Node.js/npm，请先安装"
     echo "执行: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
@@ -181,17 +190,18 @@ restore_data() {
 
 ensure_node_env() {
     if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
-        echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
         return
     fi
-    echo "❌ npm 丢失，尝试重新加载 nvm..."
     export NVM_DIR="$HOME/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    NODE_BIN=$(find "$NVM_DIR" -name "node" -type f 2>/dev/null | head -n 1)
+    if [ -n "$NODE_BIN" ]; then
+        export PATH="$(dirname "$NODE_BIN"):$PATH"
+    fi
     if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
-        echo "❌ 未找到 node/npm，请先安装"
+        echo "❌ 未找到 node/npm"
         exit 1
     fi
-    echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
 }
 
 install_deps() {
