@@ -53,6 +53,13 @@ echo "📂 项目目录: $PROJECT_DIR"
 stop_service() {
     echo "➜ 检查并停止当前服务..."
 
+    # 优先用 systemd 停止
+    if systemctl is-active --quiet accounting 2>/dev/null; then
+        systemctl stop accounting
+        echo "✅ 已通过 systemd 停止服务"
+    fi
+
+    # 兜底：杀残留进程
     if [ -f "server.pid" ]; then
         PID=$(cat server.pid)
         if ps -p "$PID" > /dev/null 2>&1; then
@@ -231,17 +238,46 @@ start_service() {
         fi
     fi
 
-    nohup npm start > server.log 2>&1 &
-    SERVER_PID=$!
-    echo "$SERVER_PID" > server.pid
+    # 获取 node 和 npm 的绝对路径
+    NODE_PATH=$(which node)
+    NPM_PATH=$(which npm)
+    PROJECT_DIR=$(pwd)
+
+    # 配置 systemd 开机自启
+    SERVICE_FILE="/etc/systemd/system/accounting.service"
+    echo "➜ 配置开机自启..."
+    cat > "$SERVICE_FILE" <<SERVICEEOF
+[Unit]
+Description=Accounting System
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${PROJECT_DIR}
+ExecStart=${NODE_PATH} server/index.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PATH=${PATH}
+StandardOutput=append:${PROJECT_DIR}/server.log
+StandardError=append:${PROJECT_DIR}/server.log
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+    systemctl daemon-reload
+    systemctl enable accounting
+    systemctl restart accounting
     sleep 3
 
-    if ps -p "$SERVER_PID" > /dev/null 2>&1; then
-        echo "✅ 服务已启动，PID: $SERVER_PID"
+    if systemctl is-active --quiet accounting; then
+        echo "✅ 服务已启动（systemd 开机自启已开启）"
     else
         echo "❌ 服务启动失败，请查看日志："
         echo "------------------------------------------"
         tail -n 80 server.log || true
+        systemctl status accounting --no-pager || true
         echo "------------------------------------------"
         exit 1
     fi
