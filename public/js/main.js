@@ -19,7 +19,15 @@ document.addEventListener('DOMContentLoaded', function() {
         userName: '',
         isAdmin: false,
         ipPortSuffix: '',
-        domainPortSuffix: ''
+        domainPortSuffix: '',
+        // 分页
+        page: 1,
+        pageSize: 50,
+        total: 0,
+        totalPages: 1,
+        // 收入弹窗
+        incomeRecordId: null,
+        incomeRecords: []
     };
 
     // DOM 引用
@@ -85,6 +93,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const addProviderBtn = $('#addProviderBtn');
     const providerList = $('#providerList');
     const providerStatus = $('#providerStatus');
+
+    const paginationBar = $('#paginationBar');
+    const paginationInfo = $('#paginationInfo');
+    const prevPageBtn = $('#prevPageBtn');
+    const nextPageBtn = $('#nextPageBtn');
+    const pageIndicator = $('#pageIndicator');
+    const pageSizeSelect = $('#pageSizeSelect');
+
+    const incomeModal = $('#incomeModal');
+    const closeIncomeModal = $('#closeIncomeModal');
+    const incomeAmountInput = $('#incomeAmountInput');
+    const incomeDateInput = $('#incomeDateInput');
+    const incomeRemarkInput = $('#incomeRemarkInput');
+    const addIncomeBtn = $('#addIncomeBtn');
+    const incomeList = $('#incomeList');
+    const incomeTotalDisplay = $('#incomeTotalDisplay');
+    const incomeStatus = $('#incomeStatus');
 
     let filterDocumentClickBound = false;
 
@@ -321,8 +346,12 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadTabs() { state.tabs = await API.get('/tabs'); return state.tabs; }
     async function loadColumns(tabId) { state.columns = await API.get('/columns?tabId=' + tabId); return state.columns; }
     async function loadRecords(tabId) {
-        state.records = await API.get('/records?tabId=' + tabId);
+        const result = await API.get('/records?tabId=' + tabId + '&page=' + state.page + '&pageSize=' + state.pageSize);
+        state.records = result.records || [];
+        state.total = result.total || 0;
+        state.totalPages = result.totalPages || 1;
         updateAllFilterOptions();
+        updatePaginationUI();
         return state.records;
     }
 
@@ -330,7 +359,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!tabId) return;
         state.tabCache[tabId] = {
             columns: state.columns,
-            records: state.records
+            total: state.total
         };
     }
 
@@ -341,6 +370,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function invalidateCurrentTabCache() {
         invalidateTabCache(state.currentTabId);
+    }
+
+    function updatePaginationUI() {
+        if (!paginationInfo) return;
+        const start = (state.page - 1) * state.pageSize + 1;
+        const end = Math.min(state.page * state.pageSize, state.total);
+        paginationInfo.textContent = state.total > 0 ? `第 ${start}-${end} 条，共 ${state.total} 条` : '共 0 条';
+        if (pageIndicator) pageIndicator.textContent = `${state.page} / ${state.totalPages}`;
+        if (prevPageBtn) prevPageBtn.disabled = state.page <= 1;
+        if (nextPageBtn) nextPageBtn.disabled = state.page >= state.totalPages;
     }
 
     function updateAllFilterOptions() {
@@ -371,24 +410,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadDataForTab(tabId, force = false) {
         try {
-            if (!force && state.tabCache[tabId] && state.tabCache[tabId].columns && state.tabCache[tabId].records) {
-                state.columns = state.tabCache[tabId].columns;
-                state.records = state.tabCache[tabId].records;
-                updateAllFilterOptions();
-                setStatus(`✅ 已加载 ${state.records.length} 条记录`);
-                return;
-            }
-            const [columns, records] = await Promise.all([
-                API.get('/columns?tabId=' + tabId),
-                API.get('/records?tabId=' + tabId)
-            ]);
+            state.page = 1;
+            const columns = await API.get('/columns?tabId=' + tabId);
             state.columns = columns;
-            state.records = records;
-            updateAllFilterOptions();
+            await loadRecords(tabId);
             updateTabCache(tabId);
-            setStatus(`✅ 已加载 ${state.records.length} 条记录`);
+            setStatus(`已加载 ${state.records.length} 条记录（共 ${state.total} 条）`);
         }
-        catch (err) { setStatus('❌ 加载失败: ' + err.message); }
+        catch (err) { setStatus('加载失败: ' + err.message); }
     }
 
     function renderTabs() {
@@ -670,13 +699,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     `;
                 } else if (colKey === 'fee') {
-                    const rawValue = val || '';
-                    const displayVal = computeFeeValue(rawValue);
-                    const displayText = (displayVal !== '' && displayVal !== null && !isNaN(Number(displayVal))) ? Number(displayVal) : (displayVal || '0');
+                    const incomeTotal = record._incomeTotal || 0;
+                    const displayText = incomeTotal > 0 ? Number(incomeTotal).toFixed(2) : '0.00';
                     inputHtml = `
-                        <div class="fee-control" data-col="${escapeAttr(colKey)}" data-id="${record.id}">
-                            <span class="fee-display">${escapeHtml(String(displayText))}</span>
-                            <input type="text" class="cell-input fee-input" value="${escapeAttr(rawValue)}" style="display:none;" />
+                        <div class="fee-summary-cell" data-id="${record.id}">
+                            <span>${escapeHtml(displayText)}</span>
+                            <span class="fee-add-icon">+</span>
                         </div>
                     `;
                 } else {
@@ -684,12 +712,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const step = col.col_type === 'number' ? 'step="0.01"' : '';
                     inputHtml = `<input type="${inputType}" class="cell-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(val || '')}" ${step} />`;
                 }
-                tbodyHtml += `<td class="${colKey === 'expense' || colKey === 'fee' ? 'editable-td' : ''}">${inputHtml}</td>`;
+                tbodyHtml += `<td class="${colKey === 'expense' ? 'editable-td' : ''}">${inputHtml}</td>`;
             });
             tbodyHtml += '</tr>';
         });
         tableBody.innerHTML = tbodyHtml;
-        recordCount.textContent = Object.keys(state.filters).length > 0 ? `共 ${filteredRecords.length} / 全部 ${state.records.length} 条记录` : `共 ${filteredRecords.length} 条记录`;
+        recordCount.textContent = Object.keys(state.filters).length > 0 ? `筛选 ${filteredRecords.length} 条 / 共 ${state.total} 条` : `共 ${state.total} 条记录`;
 
         bindTableEvents();
         bindFilterEvents();
@@ -1241,72 +1269,11 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
-        // 收入交互（同样处理）
-        $$('.fee-display').forEach(display => {
-            display.addEventListener('click', function(e) {
-                const parent = this.parentElement;
-                const input = parent.querySelector('.fee-input');
-                const td = parent.closest('td');
-                this.style.display = 'none';
-                input.style.display = 'inline-block';
-                td.classList.add('editing-cell');
-                input.focus();
-                input.select();
-            });
-        });
-
-        $$('.fee-input').forEach(input => {
-            const finishEditing = () => {
-                const parent = input.closest('.fee-control');
-                const display = parent.querySelector('.fee-display');
-                const td = parent.closest('td');
-                const colKey = parent.dataset.col;
-                const id = parseInt(parent.dataset.id);
-                const record = state.records.find(r => r.id === id);
-                if (!record) return;
-
-                const rawValue = input.value.trim();
-                record.data[colKey] = rawValue;
-                record._updated = true;
-
-                const computed = computeFeeValue(rawValue);
-                const displayText = (computed !== '' && computed !== null && !isNaN(Number(computed))) ? Number(computed) : (computed || '0');
-                display.textContent = String(displayText);
-
-                input.style.display = 'none';
-                display.style.display = 'inline';
-                td.classList.remove('editing-cell');
-
-                if (record._saveTimeout) clearTimeout(record._saveTimeout);
-                record._saveTimeout = setTimeout(() => saveRecord(record), 300);
-                updateFilterOptionsForCol(colKey);
-                renderTable(false);
-            };
-
-            input.addEventListener('blur', finishEditing);
-            input.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    finishEditing();
-                }
-                if (e.key === 'Escape') {
-                    const parent = input.closest('.fee-control');
-                    const display = parent.querySelector('.fee-display');
-                    const td = parent.closest('td');
-                    const id = parseInt(parent.dataset.id);
-                    const record = state.records.find(r => r.id === id);
-                    const raw = record ? (record.data[parent.dataset.col] || '') : '';
-                    input.value = raw;
-                    input.blur();
-                }
-            });
-            input.addEventListener('focus', function() {
-                const td = this.closest('td');
-                if (td) td.classList.add('editing-cell');
-            });
-            input.addEventListener('blur', function() {
-                const td = this.closest('td');
-                if (td) td.classList.remove('editing-cell');
+        // 收入交互（点击打开收入管理弹窗）
+        $$('.fee-summary-cell').forEach(cell => {
+            cell.addEventListener('click', function() {
+                const recordId = parseInt(this.dataset.id);
+                openIncomeModal(recordId);
             });
         });
     }
@@ -1371,7 +1338,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function addRow() {
         if (!state.currentTabId) return;
         try {
-            setStatus('🔄 添加中...');
+            setStatus('添加中...');
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
             const now = new Date();
@@ -1386,29 +1353,30 @@ document.addEventListener('DOMContentLoaded', function() {
             data.address = 'IP地址';
 
             const result = await API.post('/records', { tab_id: state.currentTabId, data });
-            const newRecord = { id: result.id, data };
-            state.records.unshift(newRecord);
+            state.total++;
+            state.page = 1;
+            await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            setStatus('✅ 添加成功');
+            setStatus('添加成功');
             const firstInput = document.querySelector('.cell-input');
             if (firstInput) firstInput.focus();
-        } catch (err) { setStatus('❌ 添加失败: ' + err.message); }
+        } catch (err) { setStatus('添加失败: ' + err.message); }
     }
 
     async function deleteSelected() {
         const ids = Array.from(state.selectedRows);
-        if (ids.length === 0) { setStatus('⚠️ 请选择行'); return; }
+        if (ids.length === 0) { setStatus('请选择行'); return; }
         if (!confirm(`确定删除 ${ids.length} 条记录吗？`)) return;
         try {
-            setStatus('🔄 删除中...');
+            setStatus('删除中...');
             await API.post('/records/batch-delete', { ids });
-            state.records = state.records.filter(r => !ids.includes(r.id));
             state.selectedRows.clear();
+            await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            setStatus(`✅ 已删除 ${ids.length} 条记录`);
-        } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+            setStatus(`已删除 ${ids.length} 条记录`);
+        } catch (err) { setStatus('删除失败: ' + err.message); }
     }
 
     // 导出/导入
@@ -1476,7 +1444,8 @@ document.addEventListener('DOMContentLoaded', function() {
             importStatus.textContent = `🔄 导入 ${records.length} 条...`;
             await API.post('/records/import', { tab_id: state.currentTabId, records });
             invalidateCurrentTabCache();
-            await loadDataForTab(state.currentTabId, true);
+            state.page = 1;
+            await loadRecords(state.currentTabId);
             renderTable(false);
             importStatus.textContent = `✅ 成功导入 ${records.length} 条`;
             setTimeout(() => importModal.classList.remove('show'), 1500);
@@ -1652,20 +1621,111 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- 统计 ---
+    // --- 收入管理弹窗 ---
+    async function openIncomeModal(recordId) {
+        state.incomeRecordId = recordId;
+        incomeAmountInput.value = '';
+        incomeRemarkInput.value = '';
+        incomeDateInput.value = new Date().toISOString().split('T')[0];
+        incomeStatus.textContent = '';
+        incomeModal.classList.add('show');
+        await loadIncomeRecords(recordId);
+    }
+
+    async function loadIncomeRecords(recordId) {
+        try {
+            const records = await API.get('/income/by-record/' + recordId);
+            state.incomeRecords = records || [];
+            const total = state.incomeRecords.reduce((s, r) => s + (r.amount || 0), 0);
+            incomeTotalDisplay.textContent = total.toFixed(2);
+            renderIncomeList();
+        } catch (err) { incomeStatus.textContent = '加载失败: ' + err.message; }
+    }
+
+    function renderIncomeList() {
+        if (!incomeList) return;
+        if (state.incomeRecords.length === 0) {
+            incomeList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无收入记录</div>';
+            return;
+        }
+        incomeList.innerHTML = state.incomeRecords.map(r => `
+            <div class="income-item">
+                <div class="income-item-info">
+                    <span class="income-item-amount">${Number(r.amount).toFixed(2)}</span>
+                    <div>
+                        <span class="income-item-date">${escapeHtml(r.income_date || '')}</span>
+                        ${r.remark ? '<span class="income-item-remark"> - ' + escapeHtml(r.remark) + '</span>' : ''}
+                    </div>
+                </div>
+                <button class="income-item-delete" data-id="${r.id}">删除</button>
+            </div>
+        `).join('');
+        incomeList.querySelectorAll('.income-item-delete').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const id = parseInt(this.dataset.id);
+                if (!confirm('确定删除此收入记录？')) return;
+                try {
+                    await API.delete('/income/' + id);
+                    await loadIncomeRecords(state.incomeRecordId);
+                    await loadRecords(state.currentTabId);
+                    renderTable(false);
+                    incomeStatus.textContent = '已删除';
+                    setTimeout(() => incomeStatus.textContent = '', 1500);
+                } catch (err) { incomeStatus.textContent = '删除失败: ' + err.message; }
+            });
+        });
+    }
+
+    async function addIncomeRecord() {
+        const amount = parseFloat(incomeAmountInput.value);
+        const date = incomeDateInput.value;
+        if (!amount || amount <= 0) { incomeStatus.textContent = '请输入有效金额'; return; }
+        if (!date) { incomeStatus.textContent = '请选择日期'; return; }
+        try {
+            await API.post('/income', {
+                record_id: state.incomeRecordId,
+                tab_id: state.currentTabId,
+                amount: amount,
+                income_date: date,
+                remark: incomeRemarkInput.value.trim()
+            });
+            incomeAmountInput.value = '';
+            incomeRemarkInput.value = '';
+            await loadIncomeRecords(state.incomeRecordId);
+            await loadRecords(state.currentTabId);
+            renderTable(false);
+            incomeStatus.textContent = '添加成功';
+            setTimeout(() => incomeStatus.textContent = '', 1500);
+        } catch (err) { incomeStatus.textContent = '添加失败: ' + err.message; }
+    }
+
+    // --- 全标签财务统计 ---
     async function getAllTabRecordsForStats() {
         const all = [];
         for (const tab of state.tabs) {
             let records;
             if (tab.id === state.currentTabId) {
                 records = state.records;
-            } else if (state.tabCache[tab.id] && state.tabCache[tab.id].records) {
-                records = state.tabCache[tab.id].records;
             } else {
-                records = await API.get('/records?tabId=' + tab.id);
-                state.tabCache[tab.id] = state.tabCache[tab.id] || {};
-                state.tabCache[tab.id].records = records;
+                try {
+                    records = await API.get('/records?tabId=' + tab.id + '&pageSize=1000');
+                    records = records.records || records;
+                } catch { records = []; }
             }
             records.forEach(record => all.push({ ...record, tabId: tab.id, tabName: tab.name }));
+        }
+        // Also load all income records per tab
+        for (const tab of state.tabs) {
+            try {
+                const incomes = await API.get('/income/by-tab/' + tab.id);
+                (incomes || []).forEach(inc => {
+                    const rec = all.find(r => r.id === inc.record_id);
+                    if (rec) {
+                        if (!rec._incomes) rec._incomes = [];
+                        rec._incomes.push(inc);
+                    }
+                });
+            } catch {}
         }
         return all;
     }
@@ -1679,9 +1739,55 @@ document.addEventListener('DOMContentLoaded', function() {
     function getRecordFinancials(record) {
         const months = parseInt(record.data.months) || 0;
         const expense = computeExpenseValue(record.data.expense, months) || 0;
-        const feeNum = computeFeeValue(record.data.fee || '');
-        const income = typeof feeNum === 'number' ? feeNum : (parseFloat(feeNum) || 0);
+        // Income from income_records
+        const incomes = record._incomes || [];
+        const income = incomes.reduce((s, r) => s + (r.amount || 0), 0);
         return { income, expense, net: income - expense };
+    }
+
+    function getRecordFinancialsByMonth(record) {
+        // Returns array of { month: 'YYYY-MM', income, expense } broken down by month
+        const results = [];
+        const months = parseInt(record.data.months) || 0;
+        const totalExpense = computeExpenseValue(record.data.expense, months) || 0;
+        const purchaseDate = record.data.host_purchase;
+        const startDate = purchaseDate ? new Date(purchaseDate) : null;
+
+        // Distribute expense across months based on host_purchase date
+        if (months > 0 && startDate && !isNaN(startDate)) {
+            const unitExpense = totalExpense / months;
+            for (let i = 0; i < months; i++) {
+                const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+                const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                results.push({ month: monthKey, income: 0, expense: unitExpense });
+            }
+        } else if (totalExpense > 0) {
+            // No date info, put in a single bucket
+            const d = record.data.host_purchase ? new Date(record.data.host_purchase) : new Date(record.created_at);
+            if (!isNaN(d)) {
+                const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                results.push({ month: monthKey, income: 0, expense: totalExpense });
+            }
+        }
+
+        // Add income by date
+        const incomes = record._incomes || [];
+        incomes.forEach(inc => {
+            if (inc.income_date) {
+                const d = new Date(inc.income_date);
+                if (!isNaN(d)) {
+                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    let bucket = results.find(r => r.month === monthKey);
+                    if (!bucket) {
+                        bucket = { month: monthKey, income: 0, expense: 0 };
+                        results.push(bucket);
+                    }
+                    bucket.income += (inc.amount || 0);
+                }
+            }
+        });
+
+        return results;
     }
 
     function sumStats(records) {
@@ -1738,18 +1844,23 @@ document.addEventListener('DOMContentLoaded', function() {
             records.forEach(record => {
                 const f = getRecordFinancials(record);
                 const d = getStatsDate(record);
-                if (d) {
-                    const year = String(d.getFullYear());
-                    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    monthMap[month] = monthMap[month] || { label: month, income: 0, expense: 0, net: 0, count: 0 };
+
+                // Use monthly breakdown for accurate per-month allocation
+                const monthlyBreakdown = getRecordFinancialsByMonth(record);
+                monthlyBreakdown.forEach(mb => {
+                    monthMap[mb.month] = monthMap[mb.month] || { label: mb.month, income: 0, expense: 0, net: 0, count: 0 };
+                    monthMap[mb.month].income += mb.income;
+                    monthMap[mb.month].expense += mb.expense;
+                    monthMap[mb.month].net += (mb.income - mb.expense);
+                    monthMap[mb.month].count += 1;
+
+                    const year = mb.month.split('-')[0];
                     yearMap[year] = yearMap[year] || { label: year, income: 0, expense: 0, net: 0, count: 0 };
-                    [monthMap[month], yearMap[year]].forEach(item => {
-                        item.income += f.income;
-                        item.expense += f.expense;
-                        item.net += f.net;
-                        item.count += 1;
-                    });
-                }
+                    yearMap[year].income += mb.income;
+                    yearMap[year].expense += mb.expense;
+                    yearMap[year].net += (mb.income - mb.expense);
+                });
+
                 const tabName = record.tabName || '未命名标签';
                 tabMap[tabName] = tabMap[tabName] || { label: tabName, income: 0, expense: 0, net: 0, count: 0 };
                 tabMap[tabName].income += f.income;
@@ -2068,8 +2179,9 @@ document.addEventListener('DOMContentLoaded', function() {
     importBtn.addEventListener('click', showImportModal);
     refreshBtn.addEventListener('click', function() {
         if (state.currentTabId) {
+            state.page = 1;
             invalidateCurrentTabCache();
-            loadDataForTab(state.currentTabId, true).then(() => renderTable(false));
+            loadRecords(state.currentTabId).then(() => renderTable(false));
         }
     });
     manageColumnsBtn.addEventListener('click', showColumnManager);
@@ -2082,6 +2194,7 @@ document.addEventListener('DOMContentLoaded', function() {
     providerManageBtn.addEventListener('click', openProviderModal);
     closeAddressSuffixModal.addEventListener('click', () => addressSuffixModal.classList.remove('show'));
     closeProviderModal.addEventListener('click', () => providerModal.classList.remove('show'));
+    closeIncomeModal.addEventListener('click', () => incomeModal.classList.remove('show'));
     closeColumnModal.addEventListener('click', () => columnModal.classList.remove('show'));
     if (addColBtn) addColBtn.addEventListener('click', addColumn);
     closeImport.addEventListener('click', () => importModal.classList.remove('show'));
@@ -2093,6 +2206,30 @@ document.addEventListener('DOMContentLoaded', function() {
     providerNameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addProvider();
         if (e.key === 'Escape') providerModal.classList.remove('show');
+    });
+    addIncomeBtn.addEventListener('click', addIncomeRecord);
+    incomeAmountInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addIncomeRecord();
+    });
+
+    // --- 分页事件 ---
+    prevPageBtn.addEventListener('click', async () => {
+        if (state.page <= 1) return;
+        state.page--;
+        await loadRecords(state.currentTabId);
+        renderTable(false);
+    });
+    nextPageBtn.addEventListener('click', async () => {
+        if (state.page >= state.totalPages) return;
+        state.page++;
+        await loadRecords(state.currentTabId);
+        renderTable(false);
+    });
+    pageSizeSelect.addEventListener('change', async () => {
+        state.pageSize = parseInt(pageSizeSelect.value) || 50;
+        state.page = 1;
+        await loadRecords(state.currentTabId);
+        renderTable(false);
     });
 
     document.getElementById('saveCertBtn').addEventListener('click', async function() {
