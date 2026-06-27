@@ -73,6 +73,20 @@ function createTables() {
             UNIQUE(user_id, key)
         )`);
 
+        db.run(`CREATE TABLE IF NOT EXISTS income_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            record_id INTEGER NOT NULL,
+            tab_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            income_date DATE NOT NULL,
+            remark TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (record_id) REFERENCES records(id) ON DELETE CASCADE,
+            FOREIGN KEY (tab_id) REFERENCES tabs(id)
+        )`);
+
         createDefaultAdmin();
     });
 }
