@@ -27,7 +27,9 @@ document.addEventListener('DOMContentLoaded', function() {
         totalPages: 1,
         // 收入弹窗
         incomeRecordId: null,
-        incomeRecords: []
+        incomeRecords: [],
+        // 行管理模式
+        rowManageMode: false
     };
 
     // DOM 引用
@@ -45,6 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const deleteTabsBtn = $('#deleteTabsBtn');
     const addRowBtn = $('#addRowBtn');
     const deleteRowsBtn = $('#deleteRowsBtn');
+    const manageRowsBtn = $('#manageRowsBtn');
     const importBtn = $('#importBtn');
     const exportBtn = $('#exportBtn');
     const refreshBtn = $('#refreshBtn');
@@ -584,7 +587,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const visibleColumns = state.columns.filter(c => c.col_visible !== 0);
         const filteredRecords = getFilteredRecords();
 
-        let theadHtml = `<tr><th style="width:36px;min-width:36px;max-width:36px;text-align:center;"><input type="checkbox" id="selectAll" /></th>`;
+        let theadHtml = `<tr>${state.rowManageMode ? '<th style="width:36px;min-width:36px;max-width:36px;text-align:center;"><input type="checkbox" id="selectAll" /></th>' : ''}`;
         visibleColumns.forEach(col => {
             const isIncome = col.is_income || 0;
             let incomeLabel = isIncome === 1 ? '💰' : (isIncome === 2 ? '💸' : '');
@@ -608,7 +611,7 @@ document.addEventListener('DOMContentLoaded', function() {
         tableHead.innerHTML = theadHtml;
 
         if (filteredRecords.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="${visibleColumns.length + 1}" style="text-align:center;padding:40px 0;color:#999;">📭 暂无数据</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="${visibleColumns.length + (state.rowManageMode ? 1 : 0)}" style="text-align:center;padding:40px 0;color:#999;">暂无数据</td></tr>`;
             recordCount.textContent = Object.keys(state.filters).length > 0 ? `共 0 / 全部 ${state.records.length} 条记录` : `共 0 条记录`;
             bindFilterEvents();
             return;
@@ -618,7 +621,9 @@ document.addEventListener('DOMContentLoaded', function() {
         filteredRecords.forEach((record) => {
             const isSelected = state.selectedRows.has(record.id);
             tbodyHtml += `<tr class="${isSelected ? 'selected' : ''}" data-id="${record.id}">`;
-            tbodyHtml += `<td><input type="checkbox" class="row-checkbox" data-id="${record.id}" ${isSelected ? 'checked' : ''} /></td>`;
+            if (state.rowManageMode) {
+                tbodyHtml += `<td><input type="checkbox" class="row-checkbox" data-id="${record.id}" ${isSelected ? 'checked' : ''} /></td>`;
+            }
             visibleColumns.forEach(col => {
                 const colKey = col.col_key;
                 let val = getCellValue(record, colKey);
@@ -700,7 +705,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                 } else if (colKey === 'fee') {
                     const incomeTotal = record._incomeTotal || 0;
-                    const displayText = incomeTotal > 0 ? Number(incomeTotal).toFixed(2) : '0.00';
+                    const displayText = incomeTotal > 0 ? Math.round(incomeTotal) : '0';
                     inputHtml = `
                         <div class="fee-summary-cell" data-id="${record.id}">
                             <span>${escapeHtml(displayText)}</span>
@@ -1637,7 +1642,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const records = await API.get('/income/by-record/' + recordId);
             state.incomeRecords = records || [];
             const total = state.incomeRecords.reduce((s, r) => s + (r.amount || 0), 0);
-            incomeTotalDisplay.textContent = total.toFixed(2);
+            incomeTotalDisplay.textContent = Math.round(total);
             renderIncomeList();
         } catch (err) { incomeStatus.textContent = '加载失败: ' + err.message; }
     }
@@ -1651,7 +1656,7 @@ document.addEventListener('DOMContentLoaded', function() {
         incomeList.innerHTML = state.incomeRecords.map(r => `
             <div class="income-item">
                 <div class="income-item-info">
-                    <span class="income-item-amount">${Number(r.amount).toFixed(2)}</span>
+                    <span class="income-item-amount">${Math.round(r.amount)}</span>
                     <div>
                         <span class="income-item-date">${escapeHtml(r.income_date || '')}</span>
                         ${r.remark ? '<span class="income-item-remark"> - ' + escapeHtml(r.remark) + '</span>' : ''}
@@ -2174,6 +2179,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- 事件绑定 ---
     addRowBtn.addEventListener('click', addRow);
+    manageRowsBtn.addEventListener('click', function() {
+        state.rowManageMode = !state.rowManageMode;
+        if (!state.rowManageMode) {
+            state.selectedRows.clear();
+        }
+        if (manageRowsBtn) {
+            manageRowsBtn.classList.toggle('active', state.rowManageMode);
+            manageRowsBtn.textContent = state.rowManageMode ? '完成' : '管理行';
+        }
+        renderTable(false);
+    });
     deleteRowsBtn.addEventListener('click', deleteSelected);
     exportBtn.addEventListener('click', exportData);
     importBtn.addEventListener('click', showImportModal);
