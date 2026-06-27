@@ -13,6 +13,7 @@ const recordRoutes = require('./routes/records');
 const columnRoutes = require('./routes/columns');
 const settingRoutes = require('./routes/settings');
 const tabRoutes = require('./routes/tabs');
+const incomeRoutes = require('./routes/income');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,7 +24,7 @@ dirs.forEach(dir => {
 });
 
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 // 托管上传目录，使背景图片等可被浏览器访问
@@ -48,15 +49,30 @@ const upload = multer({
     storage,
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        const types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        const types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml'];
         if (types.includes(file.mimetype)) cb(null, true);
         else cb(new Error('只支持图片格式'));
     }
 });
 
-app.use('/api/upload', upload.single('image'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: '请上传图片' });
-    res.json({ success: true, url: `/uploads/${req.file.filename}` });
+function requireUploadAuth(req, res, next) {
+    if (!req.session.userId) return res.status(401).json({ error: '请先登录' });
+    next();
+}
+
+app.post('/api/upload', requireUploadAuth, (req, res) => {
+    upload.single('image')(req, res, (err) => {
+        if (err) {
+            const message = err.code === 'LIMIT_FILE_SIZE' ? '图片不能超过 10MB' : err.message;
+            return res.status(400).json({ error: message });
+        }
+        if (!req.file) return res.status(400).json({ error: '请上传图片' });
+        res.json({ success: true, url: `/uploads/${req.file.filename}` });
+    });
+});
+
+app.use('/api/upload', (req, res) => {
+    res.status(405).json({ error: '上传接口只支持 POST 请求' });
 });
 
 initDatabase();
@@ -66,6 +82,7 @@ app.use('/api/records', recordRoutes);
 app.use('/api/columns', columnRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/tabs', tabRoutes);
+app.use('/api/income', incomeRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
