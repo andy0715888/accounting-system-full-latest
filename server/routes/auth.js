@@ -9,7 +9,7 @@ async function isRegisterAllowed() {
     const setting = await queryOne("SELECT value FROM settings WHERE key = 'allow_register'");
     if (!setting) return true;
     try {
-        return JSON.parse(setting.value) !== false;
+        return JSON.parse(setting.value) === true;
     } catch {
         return true;
     }
