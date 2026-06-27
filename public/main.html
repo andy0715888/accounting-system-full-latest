@@ -52,6 +52,7 @@
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="manageColumnsBtn">📋 列管理</button>
                         <button class="tool-btn" id="addressSuffixBtn">🔗 地址后缀</button>
+                        <button class="tool-btn" id="providerManageBtn">🏢 服务商管理</button>
                     </div>
                     <div class="toolbar-right">
                         <span class="record-count" id="recordCount">共 0 条记录</span>
@@ -63,6 +64,28 @@
                             <thead id="tableHead"></thead>
                             <tbody id="tableBody"></tbody>
                         </table>
+                    </div>
+                </div>
+                <div class="pagination-bar" id="paginationBar">
+                    <div class="pagination-left">
+                        <span class="pagination-info" id="paginationInfo">共 0 条</span>
+                    </div>
+                    <div class="pagination-center">
+                        <button class="page-btn" id="prevPageBtn" disabled>上一页</button>
+                        <span class="page-indicator" id="pageIndicator">1 / 1</span>
+                        <button class="page-btn" id="nextPageBtn" disabled>下一页</button>
+                    </div>
+                    <div class="pagination-right">
+                        <label class="page-size-label">每页</label>
+                        <select class="page-size-select" id="pageSizeSelect">
+                            <option value="20">20</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                        <span class="page-size-label">条</span>
                     </div>
                 </div>
             </div>
@@ -207,6 +230,48 @@
                     </div>
                     <span id="renameTabStatus"></span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="providerModal">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h2>服务商管理</h2>
+                <button class="modal-close" id="closeProviderModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="provider-manager">
+                    <div class="provider-add-row">
+                        <input type="text" id="providerNameInput" placeholder="请输入服务商名称" />
+                        <button class="tool-btn primary" id="addProviderBtn">添加</button>
+                    </div>
+                    <div class="provider-list" id="providerList"></div>
+                    <span id="providerStatus"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="incomeModal">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h2>收入管理</h2>
+                <button class="modal-close" id="closeIncomeModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="income-total-display">
+                    <span>总收入：</span>
+                    <strong id="incomeTotalDisplay">0.00</strong>
+                </div>
+                <div class="income-add-form">
+                    <input type="number" id="incomeAmountInput" placeholder="金额" step="0.01" />
+                    <input type="date" id="incomeDateInput" />
+                    <input type="text" id="incomeRemarkInput" placeholder="备注" />
+                    <button class="tool-btn primary" id="addIncomeBtn">添加收入</button>
+                </div>
+                <div class="income-list" id="incomeList"></div>
+                <span id="incomeStatus"></span>
             </div>
         </div>
     </div>
