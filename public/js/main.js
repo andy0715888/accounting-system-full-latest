@@ -754,11 +754,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 let inputHtml = '';
                 const isServerOnlyCol = SERVER_ONLY_COLS.has(colKey);
 
-                // Client row: server columns show inherited value (readonly)
+                // Client row: server columns show empty (inherited from parent, not editable)
                 if (isClient && isServerOnlyCol) {
-                    const parentRecord = state.records.find(r => r.id === record.parent_id);
-                    const inheritedVal = parentRecord ? (parentRecord.data[colKey] || '') : '';
-                    tbodyHtml += `<td class="inherited-cell">${escapeHtml(String(inheritedVal))}</td>`;
+                    tbodyHtml += `<td class="inherited-cell"></td>`;
                     return;
                 }
 
@@ -2445,13 +2443,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!state.currentTabId) return;
         try {
             setStatus('添加中...');
+            const parentRecord = state.records.find(r => r.id === parentId);
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
-            const now = new Date();
-            const today = now.toISOString().split('T')[0];
-            data.client_purchase = today;
-            data.client_expire = getNextMonth(now).toISOString().split('T')[0];
-            data.expense = '0';
+            // Client dates inherit from parent server's host dates
+            if (parentRecord) {
+                data.client_purchase = parentRecord.data.host_purchase || '';
+                data.client_expire = parentRecord.data.host_expire || '';
+            }
             data.fee = '';
 
             const result = await API.post('/records', {
