@@ -2677,9 +2677,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     ctxPasteClient.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
-        if (!contextTargetId || !state.copiedClientData || !state.currentTabId) return;
+        if (!contextTargetId || !state.copiedClientData || !state.currentTabId) {
+            setStatus('无法粘贴：缺少目标或数据');
+            return;
+        }
         const parentRecord = state.records.find(r => r.id === contextTargetId);
-        if (!parentRecord || parentRecord.record_type !== 'server') return;
+        if (!parentRecord || parentRecord.record_type !== 'server') {
+            setStatus('无法粘贴：请在服务器行上右键粘贴');
+            return;
+        }
         try {
             setStatus('移动中...');
             const data = {};
