@@ -1455,3 +1455,37 @@ body {
 .tab-item.drag-over { border-top: 2px solid #4a90d9; }
 .tab-bar.drag-active .tab-item { cursor: grab; }
 .tab-bar.drag-active .tab-item:active { cursor: grabbing; }
+
+/* === 右键菜单 === */
+.context-menu {
+    position: fixed;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid #d0d5dd;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    padding: 4px 0;
+    min-width: 140px;
+}
+.context-menu-item {
+    padding: 8px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.context-menu-item:hover { background: #f0f5ff; color: #4a90d9; }
+.context-menu-item + .context-menu-item { border-top: 1px solid #f0f0f0; }
+
+/* === 客户行样式 === */
+tr.client-row { background: #f8fafc; }
+tr.client-row:hover { background: #eef2f7; }
+tr.client-row td.inherited-cell {
+    color: #bbb;
+    font-style: italic;
+    cursor: default;
+    user-select: none;
+}
+tr.server-row td { font-weight: 500; }
+tr.server-row.has-children td:first-child {
+    border-left: 3px solid #4a90d9;
+}
