@@ -373,7 +373,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Server-only columns (inherited by client rows, not editable)
-    const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info']);
+    const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info', 'address']);
     // Client-only columns (only meaningful for client rows, empty/readonly on server rows)
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
