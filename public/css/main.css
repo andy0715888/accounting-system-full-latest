@@ -1426,3 +1426,32 @@ body {
     transition: opacity 0.15s;
 }
 .fee-summary-cell:hover .fee-add-icon { opacity: 1; }
+
+/* === 标签类型选择器 === */
+.tab-type-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0;
+}
+.tab-type-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.tab-type-option:hover { border-color: #a0c4ff; background: #f0f7ff; }
+.tab-type-option input[type="radio"] { margin-top: 3px; accent-color: #4a90d9; }
+.tab-type-option input[type="radio"]:checked + .tab-type-label { color: #4a90d9; font-weight: 600; }
+.tab-type-label { font-size: 14px; font-weight: 500; color: #333; }
+.tab-type-desc { font-size: 12px; color: #999; display: block; margin-top: 2px; }
+
+/* === 标签拖拽排序 === */
+.tab-item.dragging { opacity: 0.4; }
+.tab-item.drag-over { border-top: 2px solid #4a90d9; }
+.tab-bar.drag-active .tab-item { cursor: grab; }
+.tab-bar.drag-active .tab-item:active { cursor: grabbing; }
