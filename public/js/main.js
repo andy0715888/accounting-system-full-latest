@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 支出弹窗
         expenseRecordId: null,
         expenseRecords: [],
+        // 客户信息复制
+        copiedClientData: null,
         // 列定义缓存
         columnsCache: {},
         // 行管理模式
@@ -433,6 +435,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const contextMenu = $('#contextMenu');
     const ctxAddClient = $('#ctxAddClient');
+    const ctxCopyClient = $('#ctxCopyClient');
+    const ctxPasteClient = $('#ctxPasteClient');
     const ctxDeleteRecord = $('#ctxDeleteRecord');
 
     async function loadRecords(tabId) {
@@ -1889,10 +1893,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="income-item">
                 <div class="income-item-info">
                     <span class="income-item-amount">${Math.round(r.amount)}</span>
-                    <div>
-                        <span class="income-item-date">${escapeHtml(r.income_date || '')}</span>
-                        ${r.remark ? '<span class="income-item-remark"> - ' + escapeHtml(r.remark) + '</span>' : ''}
-                    </div>
+                    <span class="income-item-date">${escapeHtml(r.income_date || '')}</span>
+                    <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
                 </div>
                 <button class="income-item-delete" data-id="${r.id}">删除</button>
             </div>
@@ -1967,10 +1969,8 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="income-item">
                 <div class="income-item-info">
                     <span class="income-item-amount" style="color:#c62828;">${Math.round(r.amount)}</span>
-                    <div>
-                        <span class="income-item-date">${escapeHtml(r.expense_date || '')}</span>
-                        ${r.remark ? '<span class="income-item-remark"> - ' + escapeHtml(r.remark) + '</span>' : ''}
-                    </div>
+                    <span class="income-item-date">${escapeHtml(r.expense_date || '')}</span>
+                    <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
                 </div>
                 <button class="income-item-delete" data-id="${r.id}">删除</button>
             </div>
@@ -2621,6 +2621,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const recordType = tr.dataset.type;
 
         ctxAddClient.style.display = recordType === 'server' ? 'block' : 'none';
+        ctxCopyClient.style.display = recordType === 'client' ? 'block' : 'none';
+        ctxPasteClient.style.display = (recordType === 'server' && state.copiedClientData) ? 'block' : 'none';
         ctxDeleteRecord.style.display = 'block';
 
         contextMenu.style.display = 'block';
@@ -2634,6 +2636,51 @@ document.addEventListener('DOMContentLoaded', function() {
         contextMenu.style.display = 'none';
         if (!contextTargetId || !state.currentTabId) return;
         await addRowClient(contextTargetId);
+    });
+
+    ctxCopyClient.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId) return;
+        const record = state.records.find(r => r.id === contextTargetId);
+        if (!record || record.record_type !== 'client') return;
+        // Copy client-related fields
+        state.copiedClientData = {
+            client_purchase: record.data.client_purchase || '',
+            client_expire: record.data.client_expire || '',
+            client_name: record.data.client_name || '',
+            unit_price: record.data.unit_price || '',
+            fee: record.data.fee || '',
+            remark: record.data.remark || ''
+        };
+        setStatus('客户信息已提取，可在其他服务器行右键粘贴');
+    });
+
+    ctxPasteClient.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.copiedClientData || !state.currentTabId) return;
+        const parentRecord = state.records.find(r => r.id === contextTargetId);
+        if (!parentRecord || parentRecord.record_type !== 'server') return;
+        try {
+            setStatus('粘贴中...');
+            const data = {};
+            state.columns.forEach(col => { data[col.col_key] = ''; });
+            // Merge copied client data
+            Object.assign(data, state.copiedClientData);
+            // Inherit server dates
+            data.client_purchase = parentRecord.data.host_purchase || '';
+            data.client_expire = parentRecord.data.host_expire || '';
+
+            const result = await API.post('/records', {
+                tab_id: state.currentTabId,
+                data,
+                record_type: 'client',
+                parent_id: contextTargetId
+            });
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('客户信息已粘贴');
+        } catch (err) { setStatus('粘贴失败: ' + err.message); }
     });
 
     ctxDeleteRecord.addEventListener('click', async () => {
