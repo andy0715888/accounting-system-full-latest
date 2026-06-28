@@ -2042,7 +2042,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function getAllTabRecordsForStats() {
         await flushPendingSaves();
         const all = [];
-        // 并行加载所有标签的记录
+        // 并行加载所有标签的记录（后端已返回 _incomeTotal 和 _expenseTotal）
         const recordPromises = state.tabs.map(tab =>
             API.get('/records?tabId=' + tab.id + '&pageSize=1000')
                 .then(result => {
@@ -2051,7 +2051,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
                 .catch(() => {})
         );
-        // 并行加载收入和支出
+        // 加载收入和支出明细（用于按月统计，不重复累加 _incomeTotal/_expenseTotal）
         const incomePromises = state.tabs.map(tab =>
             API.get('/income/by-tab/' + tab.id).catch(() => [])
         );
@@ -2065,25 +2065,23 @@ document.addEventListener('DOMContentLoaded', function() {
             Promise.all(expensePromises)
         ]);
 
-        // 匹配收入到记录
+        // 匹配收入明细到记录（仅用于按月统计，不修改 _incomeTotal）
         incomeResults.forEach((incomes, idx) => {
             (incomes || []).forEach(inc => {
                 const rec = all.find(r => r.id === inc.record_id);
                 if (rec) {
                     if (!rec._incomes) rec._incomes = [];
                     rec._incomes.push(inc);
-                    rec._incomeTotal = (rec._incomeTotal || 0) + (inc.amount || 0);
                 }
             });
         });
-        // 匹配支出到记录
+        // 匹配支出明细到记录（仅用于按月统计，不修改 _expenseTotal）
         expenseResults.forEach((expenses, idx) => {
             (expenses || []).forEach(exp => {
                 const rec = all.find(r => r.id === exp.record_id);
                 if (rec) {
                     if (!rec._expenses) rec._expenses = [];
                     rec._expenses.push(exp);
-                    rec._expenseTotal = (rec._expenseTotal || 0) + (exp.amount || 0);
                 }
             });
         });
@@ -2098,24 +2096,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function getRecordFinancials(record) {
         const months = parseInt(record.data.months) || 0;
-        let expense;
-        if (record._expenseTotal !== undefined) {
-            expense = record._expenseTotal || 0;
+        let expense = 0;
+        // 普通记账标签：支出在 expense_records 表，用 _expenseTotal
+        // 独享/共享标签：支出在 record.data.expense，用 computeExpenseValue
+        if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
+            expense = record._expenseTotal;
         } else {
-            const raw = record.data.expense;
-            if (raw !== null && raw !== undefined && raw !== '' && months === 0) {
-                // No months field (simple tab, shared client) - expense is total value
-                expense = parseFloat(raw) || 0;
-            } else {
-                expense = computeExpenseValue(raw, months) || 0;
-            }
+            expense = computeExpenseValue(record.data.expense, months) || 0;
         }
-        // Income: prefer _incomeTotal (aggregated), fallback to sum of _incomes
+        // Income: 后端已返回 _incomeTotal（来自 income_records 表汇总）
         let income = record._incomeTotal || 0;
-        if (!income) {
-            const incomes = record._incomes || [];
-            income = incomes.reduce((s, r) => s + (r.amount || 0), 0);
-        }
         return { income, expense, net: income - expense };
     }
 
@@ -2123,16 +2113,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // Returns array of { month: 'YYYY-MM', income, expense } broken down by month
         const results = [];
         const months = parseInt(record.data.months) || 0;
+        // 普通记账用 _expenseTotal，独享/共享用 computeExpenseValue
         let totalExpense;
-        if (record._expenseTotal !== undefined) {
-            totalExpense = record._expenseTotal || 0;
+        if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
+            totalExpense = record._expenseTotal;
         } else {
-            const raw = record.data.expense;
-            if (raw !== null && raw !== undefined && raw !== '' && months === 0) {
-                totalExpense = parseFloat(raw) || 0;
-            } else {
-                totalExpense = computeExpenseValue(raw, months) || 0;
-            }
+            totalExpense = computeExpenseValue(record.data.expense, months) || 0;
         }
         const purchaseDate = record.data.host_purchase;
         const startDate = purchaseDate ? new Date(purchaseDate) : null;
