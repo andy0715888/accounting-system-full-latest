@@ -266,8 +266,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 const clientExpire = record.data.client_expire;
                 return checkExpired(clientExpire);
             } else {
-                const hostExpire = record.data.host_expire;
-                return checkExpired(hostExpire);
+                // 独享/共享服务器行：根据 host_remaining 判断
+                const hostRemaining = computeDaysRemaining(record.data.host_expire);
+                if (hostRemaining === '') return '未知';
+                return hostRemaining >= 0 ? '有效' : '过期';
             }
         } else if (colKey === 'fee') {
             const result = computeFeeValue(val);
@@ -902,13 +904,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     const options = (col.col_options || []).map(opt => `<option value="${escapeAttr(opt)}" ${val === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('');
                     inputHtml = `<select class="cell-input select-cell" data-col="${escapeAttr(colKey)}" data-id="${record.id}"><option value="">-</option>${options}</select>`;
                 } else if (colKey === 'is_expired') {
-                    let expireDate;
+                    let status;
                     if (record.record_type === 'client') {
-                        expireDate = record.data.client_expire;
+                        status = checkExpired(record.data.client_expire);
                     } else {
-                        expireDate = record.data.host_expire;
+                        const hostRemaining = computeDaysRemaining(record.data.host_expire);
+                        if (hostRemaining === '') { status = '未知'; }
+                        else { status = hostRemaining >= 0 ? '有效' : '过期'; }
                     }
-                    const status = checkExpired(expireDate);
                     const color = status === '有效' ? '#67c23a' : (status === '过期' ? '#f56c6c' : '#999');
                     inputHtml = `<span style="color:${color};">${escapeHtml(status)}</span>`;
                 } else if (colKey === 'expense') {
