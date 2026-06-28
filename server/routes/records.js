@@ -26,7 +26,7 @@ router.get('/', requireAuth, async (req, res) => {
         const offset = (page - 1) * pageSize;
 
         const records = await query(
-            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, COALESCE(parent_id, id), sort_order, created_at LIMIT ? OFFSET ?',
             [userId, tabId, pageSize, offset]
         );
         const parsed = records.map(r => {
@@ -60,17 +60,61 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
-        const { tab_id, data } = req.body;
+        const { tab_id, data, record_type, parent_id } = req.body;
         if (!tab_id) return res.status(400).json({ error: '缺少 tab_id' });
         if (!data || typeof data !== 'object') return res.status(400).json({ error: '数据格式错误' });
 
+        const rType = record_type || 'server';
+        const pParent = parent_id || null;
+
+        // For client records, get next sort_order
+        let sortOrder = 0;
+        if (pParent) {
+            const maxSort = await queryOne(
+                'SELECT MAX(sort_order) as max_sort FROM records WHERE parent_id = ? AND user_id = ?',
+                [pParent, userId]
+            );
+            sortOrder = (maxSort && maxSort.max_sort !== null) ? maxSort.max_sort + 1 : 0;
+        }
+
         const result = await execute(
-            'INSERT INTO records (user_id, tab_id, data) VALUES (?, ?, ?)',
-            [userId, tab_id, JSON.stringify(data)]
+            'INSERT INTO records (user_id, tab_id, data, record_type, parent_id, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+            [userId, tab_id, JSON.stringify(data), rType, pParent, sortOrder]
         );
-        res.json({ success: true, id: result.lastID, message: '添加成功' });
+        res.json({ success: true, id: result.lastID, record_type: rType, message: '添加成功' });
     } catch (err) {
         console.error('创建记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.get('/children/:parentId', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const parentId = parseInt(req.params.parentId);
+        const records = await query(
+            'SELECT * FROM records WHERE user_id = ? AND parent_id = ? ORDER BY sort_order, created_at',
+            [userId, parentId]
+        );
+        const parsed = records.map(r => {
+            try { return { ...r, data: JSON.parse(r.data || '{}') }; }
+            catch { return { ...r, data: {} }; }
+        });
+        // income totals
+        const recordIds = parsed.map(r => r.id);
+        let incomeMap = {};
+        if (recordIds.length > 0) {
+            const placeholders = recordIds.map(() => '?').join(',');
+            const incomeRows = await query(
+                `SELECT record_id, SUM(amount) as total FROM income_records WHERE record_id IN (${placeholders}) GROUP BY record_id`,
+                recordIds
+            );
+            incomeRows.forEach(row => { incomeMap[row.record_id] = row.total; });
+        }
+        parsed.forEach(r => { r._incomeTotal = incomeMap[r.id] || 0; });
+        res.json(parsed);
+    } catch (err) {
+        console.error('获取子记录错误:', err);
         res.status(500).json({ error: '服务器错误' });
     }
 });
