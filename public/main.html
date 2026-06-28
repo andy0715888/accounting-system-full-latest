@@ -218,11 +218,11 @@
     <div class="modal-overlay" id="renameTabModal">
         <div class="modal modal-xs">
             <div class="modal-header">
-                <h2>编辑标签名称</h2>
+                <h2 id="renameTabModalTitle">编辑标签名称</h2>
                 <button class="modal-close" id="closeRenameTabModal">✕</button>
             </div>
             <div class="modal-body">
-                <div class="rename-tab-form">
+                <div class="rename-tab-form" id="renameTabForm" style="display:none;">
                     <label for="renameTabInput">标签名称</label>
                     <input type="text" id="renameTabInput" placeholder="请输入标签名称" />
                     <div class="rename-tab-actions">
@@ -230,6 +230,28 @@
                         <button class="tool-btn" id="cancelRenameTabBtn">取消</button>
                     </div>
                     <span id="renameTabStatus"></span>
+                </div>
+                <div class="rename-tab-form" id="addTabForm">
+                    <label for="newTabType">标签类型</label>
+                    <div class="tab-type-selector">
+                        <label class="tab-type-option">
+                            <input type="radio" name="tabType" value="dedicated" checked />
+                            <span class="tab-type-label">独享记账</span>
+                            <span class="tab-type-desc">一台服务器对应一个客户</span>
+                        </label>
+                        <label class="tab-type-option">
+                            <input type="radio" name="tabType" value="shared" />
+                            <span class="tab-type-label">共享记账</span>
+                            <span class="tab-type-desc">一台服务器下多个客户</span>
+                        </label>
+                    </div>
+                    <label for="newTabName" style="margin-top:12px;">标签名称</label>
+                    <input type="text" id="newTabNameInput" placeholder="请输入标签名称" value="新标签" />
+                    <div class="rename-tab-actions">
+                        <button class="tool-btn primary" id="saveNewTabBtn">添加</button>
+                        <button class="tool-btn" id="cancelNewTabBtn">取消</button>
+                    </div>
+                    <span id="newTabStatus"></span>
                 </div>
             </div>
         </div>
