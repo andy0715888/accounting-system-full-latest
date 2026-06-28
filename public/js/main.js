@@ -2098,9 +2098,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function getRecordFinancials(record) {
         const months = parseInt(record.data.months) || 0;
-        const expense = (record._expenseTotal !== undefined)
-            ? (record._expenseTotal || 0)
-            : (computeExpenseValue(record.data.expense, months) || 0);
+        let expense;
+        if (record._expenseTotal !== undefined) {
+            expense = record._expenseTotal || 0;
+        } else {
+            const raw = record.data.expense;
+            if (raw !== null && raw !== undefined && raw !== '' && months === 0) {
+                // No months field (simple tab, shared client) - expense is total value
+                expense = parseFloat(raw) || 0;
+            } else {
+                expense = computeExpenseValue(raw, months) || 0;
+            }
+        }
         // Income: prefer _incomeTotal (aggregated), fallback to sum of _incomes
         let income = record._incomeTotal || 0;
         if (!income) {
@@ -2114,9 +2123,17 @@ document.addEventListener('DOMContentLoaded', function() {
         // Returns array of { month: 'YYYY-MM', income, expense } broken down by month
         const results = [];
         const months = parseInt(record.data.months) || 0;
-        const totalExpense = (record._expenseTotal !== undefined)
-            ? (record._expenseTotal || 0)
-            : (computeExpenseValue(record.data.expense, months) || 0);
+        let totalExpense;
+        if (record._expenseTotal !== undefined) {
+            totalExpense = record._expenseTotal || 0;
+        } else {
+            const raw = record.data.expense;
+            if (raw !== null && raw !== undefined && raw !== '' && months === 0) {
+                totalExpense = parseFloat(raw) || 0;
+            } else {
+                totalExpense = computeExpenseValue(raw, months) || 0;
+            }
+        }
         const purchaseDate = record.data.host_purchase;
         const startDate = purchaseDate ? new Date(purchaseDate) : null;
 
