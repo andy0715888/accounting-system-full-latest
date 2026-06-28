@@ -2645,8 +2645,10 @@ document.addEventListener('DOMContentLoaded', function() {
         ctxCopyClient.style.display = (isShared && recordType === 'client') ? 'block' : 'none';
         ctxPasteClient.style.display = (isShared && recordType === 'server' && state.copiedClientData) ? 'block' : 'none';
         // 独享标签菜单项
+        const targetRec = state.records.find(r => r.id === contextTargetId);
+        const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
         ctxCopyServer.style.display = (isDedicated && !recordType) ? 'block' : 'none';
-        ctxPasteServer.style.display = (isDedicated && state.copiedServerData) ? 'block' : 'none';
+        ctxPasteServer.style.display = (isDedicated && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
         ctxDeleteRecord.style.display = 'block';
 
         contextMenu.style.display = 'block';
@@ -2682,8 +2684,6 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('移动中...');
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
-            // Use all original client data (income records stay linked to original record id,
-            // but data fields are preserved)
             Object.keys(state.copiedClientData).forEach(k => { data[k] = state.copiedClientData[k]; });
 
             const result = await API.post('/records', {
@@ -2692,10 +2692,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 record_type: 'client',
                 parent_id: contextTargetId
             });
-            // Delete the original client record (cut = move)
+            const newRecordId = result.id;
+
+            // Migrate income records from old record to new record
             const oldId = state.copiedClientRecordId;
-            if (oldId) {
+            if (oldId && newRecordId) {
+                await API.post('/income/migrate', { from_record_id: oldId, to_record_id: newRecordId });
                 await API.delete('/records/' + oldId);
+            } else {
+                // No old record to delete (shouldn't happen, but safe)
+                if (oldId) await API.delete('/records/' + oldId);
             }
             state.copiedClientData = null;
             state.copiedClientRecordId = null;
@@ -2772,11 +2778,19 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('添加中...');
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
-            // New client defaults: today + 1 month
+            // New client defaults: today + 1 month (same day or last day of next month)
             const now = new Date();
             data.client_purchase = now.toISOString().split('T')[0];
-            const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
-            data.client_expire = nextMonth.toISOString().split('T')[0];
+            // +1 month: same day next month, or last day if overflow (e.g. 8-31 → 9-30)
+            const expDate = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+            // If day overflowed (e.g. 31 → next month has 30), JS auto-corrects to next-next month
+            // Detect overflow and clamp to last day of next month + 1 day
+            if (expDate.getMonth() !== now.getMonth() + 1 || (now.getMonth() === 11 && expDate.getMonth() !== 0)) {
+                // Overflow occurred, use last day of next month + 1 day
+                const lastDay = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+                expDate.setTime(lastDay.getTime() + 86400000); // +1 day
+            }
+            data.client_expire = expDate.toISOString().split('T')[0];
             data.fee = '';
 
             const result = await API.post('/records', {
