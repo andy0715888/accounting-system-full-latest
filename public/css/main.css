@@ -1384,18 +1384,38 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 10px;
+    padding: 10px 12px;
     border-bottom: 1px solid #f0f0f0;
-    font-size: 13px;
+    font-size: 15px;
 }
 .income-item:hover { background: #f5f5f5; }
-.income-item-info { display: flex; flex-direction: column; gap: 2px; }
-.income-item-amount { font-weight: 600; color: #2e7d32; }
-.income-item-date { color: #999; font-size: 12px; }
-.income-item-remark { color: #666; font-size: 12px; }
+.income-item-info {
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+    gap: 16px;
+    flex: 1;
+}
+.income-item-amount {
+    font-weight: 600;
+    color: #2e7d32;
+    font-size: 16px;
+    min-width: 60px;
+    text-align: right;
+}
+.income-item-date {
+    color: #999;
+    font-size: 14px;
+    min-width: 100px;
+}
+.income-item-remark {
+    color: #666;
+    font-size: 14px;
+    flex: 1;
+}
 .income-item-delete {
-    padding: 2px 8px;
-    font-size: 12px;
+    padding: 4px 12px;
+    font-size: 14px;
     border: 1px solid #f56c6c;
     border-radius: 3px;
     background: #fff;
@@ -1407,7 +1427,7 @@ body {
 /* 收入列在表格中的样式 - 只读显示，可点击 */
 .fee-summary-cell {
     cursor: pointer;
-    text-align: right;
+    text-align: center;
     padding: 0 10px;
     font-weight: 600;
     color: #2e7d32;
@@ -1415,7 +1435,7 @@ body {
     min-height: 32px;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: center;
     gap: 4px;
 }
 .fee-summary-cell:hover { background: #e8f5e9; }
