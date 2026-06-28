@@ -28,6 +28,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // 收入弹窗
         incomeRecordId: null,
         incomeRecords: [],
+        // 支出弹窗
+        expenseRecordId: null,
+        expenseRecords: [],
         // 行管理模式
         rowManageMode: false,
         // 待保存记录追踪
@@ -58,6 +61,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const providerManageBtn = $('#providerManageBtn');
     const logoutBtn = $('#logoutBtn');
     const columnModal = $('#columnModal');
+
+    const confirmModal = $('#confirmModal');
+    const confirmModalTitle = $('#confirmModalTitle');
+    const confirmModalMessage = $('#confirmModalMessage');
+    const confirmModalYes = $('#confirmModalYes');
+    const confirmModalNo = $('#confirmModalNo');
+    const closeConfirmModal = $('#closeConfirmModal');
     const closeColumnModal = $('#closeColumnModal');
     const addColBtn = $('#addColBtn');
     const columnList = $('#columnList');
@@ -123,6 +133,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const incomeTotalDisplay = $('#incomeTotalDisplay');
     const incomeStatus = $('#incomeStatus');
 
+    const expenseModal = $('#expenseModal');
+    const closeExpenseModal = $('#closeExpenseModal');
+    const expenseAmountInput = $('#expenseAmountInput');
+    const expenseDateInput = $('#expenseDateInput');
+    const expenseRemarkInput = $('#expenseRemarkInput');
+    const addExpenseBtn = $('#addExpenseBtn');
+    const expenseList = $('#expenseList');
+    const expenseTotalDisplay = $('#expenseTotalDisplay');
+    const expenseStatus = $('#expenseStatus');
+
     let filterDocumentClickBound = false;
 
     // --- 菜单切换 ---
@@ -165,6 +185,31 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     function escapeAttr(value) { return escapeHtml(value); }
     function cssUrl(url) { return String(url ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
+
+    function showConfirm(message, title) {
+        return new Promise((resolve) => {
+            confirmModalTitle.textContent = title || '确认';
+            confirmModalMessage.textContent = message;
+            confirmModal.classList.add('show');
+
+            const yesHandler = () => { close(); resolve(true); };
+            const noHandler = () => { close(); resolve(false); };
+            const escHandler = (e) => { if (e.key === 'Escape') { close(); resolve(false); } };
+
+            function close() {
+                confirmModal.classList.remove('show');
+                confirmModalYes.removeEventListener('click', yesHandler);
+                confirmModalNo.removeEventListener('click', noHandler);
+                closeConfirmModal.removeEventListener('click', noHandler);
+                document.removeEventListener('keydown', escHandler);
+            }
+
+            confirmModalYes.addEventListener('click', yesHandler);
+            confirmModalNo.addEventListener('click', noHandler);
+            closeConfirmModal.addEventListener('click', noHandler);
+            document.addEventListener('keydown', escHandler);
+        });
+    }
 
     function getChineseInitials(text) {
         const extraMap = {
@@ -218,6 +263,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const result = computeFeeValue(val);
             return result !== null ? String(result) : (val || '');
         } else if (colKey === 'expense') {
+            if (record._expenseTotal !== undefined) {
+                return String(Math.round(record._expenseTotal || 0));
+            }
             const months = parseInt(record.data.months) || 0;
             const result = computeExpenseValue(val, months);
             return result !== null ? String(Math.round(result)) : (val || '');
@@ -370,6 +418,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function isSharedTab() {
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         return tab && tab.tab_type === 'shared';
+    }
+    function isSimpleTab() {
+        const tab = state.tabs.find(t => t.id === state.currentTabId);
+        return tab && tab.tab_type === 'simple';
     }
 
     // Server-only columns (inherited by client rows, not editable)
@@ -526,7 +578,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function createDefaultTab() { await createTab('默认'); }
     async function deleteTabs(tabIds) {
         if (!tabIds || tabIds.length === 0) { setStatus('⚠️ 请先在管理模式中勾选标签'); return; }
-        if (!confirm(`确定删除 ${tabIds.length} 个标签及其所有数据吗？`)) return;
+        if (!await showConfirm(`确定删除 ${tabIds.length} 个标签及其所有数据吗？`)) return;
         try {
             setStatus('🔄 删除标签中...');
             await Promise.all(tabIds.map(tabId => API.delete('/tabs/' + tabId)));
@@ -827,15 +879,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     const color = status === '有效' ? '#67c23a' : (status === '过期' ? '#f56c6c' : '#999');
                     inputHtml = `<span style="color:${color};">${escapeHtml(status)}</span>`;
                 } else if (colKey === 'expense') {
-                    const rawValue = val || '';
-                    const months = parseInt(record.data.months) || 0;
-                    const displayValue = Math.round(computeExpenseValue(rawValue, months));
-                    inputHtml = `
-                        <div class="expense-inline">
-                            <span class="expense-display">${displayValue}</span>
-                            <input type="text" class="cell-input expense-input" value="${escapeAttr(rawValue)}" style="display:none;" />
-                        </div>
-                    `;
+                    if (isSimpleTab()) {
+                        const expenseTotal = record._expenseTotal || 0;
+                        const displayText = expenseTotal > 0 ? Math.round(expenseTotal) : '0';
+                        inputHtml = `
+                            <div class="fee-summary-cell expense-summary-cell" data-id="${record.id}">
+                                <span>${escapeHtml(displayText)}</span>
+                                <span class="fee-add-icon">+</span>
+                            </div>
+                        `;
+                    } else {
+                        const rawValue = val || '';
+                        const months = parseInt(record.data.months) || 0;
+                        const displayValue = Math.round(computeExpenseValue(rawValue, months));
+                        inputHtml = `
+                            <div class="expense-inline">
+                                <span class="expense-display">${displayValue}</span>
+                                <input type="text" class="cell-input expense-input" value="${escapeAttr(rawValue)}" style="display:none;" />
+                            </div>
+                        `;
+                    }
                 } else if (colKey === 'fee') {
                     const incomeTotal = record._incomeTotal || 0;
                     const displayText = incomeTotal > 0 ? Math.round(incomeTotal) : '0';
@@ -1413,6 +1476,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 openIncomeModal(recordId);
             });
         });
+        // 支出交互（点击打开支出管理弹窗）
+        $$('.expense-summary-cell').forEach(cell => {
+            cell.addEventListener('click', function() {
+                const recordId = parseInt(this.dataset.id);
+                openExpenseModal(recordId);
+            });
+        });
     }
 
     function handleCellChange(input) {
@@ -1526,7 +1596,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function deleteSelected() {
         const ids = Array.from(state.selectedRows);
         if (ids.length === 0) { setStatus('请选择行'); return; }
-        if (!confirm(`确定删除 ${ids.length} 条记录吗？`)) return;
+        if (!await showConfirm(`确定删除 ${ids.length} 条记录吗？`)) return;
         try {
             setStatus('删除中...');
             await API.post('/records/batch-delete', { ids });
@@ -1737,7 +1807,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { setStatus('❌ 更新失败: ' + err.message); }
     };
     window.deleteColumn = async function(id) {
-        if (!confirm('确定删除此列吗？')) return;
+        if (!await showConfirm('确定删除此列吗？')) return;
         try {
             await API.delete('/columns/' + id);
             await loadColumns(state.currentTabId);
@@ -1822,7 +1892,7 @@ document.addEventListener('DOMContentLoaded', function() {
         incomeList.querySelectorAll('.income-item-delete').forEach(btn => {
             btn.addEventListener('click', async function() {
                 const id = parseInt(this.dataset.id);
-                if (!confirm('确定删除此收入记录？')) return;
+                if (!await showConfirm('确定删除此收入记录？')) return;
                 try {
                     await API.delete('/income/' + id);
                     await loadIncomeRecords(state.incomeRecordId);
@@ -1858,6 +1928,84 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { incomeStatus.textContent = '添加失败: ' + err.message; }
     }
 
+    // --- 支出管理弹窗 ---
+    async function openExpenseModal(recordId) {
+        state.expenseRecordId = recordId;
+        expenseAmountInput.value = '';
+        expenseRemarkInput.value = '';
+        expenseDateInput.value = new Date().toISOString().split('T')[0];
+        expenseStatus.textContent = '';
+        expenseModal.classList.add('show');
+        await loadExpenseRecords(recordId);
+    }
+
+    async function loadExpenseRecords(recordId) {
+        try {
+            const records = await API.get('/expense/by-record/' + recordId);
+            state.expenseRecords = records || [];
+            const total = state.expenseRecords.reduce((s, r) => s + (r.amount || 0), 0);
+            expenseTotalDisplay.textContent = Math.round(total);
+            renderExpenseList();
+        } catch (err) { expenseStatus.textContent = '加载失败: ' + err.message; }
+    }
+
+    function renderExpenseList() {
+        if (!expenseList) return;
+        if (state.expenseRecords.length === 0) {
+            expenseList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无支出记录</div>';
+            return;
+        }
+        expenseList.innerHTML = state.expenseRecords.map(r => `
+            <div class="income-item">
+                <div class="income-item-info">
+                    <span class="income-item-amount" style="color:#c62828;">${Math.round(r.amount)}</span>
+                    <div>
+                        <span class="income-item-date">${escapeHtml(r.expense_date || '')}</span>
+                        ${r.remark ? '<span class="income-item-remark"> - ' + escapeHtml(r.remark) + '</span>' : ''}
+                    </div>
+                </div>
+                <button class="income-item-delete" data-id="${r.id}">删除</button>
+            </div>
+        `).join('');
+        expenseList.querySelectorAll('.income-item-delete').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const id = parseInt(this.dataset.id);
+                if (!await showConfirm('确定删除此支出记录？')) return;
+                try {
+                    await API.delete('/expense/' + id);
+                    await loadExpenseRecords(state.expenseRecordId);
+                    await loadRecords(state.currentTabId);
+                    renderTable(false);
+                    expenseStatus.textContent = '已删除';
+                    setTimeout(() => expenseStatus.textContent = '', 1500);
+                } catch (err) { expenseStatus.textContent = '删除失败: ' + err.message; }
+            });
+        });
+    }
+
+    async function addExpenseRecord() {
+        const amount = parseFloat(expenseAmountInput.value);
+        const date = expenseDateInput.value;
+        if (!amount || amount <= 0) { expenseStatus.textContent = '请输入有效金额'; return; }
+        if (!date) { expenseStatus.textContent = '请选择日期'; return; }
+        try {
+            await API.post('/expense', {
+                record_id: state.expenseRecordId,
+                tab_id: state.currentTabId,
+                amount: amount,
+                expense_date: date,
+                remark: expenseRemarkInput.value.trim()
+            });
+            expenseAmountInput.value = '';
+            expenseRemarkInput.value = '';
+            await loadExpenseRecords(state.expenseRecordId);
+            await loadRecords(state.currentTabId);
+            renderTable(false);
+            expenseStatus.textContent = '添加成功';
+            setTimeout(() => expenseStatus.textContent = '', 1500);
+        } catch (err) { expenseStatus.textContent = '添加失败: ' + err.message; }
+    }
+
     // --- 全标签财务统计 ---
     async function getAllTabRecordsForStats() {
         await flushPendingSaves();
@@ -1883,6 +2031,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             } catch {}
         }
+        // Also load all expense records per tab
+        for (const tab of state.tabs) {
+            try {
+                const expenses = await API.get('/expense/by-tab/' + tab.id);
+                (expenses || []).forEach(exp => {
+                    const rec = all.find(r => r.id === exp.record_id);
+                    if (rec) {
+                        if (!rec._expenses) rec._expenses = [];
+                        rec._expenses.push(exp);
+                    }
+                });
+            } catch {}
+        }
         return all;
     }
 
@@ -1894,7 +2055,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function getRecordFinancials(record) {
         const months = parseInt(record.data.months) || 0;
-        const expense = computeExpenseValue(record.data.expense, months) || 0;
+        const expense = (record._expenseTotal !== undefined)
+            ? (record._expenseTotal || 0)
+            : (computeExpenseValue(record.data.expense, months) || 0);
         // Income from income_records
         const incomes = record._incomes || [];
         const income = incomes.reduce((s, r) => s + (r.amount || 0), 0);
@@ -1905,7 +2068,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Returns array of { month: 'YYYY-MM', income, expense } broken down by month
         const results = [];
         const months = parseInt(record.data.months) || 0;
-        const totalExpense = computeExpenseValue(record.data.expense, months) || 0;
+        const totalExpense = (record._expenseTotal !== undefined)
+            ? (record._expenseTotal || 0)
+            : (computeExpenseValue(record.data.expense, months) || 0);
         const purchaseDate = record.data.host_purchase;
         const startDate = purchaseDate ? new Date(purchaseDate) : null;
 
@@ -1939,6 +2104,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         results.push(bucket);
                     }
                     bucket.income += (inc.amount || 0);
+                }
+            }
+        });
+
+        // Add expense by date (for simple tabs)
+        const expenses = record._expenses || [];
+        expenses.forEach(exp => {
+            if (exp.expense_date) {
+                const d = new Date(exp.expense_date);
+                if (!isNaN(d)) {
+                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    let bucket = results.find(r => r.month === monthKey);
+                    if (!bucket) {
+                        bucket = { month: monthKey, income: 0, expense: 0 };
+                        results.push(bucket);
+                    }
+                    bucket.expense += (exp.amount || 0);
                 }
             }
         });
@@ -2238,7 +2420,7 @@ document.addEventListener('DOMContentLoaded', function() {
         providerList.querySelectorAll('.delete-provider-btn').forEach(btn => {
             btn.addEventListener('click', async function() {
                 const name = this.dataset.name;
-                if (!confirm(`确定删除服务商“${name}”吗？已使用的记录不会被清空。`)) return;
+                if (!await showConfirm(`确定删除服务商"${name}"吗？已使用的记录不会被清空。`)) return;
                 try {
                     state.providerOptions = state.providerOptions.filter(item => item !== name);
                     await saveProviderOptions();
@@ -2353,7 +2535,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     manageColumnsBtn.addEventListener('click', showColumnManager);
     logoutBtn.addEventListener('click', async function() {
-        if (!confirm('确定退出吗？')) return;
+        if (!await showConfirm('确定退出吗？')) return;
         try { await API.post('/auth/logout'); window.location.href = '/login'; } catch (err) { setStatus('❌ 退出失败: ' + err.message); }
     });
 
@@ -2377,6 +2559,12 @@ document.addEventListener('DOMContentLoaded', function() {
     addIncomeBtn.addEventListener('click', addIncomeRecord);
     incomeAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addIncomeRecord();
+    });
+
+    closeExpenseModal.addEventListener('click', () => expenseModal.classList.remove('show'));
+    addExpenseBtn.addEventListener('click', addExpenseRecord);
+    expenseAmountInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addExpenseRecord();
     });
 
     // --- 分页事件 ---
@@ -2429,7 +2617,7 @@ document.addEventListener('DOMContentLoaded', function() {
     ctxDeleteRecord.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
         if (!contextTargetId) return;
-        if (!confirm('确定删除此行？')) return;
+        if (!await showConfirm('确定删除此行？')) return;
         try {
             await API.delete('/records/' + contextTargetId);
             await loadRecords(state.currentTabId);
@@ -2508,7 +2696,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { setStatus('❌ 上传失败: ' + err.message); }
     });
     document.getElementById('removeBgBtn').addEventListener('click', async function() {
-        if (!confirm('确定移除背景吗？')) return;
+        if (!await showConfirm('确定移除背景吗？')) return;
         try {
             await API.delete('/settings/background');
             const preview = document.getElementById('bgPreview');
