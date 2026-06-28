@@ -92,6 +92,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const saveRenameTabBtn = $('#saveRenameTabBtn');
     const cancelRenameTabBtn = $('#cancelRenameTabBtn');
     const renameTabStatus = $('#renameTabStatus');
+    const renameTabModalTitle = $('#renameTabModalTitle');
+    const renameTabForm = $('#renameTabForm');
+    const addTabForm = $('#addTabForm');
+    const newTabNameInput = $('#newTabNameInput');
+    const saveNewTabBtn = $('#saveNewTabBtn');
+    const cancelNewTabBtn = $('#cancelNewTabBtn');
+    const newTabStatus = $('#newTabStatus');
     const providerModal = $('#providerModal');
     const closeProviderModal = $('#closeProviderModal');
     const providerNameInput = $('#providerNameInput');
@@ -203,7 +210,10 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (colKey === 'ip_info') {
             return record.data.ip_address || '';
         } else if (colKey === 'is_expired') {
-            return checkExpired(record.data.host_expire);
+            const clientExpire = record.data.client_expire;
+            const hostExpire = record.data.host_expire;
+            const expireDate = clientExpire || hostExpire;
+            return checkExpired(expireDate);
         } else if (colKey === 'fee') {
             const result = computeFeeValue(val);
             return result !== null ? String(result) : (val || '');
@@ -266,13 +276,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (col.is_income === 1 || col.is_income === 2) maxHeaderWidth += 20;
         maxHeaderWidth += 8;
         let maxCellWidth = 0;
-        state.records.forEach(record => {
+        const sampleRecords = state.records.slice(0, 50);
+        sampleRecords.forEach(record => {
             const displayVal = getDisplayValue(record, col);
             let w = measureTextWidth(displayVal, 400, 14) + 16;
             if (col.col_key === 'expense') w = Math.max(w, 60);
             if (w > maxCellWidth) maxCellWidth = w;
         });
-        return Math.max(60, Math.min(400, Math.max(maxHeaderWidth, maxCellWidth)));
+        // IP addresses and dates have known widths, cap them
+        if (col.col_key === 'ip_address') maxCellWidth = Math.min(maxCellWidth, 150);
+        if (col.col_type === 'date' || col.col_type === 'days_remaining') maxCellWidth = Math.min(maxCellWidth, 120);
+        if (col.col_key === 'password') maxCellWidth = Math.min(maxCellWidth, 120);
+        if (col.col_key === 'fee') maxCellWidth = Math.min(maxCellWidth, 80);
+        return Math.max(60, Math.min(250, Math.max(maxHeaderWidth, maxCellWidth)));
     }
 
     function getColumnDisplayName(col) {
@@ -434,7 +450,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const checkbox = state.tabManageMode
                 ? `<input type="checkbox" class="tab-select" data-tab-id="${tab.id}" ${checked} />`
                 : '';
-            html += `<button class="tab-item ${active}" data-tab-id="${tab.id}">
+            const draggable = state.tabManageMode ? 'draggable="true"' : '';
+            html += `<button class="tab-item ${active}" data-tab-id="${tab.id}" ${draggable}>
                 ${checkbox}
                 <span class="tab-name" data-id="${tab.id}">${escapeHtml(tab.name)}</span>
             </button>`;
@@ -444,6 +461,9 @@ document.addEventListener('DOMContentLoaded', function() {
             manageTabsBtn.classList.toggle('active', state.tabManageMode);
             manageTabsBtn.textContent = state.tabManageMode ? '完成' : '管理';
         }
+        const tabBarEl = document.querySelector('.tab-bar');
+        if (tabBarEl) tabBarEl.classList.toggle('drag-active', state.tabManageMode);
+        if (state.tabManageMode) initTabDragDrop();
         tabBar.querySelectorAll('.tab-select').forEach(el => {
             el.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -480,10 +500,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
     }
 
-    async function createTab(name) {
-        const result = await API.post('/tabs', { name });
+    async function createTab(name, tabType) {
+        const result = await API.post('/tabs', { name, tab_type: tabType || 'dedicated' });
         if (result.success) {
-            state.tabs.push({ id: result.id, name });
+            state.tabs.push({ id: result.id, name, tab_type: result.tab_type || tabType || 'dedicated' });
             renderTabs();
             switchTab(result.id, true);
         }
@@ -511,10 +531,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     addTabBtn.addEventListener('click', () => {
         state.renameTabId = null;
-        renameTabInput.value = '新标签';
-        renameTabStatus.textContent = '';
+        renameTabModalTitle.textContent = '添加标签';
+        renameTabForm.style.display = 'none';
+        addTabForm.style.display = 'block';
+        newTabNameInput.value = '新标签';
+        newTabStatus.textContent = '';
         renameTabModal.classList.add('show');
-        setTimeout(() => renameTabInput.select(), 0);
+        setTimeout(() => { newTabNameInput.select(); newTabNameInput.focus(); }, 0);
     });
     manageTabsBtn.addEventListener('click', () => {
         state.tabManageMode = !state.tabManageMode;
@@ -527,10 +550,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const tab = state.tabs.find(t => t.id === tabId);
         if (!tab) return;
         state.renameTabId = tabId;
+        renameTabModalTitle.textContent = '编辑标签名称';
+        renameTabForm.style.display = 'block';
+        addTabForm.style.display = 'none';
         renameTabInput.value = tab.name;
         renameTabStatus.textContent = '';
         renameTabModal.classList.add('show');
-        setTimeout(() => renameTabInput.select(), 0);
+        setTimeout(() => { renameTabInput.select(); renameTabInput.focus(); }, 0);
     }
 
     function closeRenameModal() {
@@ -559,11 +585,88 @@ document.addEventListener('DOMContentLoaded', function() {
 
     closeRenameTabModal.addEventListener('click', closeRenameModal);
     cancelRenameTabBtn.addEventListener('click', closeRenameModal);
+    cancelNewTabBtn.addEventListener('click', closeRenameModal);
     saveRenameTabBtn.addEventListener('click', saveRenameTab);
     renameTabInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') saveRenameTab();
         if (e.key === 'Escape') closeRenameModal();
     });
+
+    async function saveNewTab() {
+        const name = newTabNameInput.value.trim();
+        if (!name) { newTabStatus.textContent = '标签名称不能为空'; return; }
+        const typeRadio = document.querySelector('input[name="tabType"]:checked');
+        const tabType = typeRadio ? typeRadio.value : 'dedicated';
+        try {
+            await createTab(name, tabType);
+            closeRenameModal();
+            setStatus('标签已添加');
+        } catch (err) { newTabStatus.textContent = '保存失败: ' + err.message; }
+    }
+    saveNewTabBtn.addEventListener('click', saveNewTab);
+    newTabNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') saveNewTab();
+        if (e.key === 'Escape') closeRenameModal();
+    });
+
+    // --- 标签拖拽排序 ---
+    let dragTabId = null;
+
+    function initTabDragDrop() {
+        const tabBar = document.querySelector('.tab-bar');
+        if (!tabBar) return;
+
+        tabBar.addEventListener('dragstart', function(e) {
+            const tabItem = e.target.closest('.tab-item');
+            if (!tabItem || !state.tabManageMode) { e.preventDefault(); return; }
+            dragTabId = parseInt(tabItem.dataset.tabId);
+            tabItem.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        tabBar.addEventListener('dragend', function(e) {
+            document.querySelectorAll('.tab-item.dragging').forEach(el => el.classList.remove('dragging'));
+            document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+            dragTabId = null;
+        });
+
+        tabBar.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const tabItem = e.target.closest('.tab-item');
+            if (!tabItem) return;
+            document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+            tabItem.classList.add('drag-over');
+        });
+
+        tabBar.addEventListener('dragleave', function(e) {
+            const tabItem = e.target.closest('.tab-item');
+            if (tabItem) tabItem.classList.remove('drag-over');
+        });
+
+        tabBar.addEventListener('drop', async function(e) {
+            e.preventDefault();
+            document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+            if (!dragTabId) return;
+            const tabItem = e.target.closest('.tab-item');
+            if (!tabItem) return;
+            const targetTabId = parseInt(tabItem.dataset.tabId);
+            if (dragTabId === targetTabId) return;
+
+            const fromIdx = state.tabs.findIndex(t => t.id === dragTabId);
+            const toIdx = state.tabs.findIndex(t => t.id === targetTabId);
+            if (fromIdx < 0 || toIdx < 0) return;
+
+            const [moved] = state.tabs.splice(fromIdx, 1);
+            state.tabs.splice(toIdx, 0, moved);
+            renderTabs();
+
+            try {
+                const tabIds = state.tabs.map(t => t.id);
+                await API.post('/tabs/reorder', { tabIds });
+            } catch (err) { setStatus('排序保存失败: ' + err.message); }
+        });
+    }
 
     function normalizeFilterValue(value) {
         if (value === null || value === undefined || String(value).trim() === '') return '(空白)';
@@ -596,9 +699,9 @@ document.addEventListener('DOMContentLoaded', function() {
             let incomeLabel = isIncome === 1 ? '💰' : (isIncome === 2 ? '💸' : '');
             const hasFilter = isFilterActive(col.col_key) ? 'filter-active' : '';
             const savedWidth = col.col_width;
-            const width = shouldAutoFit
-                ? ((savedWidth && savedWidth !== 150) ? savedWidth : calcColumnWidth(col))
-                : (savedWidth || 150);
+            const width = shouldAutoFit || !savedWidth || savedWidth === 150
+                ? calcColumnWidth(col)
+                : savedWidth;
             const displayName = getColumnDisplayName(col);
             theadHtml += `
                 <th data-col="${escapeAttr(col.col_key)}" style="width:${width}px;min-width:${width}px;max-width:${width}px;">
@@ -692,7 +795,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const options = (col.col_options || []).map(opt => `<option value="${escapeAttr(opt)}" ${val === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('');
                     inputHtml = `<select class="cell-input select-cell" data-col="${escapeAttr(colKey)}" data-id="${record.id}"><option value="">-</option>${options}</select>`;
                 } else if (colKey === 'is_expired') {
-                    const expireDate = record.data.host_expire;
+                    const clientExpire = record.data.client_expire;
+                    const hostExpire = record.data.host_expire;
+                    const expireDate = clientExpire || hostExpire;
                     const status = checkExpired(expireDate);
                     const color = status === '有效' ? '#67c23a' : (status === '过期' ? '#f56c6c' : '#999');
                     inputHtml = `<span style="color:${color};">${escapeHtml(status)}</span>`;
