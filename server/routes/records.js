@@ -26,7 +26,7 @@ router.get('/', requireAuth, async (req, res) => {
         const offset = (page - 1) * pageSize;
 
         const records = await query(
-            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, COALESCE(parent_id, id), sort_order, created_at LIMIT ? OFFSET ?',
+            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY COALESCE(parent_id, id), CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, sort_order, created_at LIMIT ? OFFSET ?',
             [userId, tabId, pageSize, offset]
         );
         const parsed = records.map(r => {
