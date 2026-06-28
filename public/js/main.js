@@ -262,10 +262,13 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (colKey === 'ip_info') {
             return record.data.ip_address || '';
         } else if (colKey === 'is_expired') {
-            const clientExpire = record.data.client_expire;
-            const hostExpire = record.data.host_expire;
-            const expireDate = clientExpire || hostExpire;
-            return checkExpired(expireDate);
+            if (record.record_type === 'client') {
+                const clientExpire = record.data.client_expire;
+                return checkExpired(clientExpire);
+            } else {
+                const hostExpire = record.data.host_expire;
+                return checkExpired(hostExpire);
+            }
         } else if (colKey === 'fee') {
             const result = computeFeeValue(val);
             return result !== null ? String(result) : (val || '');
@@ -899,9 +902,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const options = (col.col_options || []).map(opt => `<option value="${escapeAttr(opt)}" ${val === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('');
                     inputHtml = `<select class="cell-input select-cell" data-col="${escapeAttr(colKey)}" data-id="${record.id}"><option value="">-</option>${options}</select>`;
                 } else if (colKey === 'is_expired') {
-                    const clientExpire = record.data.client_expire;
-                    const hostExpire = record.data.host_expire;
-                    const expireDate = clientExpire || hostExpire;
+                    let expireDate;
+                    if (record.record_type === 'client') {
+                        expireDate = record.data.client_expire;
+                    } else {
+                        expireDate = record.data.host_expire;
+                    }
                     const status = checkExpired(expireDate);
                     const color = status === '有效' ? '#67c23a' : (status === '过期' ? '#f56c6c' : '#999');
                     inputHtml = `<span style="color:${color};">${escapeHtml(status)}</span>`;
@@ -2649,7 +2655,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
         ctxCopyServer.style.display = (isDedicated && recordType === 'server') ? 'block' : 'none';
         ctxPasteServer.style.display = (isDedicated && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
-        ctxDeleteRecord.style.display = 'block';
+        ctxDeleteRecord.style.display = isDedicated ? 'none' : 'block';
 
         contextMenu.style.display = 'block';
         contextMenu.style.left = e.clientX + 'px';
