@@ -366,6 +366,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadTabs() { state.tabs = await API.get('/tabs'); return state.tabs; }
     async function loadColumns(tabId) { state.columns = await API.get('/columns?tabId=' + tabId); return state.columns; }
+
+    function isSharedTab() {
+        const tab = state.tabs.find(t => t.id === state.currentTabId);
+        return tab && tab.tab_type === 'shared';
+    }
+
+    // Server-only columns (inherited by client rows, not editable)
+    const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info']);
+    // Client-only columns (only meaningful for client rows, empty/readonly on server rows)
+    // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
+
+    const contextMenu = $('#contextMenu');
+    const ctxAddClient = $('#ctxAddClient');
+    const ctxDeleteRecord = $('#ctxDeleteRecord');
+
     async function loadRecords(tabId) {
         await flushPendingSaves();
         const result = await API.get('/records?tabId=' + tabId + '&page=' + state.page + '&pageSize=' + state.pageSize);
@@ -726,14 +741,26 @@ document.addEventListener('DOMContentLoaded', function() {
         let tbodyHtml = '';
         filteredRecords.forEach((record) => {
             const isSelected = state.selectedRows.has(record.id);
-            tbodyHtml += `<tr class="${isSelected ? 'selected' : ''}" data-id="${record.id}">`;
+            const isClient = record.record_type === 'client';
+            const isServer = !isClient && isSharedTab();
+            const hasChildren = isServer && state.records.some(r => r.parent_id === record.id);
+            tbodyHtml += `<tr class="${isSelected ? 'selected' : ''} ${isClient ? 'client-row' : ''} ${isServer ? 'server-row' : ''} ${hasChildren ? 'has-children' : ''}" data-id="${record.id}" data-type="${record.record_type || 'server'}" data-parent="${record.parent_id || ''}">`;
             if (state.rowManageMode) {
                 tbodyHtml += `<td><input type="checkbox" class="row-checkbox" data-id="${record.id}" ${isSelected ? 'checked' : ''} /></td>`;
             }
             visibleColumns.forEach(col => {
                 const colKey = col.col_key;
-                let val = getCellValue(record, colKey);
+                const val = record.data[colKey] || '';
                 let inputHtml = '';
+                const isServerOnlyCol = SERVER_ONLY_COLS.has(colKey);
+
+                // Client row: server columns show inherited value (readonly)
+                if (isClient && isServerOnlyCol) {
+                    const parentRecord = state.records.find(r => r.id === record.parent_id);
+                    const inheritedVal = parentRecord ? (parentRecord.data[colKey] || '') : '';
+                    tbodyHtml += `<td class="inherited-cell">${escapeHtml(String(inheritedVal))}</td>`;
+                    return;
+                }
 
                 if (col.col_type === 'days_remaining') {
                     let dateKey = colKey === 'host_remaining' ? 'host_expire' : (colKey === 'client_remaining' ? 'client_expire' : '');
@@ -2373,6 +2400,72 @@ document.addEventListener('DOMContentLoaded', function() {
         await loadRecords(state.currentTabId);
         renderTable(false);
     });
+
+    // --- 右键菜单（共享标签：添加客户/删除行） ---
+    let contextTargetId = null;
+
+    document.addEventListener('contextmenu', function(e) {
+        if (!isSharedTab()) { contextMenu.style.display = 'none'; return; }
+        const tr = e.target.closest('tr[data-id]');
+        if (!tr) { contextMenu.style.display = 'none'; return; }
+        e.preventDefault();
+        contextTargetId = parseInt(tr.dataset.id);
+        const recordType = tr.dataset.type;
+
+        ctxAddClient.style.display = recordType === 'server' ? 'block' : 'none';
+        ctxDeleteRecord.style.display = 'block';
+
+        contextMenu.style.display = 'block';
+        contextMenu.style.left = e.clientX + 'px';
+        contextMenu.style.top = e.clientY + 'px';
+    });
+
+    document.addEventListener('click', function() { contextMenu.style.display = 'none'; });
+
+    ctxAddClient.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.currentTabId) return;
+        await addRowClient(contextTargetId);
+    });
+
+    ctxDeleteRecord.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId) return;
+        if (!confirm('确定删除此行？')) return;
+        try {
+            await API.delete('/records/' + contextTargetId);
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('已删除');
+        } catch (err) { setStatus('删除失败: ' + err.message); }
+    });
+
+    async function addRowClient(parentId) {
+        if (!state.currentTabId) return;
+        try {
+            setStatus('添加中...');
+            const data = {};
+            state.columns.forEach(col => { data[col.col_key] = ''; });
+            const now = new Date();
+            const today = now.toISOString().split('T')[0];
+            data.client_purchase = today;
+            data.client_expire = getNextMonth(now).toISOString().split('T')[0];
+            data.expense = '0';
+            data.fee = '';
+
+            const result = await API.post('/records', {
+                tab_id: state.currentTabId,
+                data,
+                record_type: 'client',
+                parent_id: parentId
+            });
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('客户已添加');
+        } catch (err) { setStatus('添加客户失败: ' + err.message); }
+    }
 
     document.getElementById('saveCertBtn').addEventListener('click', async function() {
         const certPath = document.getElementById('certPathInput').value.trim();
