@@ -14,6 +14,7 @@ const columnRoutes = require('./routes/columns');
 const settingRoutes = require('./routes/settings');
 const tabRoutes = require('./routes/tabs');
 const incomeRoutes = require('./routes/income');
+const expenseRoutes = require('./routes/expense');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -83,6 +84,7 @@ app.use('/api/columns', columnRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/tabs', tabRoutes);
 app.use('/api/income', incomeRoutes);
+app.use('/api/expense', expenseRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
