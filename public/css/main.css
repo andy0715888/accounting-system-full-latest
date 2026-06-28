@@ -863,6 +863,7 @@ body {
     animation: fadeIn 0.25s ease;
 }
 .modal-overlay.show { display: flex; }
+#confirmModal { z-index: 2000 !important; }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 .modal {
     background: #fff;
