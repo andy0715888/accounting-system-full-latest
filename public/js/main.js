@@ -2647,7 +2647,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 独享标签菜单项
         const targetRec = state.records.find(r => r.id === contextTargetId);
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
-        ctxCopyServer.style.display = (isDedicated && !recordType) ? 'block' : 'none';
+        ctxCopyServer.style.display = (isDedicated && recordType === 'server') ? 'block' : 'none';
         ctxPasteServer.style.display = (isDedicated && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
         ctxDeleteRecord.style.display = 'block';
 
