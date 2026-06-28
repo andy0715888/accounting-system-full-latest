@@ -93,6 +93,20 @@ function createTables() {
             FOREIGN KEY (tab_id) REFERENCES tabs(id)
         )`);
 
+        db.run(`CREATE TABLE IF NOT EXISTS expense_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            record_id INTEGER NOT NULL,
+            tab_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            expense_date DATE NOT NULL,
+            remark TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (record_id) REFERENCES records(id) ON DELETE CASCADE,
+            FOREIGN KEY (tab_id) REFERENCES tabs(id)
+        )`);
+
         // Migration: add tab_type and tab_order to existing tabs table
         db.run(`ALTER TABLE tabs ADD COLUMN tab_type TEXT DEFAULT 'dedicated'`, () => {});
         db.run(`ALTER TABLE tabs ADD COLUMN tab_order INTEGER DEFAULT 0`, () => {});
@@ -138,7 +152,13 @@ function createDefaultTabForUser(userId) {
 
 function createDefaultColumnsForTab(userId, tabId, tabType) {
     let defaultColumns;
-    if (tabType === 'shared') {
+    if (tabType === 'simple') {
+        defaultColumns = [
+            { col_key: 'remark', col_name: '备注', col_type: 'text', col_order: 0 },
+            { col_key: 'expense', col_name: '支出', col_type: 'text', col_order: 1, is_income: 2 },
+            { col_key: 'fee', col_name: '收入', col_type: 'text', col_order: 2, is_income: 1 }
+        ];
+    } else if (tabType === 'shared') {
         defaultColumns = [
             { col_key: 'provider', col_name: '服务商', col_type: 'text', col_order: 0 },
             { col_key: 'months', col_name: '月数', col_type: 'number', col_order: 1 },
