@@ -33,6 +33,9 @@ document.addEventListener('DOMContentLoaded', function() {
         expenseRecords: [],
         // 客户信息复制
         copiedClientData: null,
+        copiedClientRecordId: null,
+        // 服务器信息复制
+        copiedServerData: null,
         // 列定义缓存
         columnsCache: {},
         // 行管理模式
@@ -437,6 +440,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const ctxAddClient = $('#ctxAddClient');
     const ctxCopyClient = $('#ctxCopyClient');
     const ctxPasteClient = $('#ctxPasteClient');
+    const ctxCopyServer = $('#ctxCopyServer');
+    const ctxPasteServer = $('#ctxPasteServer');
     const ctxDeleteRecord = $('#ctxDeleteRecord');
 
     async function loadRecords(tabId) {
@@ -817,10 +822,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 const val = record.data[colKey] || '';
                 let inputHtml = '';
                 const isServerOnlyCol = SERVER_ONLY_COLS.has(colKey);
+                const CLIENT_DATE_COLS = new Set(['client_purchase', 'client_expire', 'client_remaining']);
 
                 // Client row: server columns show empty (inherited from parent, not editable)
                 if (isClient && isServerOnlyCol) {
                     tbodyHtml += `<td class="inherited-cell"></td>`;
+                    return;
+                }
+                // Server row in shared tab: client date columns sync from host, not editable
+                if (isServer && CLIENT_DATE_COLS.has(colKey)) {
+                    let syncVal = '';
+                    if (colKey === 'client_purchase') syncVal = getDisplayValue(record, { ...col, col_key: 'host_purchase' });
+                    else if (colKey === 'client_expire') syncVal = getDisplayValue(record, { ...col, col_key: 'host_expire' });
+                    else if (colKey === 'client_remaining') syncVal = getDisplayValue(record, { ...col, col_key: 'host_remaining' });
+                    tbodyHtml += `<td class="inherited-cell">${escapeHtml(String(syncVal))}</td>`;
                     return;
                 }
 
@@ -2613,16 +2628,25 @@ document.addEventListener('DOMContentLoaded', function() {
     let contextTargetId = null;
 
     document.addEventListener('contextmenu', function(e) {
-        if (!isSharedTab()) { contextMenu.style.display = 'none'; return; }
         const tr = e.target.closest('tr[data-id]');
         if (!tr) { contextMenu.style.display = 'none'; return; }
+        const tab = state.tabs.find(t => t.id === state.currentTabId);
+        const tabType = tab ? tab.tab_type : 'dedicated';
+        const isShared = tabType === 'shared';
+        const isDedicated = tabType === 'dedicated';
+        if (!isShared && !isDedicated) { contextMenu.style.display = 'none'; return; }
+
         e.preventDefault();
         contextTargetId = parseInt(tr.dataset.id);
-        const recordType = tr.dataset.type;
+        const recordType = tr.dataset.type || 'server';
 
-        ctxAddClient.style.display = recordType === 'server' ? 'block' : 'none';
-        ctxCopyClient.style.display = recordType === 'client' ? 'block' : 'none';
-        ctxPasteClient.style.display = (recordType === 'server' && state.copiedClientData) ? 'block' : 'none';
+        // 共享标签菜单项
+        ctxAddClient.style.display = (isShared && recordType === 'server') ? 'block' : 'none';
+        ctxCopyClient.style.display = (isShared && recordType === 'client') ? 'block' : 'none';
+        ctxPasteClient.style.display = (isShared && recordType === 'server' && state.copiedClientData) ? 'block' : 'none';
+        // 独享标签菜单项
+        ctxCopyServer.style.display = (isDedicated && !recordType) ? 'block' : 'none';
+        ctxPasteServer.style.display = (isDedicated && state.copiedServerData) ? 'block' : 'none';
         ctxDeleteRecord.style.display = 'block';
 
         contextMenu.style.display = 'block';
@@ -2643,16 +2667,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!contextTargetId) return;
         const record = state.records.find(r => r.id === contextTargetId);
         if (!record || record.record_type !== 'client') return;
-        // Copy client-related fields
-        state.copiedClientData = {
-            client_purchase: record.data.client_purchase || '',
-            client_expire: record.data.client_expire || '',
-            client_name: record.data.client_name || '',
-            unit_price: record.data.unit_price || '',
-            fee: record.data.fee || '',
-            remark: record.data.remark || ''
-        };
-        setStatus('客户信息已提取，可在其他服务器行右键粘贴');
+        // Copy client-related fields (for later paste)
+        state.copiedClientData = { ...record.data };
+        state.copiedClientRecordId = record.id;
+        setStatus('客户信息已剪切，可在其他服务器行右键粘贴（原记录将删除）');
     });
 
     ctxPasteClient.addEventListener('click', async () => {
@@ -2661,14 +2679,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const parentRecord = state.records.find(r => r.id === contextTargetId);
         if (!parentRecord || parentRecord.record_type !== 'server') return;
         try {
-            setStatus('粘贴中...');
+            setStatus('移动中...');
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
-            // Merge copied client data
-            Object.assign(data, state.copiedClientData);
-            // Inherit server dates
-            data.client_purchase = parentRecord.data.host_purchase || '';
-            data.client_expire = parentRecord.data.host_expire || '';
+            // Use all original client data (income records stay linked to original record id,
+            // but data fields are preserved)
+            Object.keys(state.copiedClientData).forEach(k => { data[k] = state.copiedClientData[k]; });
 
             const result = await API.post('/records', {
                 tab_id: state.currentTabId,
@@ -2676,10 +2692,64 @@ document.addEventListener('DOMContentLoaded', function() {
                 record_type: 'client',
                 parent_id: contextTargetId
             });
+            // Delete the original client record (cut = move)
+            const oldId = state.copiedClientRecordId;
+            if (oldId) {
+                await API.delete('/records/' + oldId);
+            }
+            state.copiedClientData = null;
+            state.copiedClientRecordId = null;
+
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            setStatus('客户信息已粘贴');
+            setStatus('客户已移动到新服务器');
+        } catch (err) { setStatus('移动失败: ' + err.message); }
+    });
+
+    // --- 独享标签：提取/粘贴服务器信息 ---
+    ctxCopyServer.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId) return;
+        const record = state.records.find(r => r.id === contextTargetId);
+        if (!record) return;
+        // Copy server-related fields
+        state.copiedServerData = { ...record.data };
+        state.copiedServerRecordId = record.id;
+        setStatus('服务器信息已提取，可在空白行右键粘贴（原行支出将清零）');
+    });
+
+    ctxPasteServer.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.copiedServerData || !state.currentTabId) return;
+        const targetRecord = state.records.find(r => r.id === contextTargetId);
+        if (!targetRecord) return;
+        try {
+            setStatus('粘贴中...');
+            // Write copied server info into target (empty) row
+            const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info'];
+            const updateData = { ...targetRecord.data };
+            SERVER_FIELDS.forEach(key => {
+                updateData[key] = state.copiedServerData[key] || '';
+            });
+
+            // Clear expense on source row
+            const sourceId = state.copiedServerRecordId;
+            if (sourceId) {
+                const sourceRecord = state.records.find(r => r.id === sourceId);
+                if (sourceRecord) {
+                    const sourceData = { ...sourceRecord.data, expense: '0' };
+                    await API.put('/records/' + sourceId, { data: sourceData });
+                }
+            }
+
+            await API.put('/records/' + contextTargetId, { data: updateData });
+            state.copiedServerData = null;
+            state.copiedServerRecordId = null;
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('服务器信息已粘贴，原行支出已清零');
         } catch (err) { setStatus('粘贴失败: ' + err.message); }
     });
 
@@ -2700,14 +2770,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!state.currentTabId) return;
         try {
             setStatus('添加中...');
-            const parentRecord = state.records.find(r => r.id === parentId);
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
-            // Client dates inherit from parent server's host dates
-            if (parentRecord) {
-                data.client_purchase = parentRecord.data.host_purchase || '';
-                data.client_expire = parentRecord.data.host_expire || '';
-            }
+            // New client defaults: today + 1 month
+            const now = new Date();
+            data.client_purchase = now.toISOString().split('T')[0];
+            const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+            data.client_expire = nextMonth.toISOString().split('T')[0];
             data.fee = '';
 
             const result = await API.post('/records', {
