@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 支出弹窗
         expenseRecordId: null,
         expenseRecords: [],
+        // 列定义缓存
+        columnsCache: {},
         // 行管理模式
         rowManageMode: false,
         // 待保存记录追踪
@@ -500,11 +502,17 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadDataForTab(tabId, force = false) {
         try {
             state.page = 1;
-            const columns = await API.get('/columns?tabId=' + tabId);
+            // 并行加载列定义和记录
+            const [columns] = await Promise.all([
+                force || !state.columnsCache[tabId]
+                    ? API.get('/columns?tabId=' + tabId)
+                    : Promise.resolve(state.columnsCache[tabId]),
+                loadRecords(tabId)
+            ]);
             state.columns = columns;
-            await loadRecords(tabId);
+            state.columnsCache[tabId] = columns;
             updateTabCache(tabId);
-            setStatus(`已加载 ${state.records.length} 条记录（共 ${state.total} 条）`);
+            setStatus('已加载 ' + state.records.length + ' 条记录（共 ' + state.total + ' 条）');
         }
         catch (err) { setStatus('加载失败: ' + err.message); }
     }
@@ -1470,7 +1478,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         // 收入交互（点击打开收入管理弹窗）
-        $$('.fee-summary-cell').forEach(cell => {
+        $$('.fee-summary-cell:not(.expense-summary-cell)').forEach(cell => {
             cell.addEventListener('click', function() {
                 const recordId = parseInt(this.dataset.id);
                 openIncomeModal(recordId);
@@ -2010,40 +2018,51 @@ document.addEventListener('DOMContentLoaded', function() {
     async function getAllTabRecordsForStats() {
         await flushPendingSaves();
         const all = [];
-        for (const tab of state.tabs) {
-            let records;
-            try {
-                const result = await API.get('/records?tabId=' + tab.id + '&pageSize=1000');
-                records = result.records || result || [];
-            } catch { records = []; }
-            records.forEach(record => all.push({ ...record, tabId: tab.id, tabName: tab.name }));
-        }
-        // Also load all income records per tab
-        for (const tab of state.tabs) {
-            try {
-                const incomes = await API.get('/income/by-tab/' + tab.id);
-                (incomes || []).forEach(inc => {
-                    const rec = all.find(r => r.id === inc.record_id);
-                    if (rec) {
-                        if (!rec._incomes) rec._incomes = [];
-                        rec._incomes.push(inc);
-                    }
-                });
-            } catch {}
-        }
-        // Also load all expense records per tab
-        for (const tab of state.tabs) {
-            try {
-                const expenses = await API.get('/expense/by-tab/' + tab.id);
-                (expenses || []).forEach(exp => {
-                    const rec = all.find(r => r.id === exp.record_id);
-                    if (rec) {
-                        if (!rec._expenses) rec._expenses = [];
-                        rec._expenses.push(exp);
-                    }
-                });
-            } catch {}
-        }
+        // 并行加载所有标签的记录
+        const recordPromises = state.tabs.map(tab =>
+            API.get('/records?tabId=' + tab.id + '&pageSize=1000')
+                .then(result => {
+                    const records = result.records || result || [];
+                    records.forEach(record => all.push({ ...record, tabId: tab.id, tabName: tab.name }));
+                })
+                .catch(() => {})
+        );
+        // 并行加载收入和支出
+        const incomePromises = state.tabs.map(tab =>
+            API.get('/income/by-tab/' + tab.id).catch(() => [])
+        );
+        const expensePromises = state.tabs.map(tab =>
+            API.get('/expense/by-tab/' + tab.id).catch(() => [])
+        );
+
+        const [_, incomeResults, expenseResults] = await Promise.all([
+            Promise.all(recordPromises),
+            Promise.all(incomePromises),
+            Promise.all(expensePromises)
+        ]);
+
+        // 匹配收入到记录
+        incomeResults.forEach((incomes, idx) => {
+            (incomes || []).forEach(inc => {
+                const rec = all.find(r => r.id === inc.record_id);
+                if (rec) {
+                    if (!rec._incomes) rec._incomes = [];
+                    rec._incomes.push(inc);
+                    rec._incomeTotal = (rec._incomeTotal || 0) + (inc.amount || 0);
+                }
+            });
+        });
+        // 匹配支出到记录
+        expenseResults.forEach((expenses, idx) => {
+            (expenses || []).forEach(exp => {
+                const rec = all.find(r => r.id === exp.record_id);
+                if (rec) {
+                    if (!rec._expenses) rec._expenses = [];
+                    rec._expenses.push(exp);
+                    rec._expenseTotal = (rec._expenseTotal || 0) + (exp.amount || 0);
+                }
+            });
+        });
         return all;
     }
 
@@ -2058,9 +2077,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const expense = (record._expenseTotal !== undefined)
             ? (record._expenseTotal || 0)
             : (computeExpenseValue(record.data.expense, months) || 0);
-        // Income from income_records
-        const incomes = record._incomes || [];
-        const income = incomes.reduce((s, r) => s + (r.amount || 0), 0);
+        // Income: prefer _incomeTotal (aggregated), fallback to sum of _incomes
+        let income = record._incomeTotal || 0;
+        if (!income) {
+            const incomes = record._incomes || [];
+            income = incomes.reduce((s, r) => s + (r.amount || 0), 0);
+        }
         return { income, expense, net: income - expense };
     }
 
