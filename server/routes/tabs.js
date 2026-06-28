@@ -40,7 +40,13 @@ router.post('/', requireAuth, async (req, res) => {
         const db = getDB();
         // Use the same createDefaultColumnsForTab logic inline (or just call the column creation based on type)
         let defaultColumns;
-        if (type === 'shared') {
+        if (type === 'simple') {
+            defaultColumns = [
+                { col_key: 'remark', col_name: '备注', col_type: 'text', col_order: 0 },
+                { col_key: 'expense', col_name: '支出', col_type: 'text', col_order: 1, is_income: 2 },
+                { col_key: 'fee', col_name: '收入', col_type: 'text', col_order: 2, is_income: 1 }
+            ];
+        } else if (type === 'shared') {
             defaultColumns = [
                 { col_key: 'provider', col_name: '服务商', col_type: 'text', col_order: 0 },
                 { col_key: 'months', col_name: '月数', col_type: 'number', col_order: 1 },
