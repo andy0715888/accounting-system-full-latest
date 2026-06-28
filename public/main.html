@@ -244,6 +244,11 @@
                             <span class="tab-type-label">共享记账</span>
                             <span class="tab-type-desc">一台服务器下多个客户</span>
                         </label>
+                        <label class="tab-type-option">
+                            <input type="radio" name="tabType" value="simple" />
+                            <span class="tab-type-label">普通记账</span>
+                            <span class="tab-type-desc">备注 + 支出 + 收入</span>
+                        </label>
                     </div>
                     <label for="newTabName" style="margin-top:12px;">标签名称</label>
                     <input type="text" id="newTabNameInput" placeholder="请输入标签名称" value="新标签" />
@@ -281,6 +286,22 @@
         <div class="context-menu-item" id="ctxDeleteRecord">🗑️ 删除此行</div>
     </div>
 
+    <div class="modal-overlay" id="confirmModal">
+        <div class="modal modal-xs">
+            <div class="modal-header">
+                <h2 id="confirmModalTitle">确认</h2>
+                <button class="modal-close" id="closeConfirmModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmModalMessage" style="font-size:14px;color:#333;padding:8px 0;"></p>
+                <div class="rename-tab-actions" style="margin-top:16px;">
+                    <button class="tool-btn primary" id="confirmModalYes">确定</button>
+                    <button class="tool-btn" id="confirmModalNo">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="incomeModal">
         <div class="modal modal-sm">
             <div class="modal-header">
@@ -300,6 +321,29 @@
                 </div>
                 <div class="income-list" id="incomeList"></div>
                 <span id="incomeStatus"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="expenseModal">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h2>支出管理</h2>
+                <button class="modal-close" id="closeExpenseModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="income-total-display" style="background: linear-gradient(135deg, #ffebee, #ffcdd2);">
+                    <span>总支出：</span>
+                    <strong id="expenseTotalDisplay" style="color: #c62828;">0</strong>
+                </div>
+                <div class="income-add-form">
+                    <input type="number" id="expenseAmountInput" placeholder="金额" step="0.01" />
+                    <input type="date" id="expenseDateInput" />
+                    <input type="text" id="expenseRemarkInput" placeholder="备注" />
+                    <button class="tool-btn primary" id="addExpenseBtn">添加支出</button>
+                </div>
+                <div class="income-list" id="expenseList"></div>
+                <span id="expenseStatus"></span>
             </div>
         </div>
     </div>
