@@ -2658,7 +2658,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
         ctxCopyServer.style.display = (isDedicated && recordType === 'server') ? 'block' : 'none';
         ctxPasteServer.style.display = (isDedicated && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
-        ctxDeleteRecord.style.display = isDedicated ? 'none' : 'block';
+        // 共享标签：服务器行不显示删除（有客户关联），客户行可以删除；独享标签不显示删除
+        const canDelete = isShared ? (recordType === 'client') : false;
+        ctxDeleteRecord.style.display = canDelete ? 'block' : 'none';
 
         contextMenu.style.display = 'block';
         contextMenu.style.left = e.clientX + 'px';
