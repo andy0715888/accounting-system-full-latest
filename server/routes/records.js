@@ -46,8 +46,20 @@ router.get('/', requireAuth, async (req, res) => {
             incomeRows.forEach(row => { incomeMap[row.record_id] = row.total; });
         }
 
+        // Also get expense totals for each record on this page
+        let expenseMap = {};
+        if (recordIds.length > 0) {
+            const placeholders = recordIds.map(() => '?').join(',');
+            const expenseRows = await query(
+                `SELECT record_id, SUM(amount) as total FROM expense_records WHERE record_id IN (${placeholders}) GROUP BY record_id`,
+                recordIds
+            );
+            expenseRows.forEach(row => { expenseMap[row.record_id] = row.total; });
+        }
+
         parsed.forEach(r => {
             r._incomeTotal = incomeMap[r.id] || 0;
+            r._expenseTotal = expenseMap[r.id] || 0;
         });
 
         res.json({ records: parsed, total, page, pageSize, totalPages });
