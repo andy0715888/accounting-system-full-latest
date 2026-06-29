@@ -584,6 +584,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.filters = {};
         renderTabs();
         await loadDataForTab(tabId, force);
+        // 确保服务商选项已加载（避免切换标签后选项为空）
+        if (!state.providerOptions.length) await loadProviderOptions();
         renderTable(false);
         const tab = state.tabs.find(t => t.id === tabId);
         if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
@@ -2437,8 +2439,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function collectProviderOptionsFromRecords() {
-        const values = state.records.map(r => r.data.provider).filter(Boolean);
-        state.providerOptions = normalizeProviderOptions([...state.providerOptions, ...values]);
+        // 不再从记录中自动收集服务商（避免删除后重新出现）
+        state.providerOptions = normalizeProviderOptions(state.providerOptions);
     }
 
     async function loadProviderOptions() {
