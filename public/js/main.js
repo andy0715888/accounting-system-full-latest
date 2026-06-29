@@ -129,6 +129,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const nextPageBtn = $('#nextPageBtn');
     const pageIndicator = $('#pageIndicator');
     const pageSizeSelect = $('#pageSizeSelect');
+    const pageJumpInput = $('#pageJumpInput');
+    const pageJumpBtn = $('#pageJumpBtn');
 
     const incomeModal = $('#incomeModal');
     const closeIncomeModal = $('#closeIncomeModal');
@@ -451,7 +453,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadRecords(tabId) {
         await flushPendingSaves();
-        const result = await API.get('/records?tabId=' + tabId + '&page=' + state.page + '&pageSize=' + state.pageSize);
+        // 有筛选条件时获取全部数据（不分页），让前端筛选
+        const hasFilters = Object.keys(state.filters).length > 0;
+        const effectivePageSize = hasFilters ? 999999 : state.pageSize;
+        const effectivePage = hasFilters ? 1 : state.page;
+        const result = await API.get('/records?tabId=' + tabId + '&page=' + effectivePage + '&pageSize=' + effectivePageSize);
         state.records = result.records || [];
         state.total = result.total || 0;
         state.totalPages = result.totalPages || 1;
@@ -485,6 +491,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pageIndicator) pageIndicator.textContent = `${state.page} / ${state.totalPages}`;
         if (prevPageBtn) prevPageBtn.disabled = state.page <= 1;
         if (nextPageBtn) nextPageBtn.disabled = state.page >= state.totalPages;
+        if (pageJumpInput) { pageJumpInput.max = state.totalPages; pageJumpInput.value = state.page; }
     }
 
     function updateAllFilterOptions() {
@@ -2657,6 +2664,22 @@ document.addEventListener('DOMContentLoaded', function() {
         await loadRecords(state.currentTabId);
         renderTable(false);
     });
+
+    if (pageJumpBtn) {
+        pageJumpBtn.addEventListener('click', async () => {
+            const target = parseInt(pageJumpInput.value);
+            if (target >= 1 && target <= state.totalPages && target !== state.page) {
+                state.page = target;
+                await loadRecords(state.currentTabId);
+                renderTable(false);
+            }
+        });
+    }
+    if (pageJumpInput) {
+        pageJumpInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && pageJumpBtn) pageJumpBtn.click();
+        });
+    }
 
     // --- 右键菜单（共享标签：添加客户/删除行） ---
     let contextTargetId = null;
