@@ -2106,8 +2106,13 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             expense = computeExpenseValue(record.data.expense, months) || 0;
         }
-        // Income: 后端已返回 _incomeTotal（来自 income_records 表汇总）
+        // Income: 优先用 _incomeTotal（income_records 表汇总）
+        // 独享/共享标签收入在 record.data.fee 中，_incomeTotal 为 0 时 fallback
         let income = record._incomeTotal || 0;
+        if (income <= 0) {
+            const fee = parseFloat(record.data.fee);
+            if (!isNaN(fee)) income = fee;
+        }
         return { income, expense, net: income - expense };
     }
 
@@ -2158,6 +2163,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
+
+        // 独享/共享标签：收入在 record.data.fee，没有 _incomes 明细时按 host_purchase 分配
+        if (incomes.length === 0) {
+            const fee = parseFloat(record.data.fee);
+            if (!isNaN(fee) && fee > 0 && startDate && !isNaN(startDate)) {
+                // 分配到 host_purchase 当月
+                const monthKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+                let bucket = results.find(r => r.month === monthKey);
+                if (!bucket) {
+                    bucket = { month: monthKey, income: 0, expense: 0 };
+                    results.push(bucket);
+                }
+                bucket.income += fee;
+            }
+        }
 
         // Add expense by date (for simple tabs)
         const expenses = record._expenses || [];
