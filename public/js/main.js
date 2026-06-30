@@ -880,7 +880,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     inputHtml = `
                         <div class="address-control">
                             <select class="cell-input address-select" data-col="${escapeAttr(colKey)}" data-id="${record.id}">${options}</select>
-                            <button class="open-link" data-address="${escapeAttr(addressValue)}">打开</button>
+                            <button class="open-link" data-address="${escapeAttr(addressValue)}" data-ip="${escapeAttr(record.data.ip_address || '')}" data-domain="${escapeAttr(record.data.domain || '')}">打开</button>
                         </div>
                     `;
                 } else if (col.col_type === 'number' && colKey === 'months') {
@@ -1141,39 +1141,52 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (e.target.classList.contains('filter-ok')) {
-                const colKey = e.target.dataset.col;
-                const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
-                if (!panel) return;
-                const searchInput = panel.querySelector('.filter-search');
-                const searchText = searchInput ? searchInput.value.trim() : '';
-                const allCbs = Array.from(panel.querySelectorAll('.filter-option:not(.filter-select-all-checkbox)'));
-                const allValues = allCbs.map(cb => cb.value);
+                (async () => {
+                    const colKey = e.target.dataset.col;
+                    const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
+                    if (!panel) return;
+                    const searchInput = panel.querySelector('.filter-search');
+                    const searchText = searchInput ? searchInput.value.trim() : '';
+                    const allCbs = Array.from(panel.querySelectorAll('.filter-option:not(.filter-select-all-checkbox)'));
+                    const allValues = allCbs.map(cb => cb.value);
 
-                let checkedValues;
-                if (searchText === '') {
-                    // 无搜索：直接读全部勾选状态
-                    checkedValues = allCbs.filter(cb => cb.checked).map(cb => cb.value);
-                } else {
-                    // 有搜索关键字时：只把【当前可见且勾选】的值作为筛选结果
-                    // 不合并隐藏项，用户搜索后勾选什么就只显示什么
-                    const visibleCbs = allCbs.filter(cb => {
-                        const label = cb.closest('.filter-option-label');
-                        return label && label.style.display !== 'none';
-                    });
-                    checkedValues = visibleCbs.filter(cb => cb.checked).map(cb => cb.value);
-                }
+                    let checkedValues;
+                    if (searchText === '') {
+                        checkedValues = allCbs.filter(cb => cb.checked).map(cb => cb.value);
+                    } else {
+                        const visibleCbs = allCbs.filter(cb => {
+                            const label = cb.closest('.filter-option-label');
+                            return label && label.style.display !== 'none';
+                        });
+                        checkedValues = visibleCbs.filter(cb => cb.checked).map(cb => cb.value);
+                    }
 
-                if (checkedValues.length === 0) {
-                    delete state.filters[colKey];
-                } else if (checkedValues.length === allValues.length) {
-                    delete state.filters[colKey];
-                } else {
-                    state.filters[colKey] = checkedValues;
-                }
-                // 无筛选条件时清除全量缓存，恢复正常分页
-                if (Object.keys(state.filters).length === 0) state._allRecordsCache = null;
-                panel.classList.remove('show');
-                renderTable(false);
+                    if (checkedValues.length === 0) {
+                        delete state.filters[colKey];
+                    } else if (checkedValues.length === allValues.length) {
+                        delete state.filters[colKey];
+                    } else {
+                        state.filters[colKey] = checkedValues;
+                    }
+                    if (Object.keys(state.filters).length === 0) {
+                        state._allRecordsCache = null;
+                        panel.classList.remove('show');
+                        renderTable(false);
+                        return;
+                    }
+                    // 有筛选条件时，确保全量数据已加载
+                    if (!state._allRecordsCache && state.total > state.records.length) {
+                        setStatus('加载全量数据中...');
+                        try {
+                            const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0');
+                            state._allRecordsCache = result.records || [];
+                        } catch (e) {
+                            setStatus('加载失败，筛选可能不完整');
+                        }
+                    }
+                    panel.classList.remove('show');
+                    renderTable(false);
+                })();
                 return;
             }
 
@@ -1440,12 +1453,8 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.onclick = function() {
                 const address = this.dataset.address;
                 if (!address) { setStatus('⚠️ 请先选择地址类型'); return; }
-                const tr = this.closest('tr');
-                const rowId = parseInt(tr.dataset.id);
-                const record = state.records.find(r => r.id === rowId);
-                if (!record) return;
-                const ip = record.data.ip_address || '';
-                const domain = record.data.domain || '';
+                const ip = this.dataset.ip || '';
+                const domain = this.dataset.domain || '';
                 let base = '';
                 let suffix = '';
                 if (address === 'IP地址' || address === 'IP') {
