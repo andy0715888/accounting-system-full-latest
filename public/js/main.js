@@ -455,7 +455,7 @@ document.addEventListener('DOMContentLoaded', function() {
         await flushPendingSaves();
         // 有筛选条件时获取全部数据（不分页），让前端筛选
         const hasFilters = Object.keys(state.filters).length > 0;
-        const effectivePageSize = hasFilters ? 999999 : state.pageSize;
+        const effectivePageSize = hasFilters ? 0 : state.pageSize;
         const effectivePage = hasFilters ? 1 : state.page;
         const result = await API.get('/records?tabId=' + tabId + '&page=' + effectivePage + '&pageSize=' + effectivePageSize);
         state.records = result.records || [];
@@ -1026,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 如果当前页数据不完整，先加载全量数据用于筛选选项
         if (state.total > state.records.length && !state._allRecordsCache) {
             try {
-                const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=999999');
+                const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0');
                 state._allRecordsCache = result.records || [];
                 updateAllFilterOptions(state._allRecordsCache);
             } catch (e) {
@@ -1576,12 +1576,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const purchase = record.data.host_purchase;
             if (purchase) record.data.host_expire = calcHostExpire(purchase, val);
             else record.data.host_expire = '';
-            renderTable(false);
         }
         if (colKey === 'ip_address') record.data.ip_info = val;
 
         saveRecord(record);
-        renderTable(false);
+        // 只有联动更新其他字段时才重新渲染，普通文本修改不渲染（避免输入框丢失焦点）
+        if (colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address') {
+            renderTable(false);
+        }
     }
 
     async function saveRecord(record) {
