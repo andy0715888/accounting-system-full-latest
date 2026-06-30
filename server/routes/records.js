@@ -8,6 +8,78 @@ function requireAuth(req, res, next) {
     next();
 }
 
+/**
+ * 构建筛选 SQL WHERE 条件
+ * filters 格式: { "colKey": ["value1", "value2"], ... }
+ * 特殊列:
+ *   - is_expired: 需要根据 host_expire / client_expire 计算
+ *   - days_remaining: 需要计算
+ *   - 其他列: 直接 json_extract(data, '$.colKey')
+ */
+function buildFilterConditions(filters, params) {
+    if (!filters || typeof filters !== 'object') return { where: '', params: [] };
+    const conditions = [];
+    const allParams = [];
+
+    for (const [colKey, values] of Object.entries(filters)) {
+        if (!Array.isArray(values) || values.length === 0) continue;
+
+        if (colKey === 'is_expired') {
+            // is_expired 判断逻辑（和前端 getDisplayValue 一致）：
+            // server 行: host_expire 有值且 date(host_expire) >= date('now') => 有效, 否则 过期
+            // host_expire 为空 => 未知
+            // client 行: client_expire 有值且 date(client_expire) >= date('now') => 有效, 否则 过期
+            // 筛选时，需要区分 server/client
+            const expiredClauses = [];
+            if (values.includes('有效')) {
+                // server: host_expire 有效或为空
+                // client: client_expire 有效
+                expiredClauses.push(`(
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') = '') OR
+                    (record_type = 'server' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
+                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
+                )`);
+            }
+            if (values.includes('过期')) {
+                expiredClauses.push(`(
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
+                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
+                )`);
+            }
+            if (values.includes('未知')) {
+                expiredClauses.push(`(
+                    record_type = 'server' AND json_extract(data, '$.host_expire') = ''
+                )`);
+            }
+            if (expiredClauses.length > 0) {
+                conditions.push(`(${expiredClauses.join(' OR ')})`);
+            }
+        } else if (colKey === 'host_remaining' || colKey === 'client_remaining') {
+            // days_remaining 类型：基于日期差计算，前端展示，后端不好直接筛选，跳过
+            continue;
+        } else if (colKey === 'ip_info') {
+            // ip_info 等于 ip_address
+            const placeholders = values.map(() => '?').join(',');
+            allParams.push(...values);
+            conditions.push(`json_extract(data, '$.ip_address') IN (${placeholders})`);
+        } else if (colKey === 'fee') {
+            // fee 可能有计算表达式，不好后端筛选，跳过
+            continue;
+        } else if (colKey === 'expense') {
+            // expense 可能有月数计算，不好后端筛选，跳过
+            continue;
+        } else {
+            // 通用列: json_extract
+            const placeholders = values.map(() => '?').join(',');
+            allParams.push(...values);
+            conditions.push(`json_extract(data, '$.${colKey}') IN (${placeholders})`);
+        }
+    }
+
+    const where = conditions.length > 0 ? ' AND (' + conditions.join(' AND ') + ')' : '';
+    return { where, params: allParams };
+}
+
 router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
@@ -18,9 +90,22 @@ router.get('/', requireAuth, async (req, res) => {
         const rawPageSize = parseInt(req.query.pageSize) || 50;
         const allMode = rawPageSize === 0;
 
+        // 解析筛选条件
+        let filters = {};
+        try {
+            filters = req.query.filters ? JSON.parse(req.query.filters) : {};
+        } catch (e) {
+            filters = {};
+        }
+
+        const filterResult = buildFilterConditions(filters, []);
+        const filterWhere = filterResult.where;
+        const filterParams = filterResult.params;
+
+        // COUNT 查询（带筛选）
         const countResult = await queryOne(
-            'SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?',
-            [userId, tabId]
+            `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere}`,
+            [userId, tabId, ...filterParams]
         );
         const total = countResult ? countResult.cnt : 0;
         const pageSize = allMode ? total : Math.min(999999, Math.max(1, rawPageSize));
@@ -29,17 +114,18 @@ router.get('/', requireAuth, async (req, res) => {
         const limit = allMode ? total : pageSize;
 
         const records = await query(
-            'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY COALESCE(parent_id, id), CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, sort_order, created_at LIMIT ? OFFSET ?',
-            [userId, tabId, limit, offset]
+            `SELECT * FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} ORDER BY COALESCE(parent_id, id), CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, sort_order, created_at LIMIT ? OFFSET ?`,
+            [userId, tabId, ...filterParams, limit, offset]
         );
         const parsed = records.map(r => {
             try { return { ...r, data: JSON.parse(r.data || '{}') }; }
             catch { return { ...r, data: {} }; }
         });
 
-        // Also get income totals for each record on this page
+        // income/expense totals
         const recordIds = parsed.map(r => r.id);
         let incomeMap = {};
+        let expenseMap = {};
         if (recordIds.length > 0) {
             const placeholders = recordIds.map(() => '?').join(',');
             const incomeRows = await query(
@@ -47,12 +133,7 @@ router.get('/', requireAuth, async (req, res) => {
                 recordIds
             );
             incomeRows.forEach(row => { incomeMap[row.record_id] = row.total; });
-        }
 
-        // Also get expense totals for each record on this page
-        let expenseMap = {};
-        if (recordIds.length > 0) {
-            const placeholders = recordIds.map(() => '?').join(',');
             const expenseRows = await query(
                 `SELECT record_id, SUM(amount) as total FROM expense_records WHERE record_id IN (${placeholders}) GROUP BY record_id`,
                 recordIds
@@ -72,6 +153,75 @@ router.get('/', requireAuth, async (req, res) => {
     }
 });
 
+/**
+ * 获取某列的去重值和计数（用于筛选面板）
+ * GET /records/filter-options?tabId=X&colKey=Y&search=keyword
+ */
+router.get('/filter-options', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { tabId, colKey, search } = req.query;
+        if (!tabId || !colKey) return res.status(400).json({ error: '缺少参数' });
+
+        let options = [];
+
+        if (colKey === 'is_expired') {
+            // 特殊处理：计算有效/过期/未知的数量
+            const baseWhere = 'user_id = ? AND tab_id = ?';
+            const baseParams = [userId, tabId];
+
+            // 有效数
+            const validCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE ${baseWhere} AND (
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') = '') OR
+                    (record_type = 'server' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
+                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
+                )`, baseParams
+            );
+            // 过期数
+            const expiredCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE ${baseWhere} AND (
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
+                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
+                )`, baseParams
+            );
+            // 未知数
+            const unknownCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE ${baseWhere} AND record_type = 'server' AND json_extract(data, '$.host_expire') = ''`, baseParams
+            );
+
+            options = [
+                { value: '有效', count: validCount?.cnt || 0 },
+                { value: '过期', count: expiredCount?.cnt || 0 },
+            ];
+            // 只在有过期数据时显示未知（避免和有效重复）
+            if ((unknownCount?.cnt || 0) > 0 && (unknownCount?.cnt || 0) !== (validCount?.cnt || 0)) {
+                options.push({ value: '未知', count: unknownCount?.cnt || 0 });
+            }
+        } else if (colKey === 'ip_info') {
+            const searchLike = search ? `%${search}%` : '%';
+            const rows = await query(
+                `SELECT json_extract(data, '$.ip_address') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.ip_address') != '' AND json_extract(data, '$.ip_address') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
+                [userId, tabId, searchLike]
+            );
+            options = rows.filter(r => r.val).map(r => ({ value: r.val, count: r.cnt }));
+        } else {
+            const searchLike = search ? `%${search}%` : '%';
+            const rows = await query(
+                `SELECT json_extract(data, '$.${colKey}') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.${colKey}') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
+                [userId, tabId, searchLike]
+            );
+            options = rows.filter(r => r.val !== null && r.val !== undefined && String(r.val).trim() !== '')
+                .map(r => ({ value: String(r.val).trim(), count: r.cnt }));
+        }
+
+        res.json(options);
+    } catch (err) {
+        console.error('获取筛选选项错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 router.post('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
@@ -82,7 +232,6 @@ router.post('/', requireAuth, async (req, res) => {
         const rType = record_type || 'server';
         const pParent = parent_id || null;
 
-        // For client records, get next sort_order
         let sortOrder = 0;
         if (pParent) {
             const maxSort = await queryOne(
@@ -115,7 +264,6 @@ router.get('/children/:parentId', requireAuth, async (req, res) => {
             try { return { ...r, data: JSON.parse(r.data || '{}') }; }
             catch { return { ...r, data: {} }; }
         });
-        // income totals
         const recordIds = parsed.map(r => r.id);
         let incomeMap = {};
         if (recordIds.length > 0) {
@@ -203,7 +351,7 @@ router.post('/import', requireAuth, async (req, res) => {
         const stmt = db.prepare('INSERT INTO records (user_id, tab_id, data) VALUES (?, ?, ?)');
         let count = 0;
         for (const record of records) {
-            stmt.run([userId, tab_id, JSON.stringify(record)]);
+            stmt.run([userId, tabId, JSON.stringify(record)]);
             count++;
         }
         stmt.finalize();
