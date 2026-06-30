@@ -1024,15 +1024,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function refreshFilterPanelContent(panel, colKey) {
-        // 如果当前页数据不完整，先加载全量数据用于筛选选项
-        if (state.total > state.records.length && !state._allRecordsCache) {
+        // 加载全量数据用于筛选选项（如果尚未加载或数据已过期）
+        const cacheStale = state._allRecordsCache && state._allRecordsCache.length !== state.total;
+        if ((state.total > state.records.length && !state._allRecordsCache) || cacheStale) {
             try {
                 const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0');
                 state._allRecordsCache = result.records || [];
-                updateAllFilterOptions(state._allRecordsCache);
             } catch (e) {
-                // fallback: 用当前页数据
+                setStatus('加载全量筛选数据失败');
             }
+        }
+        if (state._allRecordsCache) {
+            updateAllFilterOptions(state._allRecordsCache);
         }
         const options = state.filterOptions[colKey] || [];
         const optionsHtml = options.map(opt => `
@@ -1218,21 +1221,55 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // 搜索过滤
+        // 搜索过滤：从全量数据中实时搜索并重新生成选项
         document.body.addEventListener('input', function(e) {
             if (e.target.classList.contains('filter-search')) {
                 const panel = e.target.closest('.col-dropdown-panel');
                 if (!panel) return;
+                const colKey = panel.dataset.col;
                 const searchText = e.target.value.trim().toLowerCase();
-                const labels = panel.querySelectorAll('.filter-option-label:not(.filter-select-all)');
-                labels.forEach(label => {
-                    const text = (label.dataset.filterLabel || '').toLowerCase();
-                    if (searchText === '' || text.includes(searchText)) {
-                        label.style.display = 'flex';
-                    } else {
-                        label.style.display = 'none';
-                    }
+                const col = state.columns.find(c => c.col_key === colKey);
+                const data = state._allRecordsCache || state.records;
+
+                // 保存当前勾选状态
+                const checkedValues = new Set();
+                panel.querySelectorAll('.filter-option:not(.filter-select-all-checkbox)').forEach(cb => {
+                    if (cb.checked) checkedValues.add(cb.value);
                 });
+
+                let options = [];
+                if (searchText === '' || !col) {
+                    // 无搜索或异常：显示全部选项
+                    options = state.filterOptions[colKey] || [];
+                } else if (data && data.length > 0) {
+                    // 从全量数据中搜索匹配的值
+                    const matchedMap = new Map();
+                    data.forEach(r => {
+                        const val = normalizeFilterValue(getDisplayValue(r, col));
+                        if (String(val).toLowerCase().includes(searchText)) {
+                            matchedMap.set(val, (matchedMap.get(val) || 0) + 1);
+                        }
+                    });
+                    options = Array.from(matchedMap.entries())
+                        .map(([val, cnt]) => ({ value: val, count: cnt }))
+                        .sort((a, b) => String(a.value).localeCompare(String(b.value)));
+                }
+
+                const optionsHtml = options.map(opt => `
+                    <label class="filter-option-label" data-filter-label="${escapeHtml(String(opt.value).toLowerCase())}">
+                        <input type="checkbox" class="filter-option" data-col="${escapeAttr(colKey)}" value="${escapeAttr(opt.value)}" />
+                        <span class="filter-option-text">${escapeHtml(opt.value)}</span>
+                        <span class="filter-count">(${opt.count})</span>
+                    </label>
+                `).join('');
+
+                panel.querySelector('.filter-options').innerHTML = optionsHtml;
+
+                // 恢复勾选状态
+                panel.querySelectorAll('.filter-option').forEach(cb => {
+                    cb.checked = checkedValues.has(cb.value);
+                });
+
                 const selectAllLabel = panel.querySelector('.filter-select-all');
                 if (selectAllLabel) {
                     selectAllLabel.style.display = searchText === '' ? 'flex' : 'none';
@@ -1591,7 +1628,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         saveRecord(record);
         // 只有联动更新其他字段时才重新渲染，普通文本修改不渲染（避免输入框丢失焦点）
-        if (colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address') {
+        // ip_address / domain 修改后需要更新 open-link 按钮的 data 属性
+        if (colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address' || colKey === 'ip_address' || colKey === 'domain') {
             renderTable(false);
         }
     }
