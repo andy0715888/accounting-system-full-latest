@@ -153,75 +153,6 @@ router.get('/', requireAuth, async (req, res) => {
     }
 });
 
-/**
- * 获取某列的去重值和计数（用于筛选面板）
- * GET /records/filter-options?tabId=X&colKey=Y&search=keyword
- */
-router.get('/filter-options', requireAuth, async (req, res) => {
-    try {
-        const userId = req.session.userId;
-        const { tabId, colKey, search } = req.query;
-        if (!tabId || !colKey) return res.status(400).json({ error: '缺少参数' });
-
-        let options = [];
-
-        if (colKey === 'is_expired') {
-            // 特殊处理：计算有效/过期/未知的数量
-            const baseWhere = 'user_id = ? AND tab_id = ?';
-            const baseParams = [userId, tabId];
-
-            // 有效数
-            const validCount = await queryOne(
-                `SELECT COUNT(*) as cnt FROM records WHERE ${baseWhere} AND (
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') = '') OR
-                    (record_type = 'server' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
-                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
-                )`, baseParams
-            );
-            // 过期数
-            const expiredCount = await queryOne(
-                `SELECT COUNT(*) as cnt FROM records WHERE ${baseWhere} AND (
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
-                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
-                )`, baseParams
-            );
-            // 未知数
-            const unknownCount = await queryOne(
-                `SELECT COUNT(*) as cnt FROM records WHERE ${baseWhere} AND record_type = 'server' AND json_extract(data, '$.host_expire') = ''`, baseParams
-            );
-
-            options = [
-                { value: '有效', count: validCount?.cnt || 0 },
-                { value: '过期', count: expiredCount?.cnt || 0 },
-            ];
-            // 只在有过期数据时显示未知（避免和有效重复）
-            if ((unknownCount?.cnt || 0) > 0 && (unknownCount?.cnt || 0) !== (validCount?.cnt || 0)) {
-                options.push({ value: '未知', count: unknownCount?.cnt || 0 });
-            }
-        } else if (colKey === 'ip_info') {
-            const searchLike = search ? `%${search}%` : '%';
-            const rows = await query(
-                `SELECT json_extract(data, '$.ip_address') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.ip_address') != '' AND json_extract(data, '$.ip_address') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
-                [userId, tabId, searchLike]
-            );
-            options = rows.filter(r => r.val).map(r => ({ value: r.val, count: r.cnt }));
-        } else {
-            const searchLike = search ? `%${search}%` : '%';
-            const rows = await query(
-                `SELECT json_extract(data, '$.${colKey}') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.${colKey}') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
-                [userId, tabId, searchLike]
-            );
-            options = rows.filter(r => r.val !== null && r.val !== undefined && String(r.val).trim() !== '')
-                .map(r => ({ value: String(r.val).trim(), count: r.cnt }));
-        }
-
-        res.json(options);
-    } catch (err) {
-        console.error('获取筛选选项错误:', err);
-        res.status(500).json({ error: '服务器错误' });
-    }
-});
-
 router.post('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
@@ -278,6 +209,68 @@ router.get('/children/:parentId', requireAuth, async (req, res) => {
         res.json(parsed);
     } catch (err) {
         console.error('获取子记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+/**
+ * 获取某列的去重值和计数（用于筛选面板）
+ * GET /records/filter-options?tabId=X&colKey=Y&search=keyword
+ * 注意：必须在 /:id 路由之前注册，否则 "filter-options" 会被当作 id
+ */
+router.get('/filter-options', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { tabId, colKey, search } = req.query;
+        if (!tabId || !colKey) return res.status(400).json({ error: '缺少参数' });
+
+        let options = [];
+
+        if (colKey === 'is_expired') {
+            const baseParams = [userId, tabId];
+            const validCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND (
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') = '') OR
+                    (record_type = 'server' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
+                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
+                )`, baseParams
+            );
+            const expiredCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND (
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
+                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
+                )`, baseParams
+            );
+            const unknownCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND record_type = 'server' AND json_extract(data, '$.host_expire') = ''`, baseParams
+            );
+            options = [
+                { value: '有效', count: validCount?.cnt || 0 },
+                { value: '过期', count: expiredCount?.cnt || 0 },
+            ];
+            if ((unknownCount?.cnt || 0) > 0 && (unknownCount?.cnt || 0) !== (validCount?.cnt || 0)) {
+                options.push({ value: '未知', count: unknownCount?.cnt || 0 });
+            }
+        } else if (colKey === 'ip_info') {
+            const searchLike = search ? `%${search}%` : '%';
+            const rows = await query(
+                `SELECT json_extract(data, '$.ip_address') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.ip_address') != '' AND json_extract(data, '$.ip_address') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
+                [userId, tabId, searchLike]
+            );
+            options = rows.filter(r => r.val).map(r => ({ value: r.val, count: r.cnt }));
+        } else {
+            const searchLike = search ? `%${search}%` : '%';
+            const rows = await query(
+                `SELECT json_extract(data, '$.${colKey}') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.${colKey}') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
+                [userId, tabId, searchLike]
+            );
+            options = rows.filter(r => r.val !== null && r.val !== undefined && String(r.val).trim() !== '')
+                .map(r => ({ value: String(r.val).trim(), count: r.cnt }));
+        }
+
+        res.json(options);
+    } catch (err) {
+        console.error('获取筛选选项错误:', err);
         res.status(500).json({ error: '服务器错误' });
     }
 });
