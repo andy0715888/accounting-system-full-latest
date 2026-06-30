@@ -453,16 +453,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadRecords(tabId) {
         await flushPendingSaves();
-        // 有筛选条件时获取全部数据（不分页），让前端筛选
-        const hasFilters = Object.keys(state.filters).length > 0;
-        const effectivePageSize = hasFilters ? 0 : state.pageSize;
-        const effectivePage = hasFilters ? 1 : state.page;
-        const result = await API.get('/records?tabId=' + tabId + '&page=' + effectivePage + '&pageSize=' + effectivePageSize);
+        // 构建 URL：把 filters 作为 JSON 传给后端
+        const filtersParam = Object.keys(state.filters).length > 0
+            ? '&filters=' + encodeURIComponent(JSON.stringify(state.filters)) : '';
+        const result = await API.get('/records?tabId=' + tabId + '&page=' + state.page + '&pageSize=' + state.pageSize + filtersParam);
         state.records = result.records || [];
         state.total = result.total || 0;
         state.totalPages = result.totalPages || 1;
-        state._allRecordsCache = null; // 数据已重新加载，清除旧缓存
-        updateAllFilterOptions();
         updatePaginationUI();
         return state.records;
     }
@@ -591,8 +588,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (tabId === state.currentTabId && !force) return;
         state.currentTabId = tabId;
         state.selectedRows.clear();
-        state.filters = {};
-        state._allRecordsCache = null; // 切换标签时清除全量缓存
+        state.page = 1;
+        // 独享/共享标签：默认只显示"有效"记录
+        const tab = state.tabs.find(t => t.id === tabId);
+        if (tab && (tab.tab_type === 'dedicated' || tab.tab_type === 'shared')) {
+            state.filters = { is_expired: ['有效'] };
+        } else {
+            state.filters = {};
+        }
         renderTabs();
         await loadDataForTab(tabId, force);
         // 确保服务商选项已加载（避免切换标签后选项为空）
@@ -781,15 +784,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return selectedValues.includes(normalizeFilterValue(getDisplayValue(record, col)));
     }
     function getFilteredRecords() {
-        // 有筛选条件时，用全量缓存数据做过滤（确保不遗漏其他页的记录）
-        const allRecords = (Object.keys(state.filters).length > 0 && state._allRecordsCache)
-            ? state._allRecordsCache : state.records;
-        return allRecords.filter(record => {
-            for (const [colKey, selectedValues] of Object.entries(state.filters)) {
-                if (!recordMatchesFilter(record, colKey, selectedValues)) return false;
-            }
-            return true;
-        });
+        // 后端已根据 filters 做了过滤，前端直接返回当前页数据
+        return state.records;
     }
 
     // 渲染表格（刷新时不自动适配列宽）
@@ -1024,20 +1020,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function refreshFilterPanelContent(panel, colKey) {
-        // 加载全量数据用于筛选选项（如果尚未加载或数据已过期）
-        const cacheStale = state._allRecordsCache && state._allRecordsCache.length !== state.total;
-        if ((state.total > state.records.length && !state._allRecordsCache) || cacheStale) {
-            try {
-                const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0');
-                state._allRecordsCache = result.records || [];
-            } catch (e) {
-                setStatus('加载全量筛选数据失败');
-            }
+        // 从后端获取该列的全部去重值和计数
+        let options = [];
+        try {
+            options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey));
+        } catch (e) {
+            setStatus('加载筛选选项失败');
+            return;
         }
-        if (state._allRecordsCache) {
-            updateAllFilterOptions(state._allRecordsCache);
-        }
-        const options = state.filterOptions[colKey] || [];
         const optionsHtml = options.map(opt => `
             <label class="filter-option-label" data-filter-label="${escapeHtml(String(opt.value).toLowerCase())}">
                 <input type="checkbox" class="filter-option" data-col="${escapeAttr(colKey)}" value="${escapeAttr(opt.value)}" />
@@ -1144,52 +1134,36 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (e.target.classList.contains('filter-ok')) {
-                (async () => {
-                    const colKey = e.target.dataset.col;
-                    const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
-                    if (!panel) return;
-                    const searchInput = panel.querySelector('.filter-search');
-                    const searchText = searchInput ? searchInput.value.trim() : '';
-                    const allCbs = Array.from(panel.querySelectorAll('.filter-option:not(.filter-select-all-checkbox)'));
-                    const allValues = allCbs.map(cb => cb.value);
+                const colKey = e.target.dataset.col;
+                const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
+                if (!panel) return;
+                const searchInput = panel.querySelector('.filter-search');
+                const searchText = searchInput ? searchInput.value.trim() : '';
+                const allCbs = Array.from(panel.querySelectorAll('.filter-option:not(.filter-select-all-checkbox)'));
+                const allValues = allCbs.map(cb => cb.value);
 
-                    let checkedValues;
-                    if (searchText === '') {
-                        checkedValues = allCbs.filter(cb => cb.checked).map(cb => cb.value);
-                    } else {
-                        const visibleCbs = allCbs.filter(cb => {
-                            const label = cb.closest('.filter-option-label');
-                            return label && label.style.display !== 'none';
-                        });
-                        checkedValues = visibleCbs.filter(cb => cb.checked).map(cb => cb.value);
-                    }
+                let checkedValues;
+                if (searchText === '') {
+                    checkedValues = allCbs.filter(cb => cb.checked).map(cb => cb.value);
+                } else {
+                    const visibleCbs = allCbs.filter(cb => {
+                        const label = cb.closest('.filter-option-label');
+                        return label && label.style.display !== 'none';
+                    });
+                    checkedValues = visibleCbs.filter(cb => cb.checked).map(cb => cb.value);
+                }
 
-                    if (checkedValues.length === 0) {
-                        delete state.filters[colKey];
-                    } else if (checkedValues.length === allValues.length) {
-                        delete state.filters[colKey];
-                    } else {
-                        state.filters[colKey] = checkedValues;
-                    }
-                    if (Object.keys(state.filters).length === 0) {
-                        state._allRecordsCache = null;
-                        panel.classList.remove('show');
-                        renderTable(false);
-                        return;
-                    }
-                    // 有筛选条件时，确保全量数据已加载
-                    if (!state._allRecordsCache && state.total > state.records.length) {
-                        setStatus('加载全量数据中...');
-                        try {
-                            const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0');
-                            state._allRecordsCache = result.records || [];
-                        } catch (e) {
-                            setStatus('加载失败，筛选可能不完整');
-                        }
-                    }
-                    panel.classList.remove('show');
-                    renderTable(false);
-                })();
+                if (checkedValues.length === 0) {
+                    delete state.filters[colKey];
+                } else if (checkedValues.length === allValues.length) {
+                    delete state.filters[colKey];
+                } else {
+                    state.filters[colKey] = checkedValues;
+                }
+                panel.classList.remove('show');
+                // 筛选条件变更，重新从后端加载
+                state.page = 1;
+                loadRecords(state.currentTabId).then(() => renderTable(false));
                 return;
             }
 
@@ -1202,10 +1176,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (e.target.classList.contains('filter-clear')) {
                 const colKey = e.target.dataset.col;
                 delete state.filters[colKey];
-                if (Object.keys(state.filters).length === 0) state._allRecordsCache = null;
                 const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
                 if (panel) panel.classList.remove('show');
-                renderTable(false);
+                state.page = 1;
+                loadRecords(state.currentTabId).then(() => renderTable(false));
                 return;
             }
         });
@@ -1221,15 +1195,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // 搜索过滤：从全量数据中实时搜索并重新生成选项
+        // 搜索过滤：从后端搜索该列全部数据
+        let searchTimer = null;
         document.body.addEventListener('input', function(e) {
             if (e.target.classList.contains('filter-search')) {
                 const panel = e.target.closest('.col-dropdown-panel');
                 if (!panel) return;
                 const colKey = panel.dataset.col;
-                const searchText = e.target.value.trim().toLowerCase();
-                const col = state.columns.find(c => c.col_key === colKey);
-                const data = state._allRecordsCache || state.records;
+                const searchText = e.target.value.trim();
 
                 // 保存当前勾选状态
                 const checkedValues = new Set();
@@ -1237,44 +1210,36 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (cb.checked) checkedValues.add(cb.value);
                 });
 
-                let options = [];
-                if (searchText === '' || !col) {
-                    // 无搜索或异常：显示全部选项
-                    options = state.filterOptions[colKey] || [];
-                } else if (data && data.length > 0) {
-                    // 从全量数据中搜索匹配的值
-                    const matchedMap = new Map();
-                    data.forEach(r => {
-                        const val = normalizeFilterValue(getDisplayValue(r, col));
-                        if (String(val).toLowerCase().includes(searchText)) {
-                            matchedMap.set(val, (matchedMap.get(val) || 0) + 1);
-                        }
+                // 防抖：300ms 后请求后端
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(async () => {
+                    let options = [];
+                    try {
+                        const searchParam = searchText ? '&search=' + encodeURIComponent(searchText) : '';
+                        options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey) + searchParam);
+                    } catch (e) { /* ignore */ }
+
+                    const optionsHtml = options.map(opt => `
+                        <label class="filter-option-label" data-filter-label="${escapeHtml(String(opt.value).toLowerCase())}">
+                            <input type="checkbox" class="filter-option" data-col="${escapeAttr(colKey)}" value="${escapeAttr(opt.value)}" />
+                            <span class="filter-option-text">${escapeHtml(opt.value)}</span>
+                            <span class="filter-count">(${opt.count})</span>
+                        </label>
+                    `).join('');
+
+                    panel.querySelector('.filter-options').innerHTML = optionsHtml;
+
+                    // 恢复勾选状态
+                    panel.querySelectorAll('.filter-option').forEach(cb => {
+                        cb.checked = checkedValues.has(cb.value);
                     });
-                    options = Array.from(matchedMap.entries())
-                        .map(([val, cnt]) => ({ value: val, count: cnt }))
-                        .sort((a, b) => String(a.value).localeCompare(String(b.value)));
-                }
 
-                const optionsHtml = options.map(opt => `
-                    <label class="filter-option-label" data-filter-label="${escapeHtml(String(opt.value).toLowerCase())}">
-                        <input type="checkbox" class="filter-option" data-col="${escapeAttr(colKey)}" value="${escapeAttr(opt.value)}" />
-                        <span class="filter-option-text">${escapeHtml(opt.value)}</span>
-                        <span class="filter-count">(${opt.count})</span>
-                    </label>
-                `).join('');
-
-                panel.querySelector('.filter-options').innerHTML = optionsHtml;
-
-                // 恢复勾选状态
-                panel.querySelectorAll('.filter-option').forEach(cb => {
-                    cb.checked = checkedValues.has(cb.value);
-                });
-
-                const selectAllLabel = panel.querySelector('.filter-select-all');
-                if (selectAllLabel) {
-                    selectAllLabel.style.display = searchText === '' ? 'flex' : 'none';
-                }
-                updateSelectAllCheckbox(panel);
+                    const selectAllLabel = panel.querySelector('.filter-select-all');
+                    if (selectAllLabel) {
+                        selectAllLabel.style.display = searchText === '' ? 'flex' : 'none';
+                    }
+                    updateSelectAllCheckbox(panel);
+                }, 300);
             }
         });
     }
@@ -1642,7 +1607,6 @@ document.addEventListener('DOMContentLoaded', function() {
             await API.put('/records/' + record.id, { data: record.data });
             updateTabCache(state.currentTabId);
             setStatus('保存成功');
-            state._allRecordsCache = null; // 数据已修改，清除缓存确保筛选使用最新数据
         } catch (err) {
             setStatus('保存失败: ' + err.message);
             record._updated = true;
