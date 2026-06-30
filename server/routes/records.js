@@ -15,19 +15,22 @@ router.get('/', requireAuth, async (req, res) => {
         if (!tabId) return res.status(400).json({ error: '缺少 tabId' });
 
         const page = Math.max(1, parseInt(req.query.page) || 1);
-        const pageSize = Math.min(1000, Math.max(1, parseInt(req.query.pageSize) || 50));
+        const rawPageSize = parseInt(req.query.pageSize) || 50;
+        const allMode = rawPageSize === 0;
 
         const countResult = await queryOne(
             'SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?',
             [userId, tabId]
         );
         const total = countResult ? countResult.cnt : 0;
-        const totalPages = Math.ceil(total / pageSize);
-        const offset = (page - 1) * pageSize;
+        const pageSize = allMode ? total : Math.min(999999, Math.max(1, rawPageSize));
+        const totalPages = allMode ? 1 : Math.ceil(total / pageSize);
+        const offset = allMode ? 0 : (page - 1) * pageSize;
+        const limit = allMode ? total : pageSize;
 
         const records = await query(
             'SELECT * FROM records WHERE user_id = ? AND tab_id = ? ORDER BY COALESCE(parent_id, id), CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, sort_order, created_at LIMIT ? OFFSET ?',
-            [userId, tabId, pageSize, offset]
+            [userId, tabId, limit, offset]
         );
         const parsed = records.map(r => {
             try { return { ...r, data: JSON.parse(r.data || '{}') }; }
