@@ -494,10 +494,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pageJumpInput) { pageJumpInput.max = state.totalPages; pageJumpInput.value = state.page; }
     }
 
-    function updateAllFilterOptions() {
+    function updateAllFilterOptions(records) {
+        const data = records || state.records;
         state.columns.forEach(col => {
             const valueCountMap = new Map();
-            state.records.forEach(r => {
+            data.forEach(r => {
                 const dv = normalizeFilterValue(getDisplayValue(r, col));
                 valueCountMap.set(dv, (valueCountMap.get(dv) || 0) + 1);
             });
@@ -507,11 +508,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function updateFilterOptionsForCol(colKey) {
+    function updateFilterOptionsForCol(colKey, records) {
         const col = state.columns.find(c => c.col_key === colKey);
         if (!col) return;
+        const data = records || state.records;
         const valueCountMap = new Map();
-        state.records.forEach(r => {
+        data.forEach(r => {
             const dv = normalizeFilterValue(getDisplayValue(r, col));
             valueCountMap.set(dv, (valueCountMap.get(dv) || 0) + 1);
         });
@@ -589,6 +591,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.filters = {};
+        state._allRecordsCache = null; // 切换标签时清除全量缓存
         renderTabs();
         await loadDataForTab(tabId, force);
         // 确保服务商选项已加载（避免切换标签后选项为空）
@@ -777,7 +780,10 @@ document.addEventListener('DOMContentLoaded', function() {
         return selectedValues.includes(normalizeFilterValue(getDisplayValue(record, col)));
     }
     function getFilteredRecords() {
-        return state.records.filter(record => {
+        // 有筛选条件时，用全量缓存数据做过滤（确保不遗漏其他页的记录）
+        const allRecords = (Object.keys(state.filters).length > 0 && state._allRecordsCache)
+            ? state._allRecordsCache : state.records;
+        return allRecords.filter(record => {
             for (const [colKey, selectedValues] of Object.entries(state.filters)) {
                 if (!recordMatchesFilter(record, colKey, selectedValues)) return false;
             }
@@ -1016,7 +1022,17 @@ document.addEventListener('DOMContentLoaded', function() {
         return panel;
     }
 
-    function refreshFilterPanelContent(panel, colKey) {
+    async function refreshFilterPanelContent(panel, colKey) {
+        // 如果当前页数据不完整，先加载全量数据用于筛选选项
+        if (state.total > state.records.length && !state._allRecordsCache) {
+            try {
+                const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=999999');
+                state._allRecordsCache = result.records || [];
+                updateAllFilterOptions(state._allRecordsCache);
+            } catch (e) {
+                // fallback: 用当前页数据
+            }
+        }
         const options = state.filterOptions[colKey] || [];
         const optionsHtml = options.map(opt => `
             <label class="filter-option-label" data-filter-label="${escapeHtml(String(opt.value).toLowerCase())}">
@@ -1109,11 +1125,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 const isOpen = panel.classList.contains('show');
                 closeFilterPanels();
                 if (!isOpen) {
-                    refreshFilterPanelContent(panel, colKey);
-                    positionFilterPanel(panel, colKey);
-                    panel.classList.add('show');
-                    const search = panel.querySelector('.filter-search');
-                    if (search) setTimeout(() => search.focus(), 0);
+                    refreshFilterPanelContent(panel, colKey).then(() => {
+                        positionFilterPanel(panel, colKey);
+                        panel.classList.add('show');
+                        const search = panel.querySelector('.filter-search');
+                        if (search) setTimeout(() => search.focus(), 0);
+                    });
                 }
                 return;
             }
@@ -1146,14 +1163,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if (checkedValues.length === 0) {
-                    // 没有选中任何项，不做筛选（清除该列筛选）
                     delete state.filters[colKey];
                 } else if (checkedValues.length === allValues.length) {
-                    // 全部都选了，等于没有筛选
                     delete state.filters[colKey];
                 } else {
                     state.filters[colKey] = checkedValues;
                 }
+                // 无筛选条件时清除全量缓存，恢复正常分页
+                if (Object.keys(state.filters).length === 0) state._allRecordsCache = null;
                 panel.classList.remove('show');
                 renderTable(false);
                 return;
@@ -1168,6 +1185,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (e.target.classList.contains('filter-clear')) {
                 const colKey = e.target.dataset.col;
                 delete state.filters[colKey];
+                if (Object.keys(state.filters).length === 0) state._allRecordsCache = null;
                 const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
                 if (panel) panel.classList.remove('show');
                 renderTable(false);
