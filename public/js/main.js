@@ -461,6 +461,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.records = result.records || [];
         state.total = result.total || 0;
         state.totalPages = result.totalPages || 1;
+        state._allRecordsCache = null; // 数据已重新加载，清除旧缓存
         updateAllFilterOptions();
         updatePaginationUI();
         return state.records;
@@ -1594,6 +1595,7 @@ document.addEventListener('DOMContentLoaded', function() {
             await API.put('/records/' + record.id, { data: record.data });
             updateTabCache(state.currentTabId);
             setStatus('保存成功');
+            state._allRecordsCache = null; // 数据已修改，清除缓存确保筛选使用最新数据
         } catch (err) {
             setStatus('保存失败: ' + err.message);
             record._updated = true;
