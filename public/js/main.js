@@ -1592,6 +1592,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 优先从 data 属性获取，其次从输入框当前值获取（用户可能刚输入未保存）
                 let ip = this.dataset.ip || '';
                 let domain = this.dataset.domain || '';
+                let base = '';
+                let suffix = '';
                 if (address === 'IP地址' || address === 'IP') {
                     if (!ip) {
                         const ipInput = tr.querySelector('input[data-col="ip_address"]');
