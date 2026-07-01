@@ -601,8 +601,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 确保服务商选项已加载（避免切换标签后选项为空）
         if (!state.providerOptions.length) await loadProviderOptions();
         renderTable(false);
-        const tab = state.tabs.find(t => t.id === tabId);
-        if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
+        const currentTab = state.tabs.find(t => t.id === tabId);
+        if (currentTab) document.getElementById('columnModalTabName').textContent = currentTab.name;
     }
 
     async function createTab(name, tabType) {
