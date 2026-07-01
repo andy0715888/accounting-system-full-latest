@@ -444,6 +444,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
     const contextMenu = $('#contextMenu');
+    const ctxInsertAbove = $('#ctxInsertAbove');
     const ctxAddClient = $('#ctxAddClient');
     const ctxCopyClient = $('#ctxCopyClient');
     const ctxPasteClient = $('#ctxPasteClient');
@@ -1219,6 +1220,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey) + searchParam);
                     } catch (e) { /* ignore */ }
 
+                    const selectAllHtml = `
+                        <label class="filter-option-label filter-select-all">
+                            <input type="checkbox" class="filter-select-all-checkbox" data-col="${escapeAttr(colKey)}" /> <span class="filter-option-text">全选</span>
+                        </label>
+                    `;
                     const optionsHtml = options.map(opt => `
                         <label class="filter-option-label" data-filter-label="${escapeHtml(String(opt.value).toLowerCase())}">
                             <input type="checkbox" class="filter-option" data-col="${escapeAttr(colKey)}" value="${escapeAttr(opt.value)}" />
@@ -1227,17 +1233,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         </label>
                     `).join('');
 
-                    panel.querySelector('.filter-options').innerHTML = optionsHtml;
+                    panel.querySelector('.filter-options').innerHTML = selectAllHtml + optionsHtml;
 
                     // 恢复勾选状态
-                    panel.querySelectorAll('.filter-option').forEach(cb => {
+                    panel.querySelectorAll('.filter-option:not(.filter-select-all-checkbox)').forEach(cb => {
                         cb.checked = checkedValues.has(cb.value);
                     });
 
-                    const selectAllLabel = panel.querySelector('.filter-select-all');
-                    if (selectAllLabel) {
-                        selectAllLabel.style.display = searchText === '' ? 'flex' : 'none';
-                    }
                     updateSelectAllCheckbox(panel);
                 }, 300);
             }
@@ -1272,6 +1274,123 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
             };
             if (input.tagName === 'SELECT') input.onchange = () => handleCellChange(input);
+        });
+
+        // --- 拖选粘贴功能 ---
+        let dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
+
+        function clearDragHighlight() {
+            $$('.cell-input.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+        }
+
+        function getTextInputCells() {
+            return $$('input.cell-input:not(.address-select):not(.provider-search-input):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input)');
+        }
+
+        function updateDragHighlight() {
+            clearDragHighlight();
+            if (!dragSelect.active || !dragSelect.colKey) return;
+            const startId = dragSelect.startRowId;
+            const endId = dragSelect.endRowId;
+            if (!startId || !endId) return;
+            // 获取当前页中该列的所有输入框
+            getTextInputCells().forEach(input => {
+                if (input.dataset.col === dragSelect.colKey) {
+                    const rowId = parseInt(input.dataset.id);
+                    if (rowId === startId || rowId === endId ||
+                        (rowId > Math.min(startId, endId) && rowId < Math.max(startId, endId))) {
+                        input.classList.add('drag-selected');
+                    }
+                }
+            });
+        }
+
+        getTextInputCells().forEach(input => {
+            input.addEventListener('mousedown', function(e) {
+                // 只在文本输入框上启动拖选
+                const colKey = this.dataset.col;
+                const rowId = parseInt(this.dataset.id);
+                dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId };
+                updateDragHighlight();
+                // 让文本选中正常工作（不阻止默认行为）
+            });
+
+            input.addEventListener('mouseenter', function(e) {
+                if (!dragSelect.active) return;
+                if (this.dataset.col !== dragSelect.colKey) return;
+                dragSelect.endRowId = parseInt(this.dataset.id);
+                updateDragHighlight();
+            });
+        });
+
+        document.addEventListener('mouseup', function() {
+            if (dragSelect.active) {
+                dragSelect.active = false;
+            }
+        });
+
+        // 添加拖选粘贴的 CSS 样式
+        if (!document.getElementById('drag-select-style')) {
+            const style = document.createElement('style');
+            style.id = 'drag-select-style';
+            style.textContent = `
+                .cell-input.drag-selected {
+                    outline: 2px solid #1890ff !important;
+                    outline-offset: -2px;
+                    background-color: #e6f7ff !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Ctrl+V 粘贴到选中的单元格
+        document.addEventListener('paste', function(e) {
+            if (!dragSelect.startRowId || !dragSelect.endRowId || !dragSelect.colKey) return;
+            const startId = dragSelect.startRowId;
+            const endId = dragSelect.endRowId;
+            const colKey = dragSelect.colKey;
+
+            const clipboardText = (e.clipboardData || window.clipboardData).getData('text');
+            if (!clipboardText) return;
+
+            // 解析剪贴板：按行分割
+            const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
+            if (lines.length === 0) return;
+
+            const minId = Math.min(startId, endId);
+            const maxId = Math.max(startId, endId);
+
+            // 获取选中范围内的行（按表格中出现的顺序）
+            const selectedInputs = getTextInputCells().filter(input => {
+                if (input.dataset.col !== colKey) return false;
+                const rowId = parseInt(input.dataset.id);
+                return rowId >= minId && rowId <= maxId;
+            });
+
+            // 逐个填入
+            let changed = 0;
+            selectedInputs.forEach((input, index) => {
+                if (index < lines.length) {
+                    input.value = lines[index].trim();
+                    handleCellChange(input);
+                    changed++;
+                }
+            });
+
+            if (changed > 0) {
+                e.preventDefault();
+                setStatus(`已粘贴 ${changed} 条数据`);
+                clearDragHighlight();
+                dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
+            }
+        });
+
+        // 按 Escape 清除拖选
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                clearDragHighlight();
+                dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
+            }
         });
 
         $$('.col-resize').forEach(handle => {
@@ -1661,7 +1780,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const result = await API.post('/records', { tab_id: state.currentTabId, data });
             state.total++;
-            state.page = 1;
+            // 跳转到最后一页
+            state.page = Math.ceil(state.total / state.pageSize);
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
@@ -2730,6 +2850,8 @@ document.addEventListener('DOMContentLoaded', function() {
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
 
+        // 独享标签：在上方插入一行
+        ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
         // 共享标签菜单项
         ctxAddClient.style.display = (isShared && recordType === 'server') ? 'block' : 'none';
         ctxCopyClient.style.display = (isShared && recordType === 'client') ? 'block' : 'none';
@@ -2749,6 +2871,42 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.addEventListener('click', function() { contextMenu.style.display = 'none'; });
+
+    ctxInsertAbove.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.currentTabId) return;
+        // 在目标行上方插入一行
+        const targetRec = state.records.find(r => r.id === contextTargetId);
+        if (!targetRec) return;
+        try {
+            setStatus('插入中...');
+            const data = {};
+            state.columns.forEach(col => { data[col.col_key] = ''; });
+            const now = new Date();
+            const today = now.toISOString().split('T')[0];
+            data.host_purchase = today;
+            data.months = 1;
+            data.host_expire = calcHostExpire(today, 1);
+            data.client_purchase = today;
+            data.client_expire = getNextMonth(now).toISOString().split('T')[0];
+            data.expense = '0';
+            data.fee = '';
+            data.address = 'IP地址';
+            // sort_order 使用目标行的 sort_order
+            const sortOrder = targetRec.sort_order || 0;
+            await API.post('/records', {
+                tab_id: state.currentTabId,
+                data,
+                record_type: 'server',
+                sort_order: sortOrder
+            });
+            state.total++;
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('插入成功');
+        } catch (err) { setStatus('插入失败: ' + err.message); }
+    });
 
     ctxAddClient.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
