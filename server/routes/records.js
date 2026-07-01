@@ -156,20 +156,34 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
-        const { tab_id, data, record_type, parent_id } = req.body;
+        const { tab_id, data, record_type, parent_id, sort_order } = req.body;
         if (!tab_id) return res.status(400).json({ error: '缺少 tab_id' });
         if (!data || typeof data !== 'object') return res.status(400).json({ error: '数据格式错误' });
 
         const rType = record_type || 'server';
         const pParent = parent_id || null;
 
-        let sortOrder = 0;
-        if (pParent) {
-            const maxSort = await queryOne(
-                'SELECT MAX(sort_order) as max_sort FROM records WHERE parent_id = ? AND user_id = ?',
-                [pParent, userId]
+        let sortOrder = sort_order;
+        if (sortOrder === undefined || sortOrder === null) {
+            if (pParent) {
+                const maxSort = await queryOne(
+                    'SELECT MAX(sort_order) as max_sort FROM records WHERE parent_id = ? AND user_id = ?',
+                    [pParent, userId]
+                );
+                sortOrder = (maxSort && maxSort.max_sort !== null) ? maxSort.max_sort + 1 : 0;
+            } else {
+                const maxSort = await queryOne(
+                    'SELECT MAX(sort_order) as max_sort FROM records WHERE user_id = ? AND tab_id = ? AND parent_id IS NULL',
+                    [userId, tab_id]
+                );
+                sortOrder = (maxSort && maxSort.max_sort !== null) ? maxSort.max_sort + 1 : 0;
+            }
+        } else {
+            // 指定了 sort_order，把 >=sort_order 的记录往后移一位
+            await execute(
+                'UPDATE records SET sort_order = sort_order + 1 WHERE user_id = ? AND tab_id = ? AND parent_id IS ? AND sort_order >= ?',
+                [userId, tab_id, pParent, sortOrder]
             );
-            sortOrder = (maxSort && maxSort.max_sort !== null) ? maxSort.max_sort + 1 : 0;
         }
 
         const result = await execute(
