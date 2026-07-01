@@ -25,18 +25,13 @@ function buildFilterConditions(filters, params) {
         if (!Array.isArray(values) || values.length === 0) continue;
 
         if (colKey === 'is_expired') {
-            // is_expired 判断逻辑（和前端 getDisplayValue 一致）：
-            // server 行: host_expire 有值且 date(host_expire) >= date('now') => 有效, 否则 过期
-            // host_expire 为空 => 未知
-            // client 行: client_expire 有值且 date(client_expire) >= date('now') => 有效, 否则 过期
-            // 筛选时，需要区分 server/client
+            // is_expired 判断逻辑（和前端 getDisplayValue 完全一致）：
+            // server 行: host_expire 为空 => 未知; host_expire 有值且 >= 今天 => 有效; 否则 过期
+            // client 行: client_expire 为空或 < 今天 => 过期; client_expire >= 今天 => 有效
             const expiredClauses = [];
             if (values.includes('有效')) {
-                // server: host_expire 有效或为空
-                // client: client_expire 有效
                 expiredClauses.push(`(
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') = '') OR
-                    (record_type = 'server' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
                     (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
                 )`);
             }
@@ -244,8 +239,7 @@ router.get('/filter-options', requireAuth, async (req, res) => {
             const baseParams = [userId, tabId];
             const validCount = await queryOne(
                 `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND (
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') = '') OR
-                    (record_type = 'server' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
                     (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
                 )`, baseParams
             );
@@ -262,7 +256,7 @@ router.get('/filter-options', requireAuth, async (req, res) => {
                 { value: '有效', count: validCount?.cnt || 0 },
                 { value: '过期', count: expiredCount?.cnt || 0 },
             ];
-            if ((unknownCount?.cnt || 0) > 0 && (unknownCount?.cnt || 0) !== (validCount?.cnt || 0)) {
+            if ((unknownCount?.cnt || 0) > 0) {
                 options.push({ value: '未知', count: unknownCount?.cnt || 0 });
             }
         } else if (colKey === 'ip_info') {
