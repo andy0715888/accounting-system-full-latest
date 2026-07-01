@@ -79,6 +79,15 @@ router.post('/register', async (req, res) => {
     }
 });
 
+router.get('/check-register', async (req, res) => {
+    try {
+        const allowed = await isRegisterAllowed();
+        res.json({ allowed });
+    } catch (err) {
+        res.json({ allowed: false });
+    }
+});
+
 router.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
