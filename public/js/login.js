@@ -7,6 +7,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const registerBtn = document.getElementById('registerBtn');
     const showRegister = document.getElementById('showRegister');
     const showLogin = document.getElementById('showLogin');
+
+    // 检测是否允许注册
+    fetch('/api/auth/check-register').then(r => r.json()).then(data => {
+        if (!data.allowed) {
+            showRegister.style.display = 'none';
+        }
+    }).catch(() => {});
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
     const bgLayer = document.getElementById('bgLayer');
