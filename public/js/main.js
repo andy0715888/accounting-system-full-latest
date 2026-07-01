@@ -1293,7 +1293,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const startId = dragSelect.startRowId;
             const endId = dragSelect.endRowId;
             if (!startId || !endId) return;
-            // 获取当前页中该列的所有输入框
             getTextInputCells().forEach(input => {
                 if (input.dataset.col === dragSelect.colKey) {
                     const rowId = parseInt(input.dataset.id);
@@ -1307,20 +1306,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
         getTextInputCells().forEach(input => {
             input.addEventListener('mousedown', function(e) {
-                // 只在文本输入框上启动拖选
                 const colKey = this.dataset.col;
                 const rowId = parseInt(this.dataset.id);
                 dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId };
                 updateDragHighlight();
-                // 让文本选中正常工作（不阻止默认行为）
             });
+        });
 
-            input.addEventListener('mouseenter', function(e) {
-                if (!dragSelect.active) return;
-                if (this.dataset.col !== dragSelect.colKey) return;
-                dragSelect.endRowId = parseInt(this.dataset.id);
+        // 使用 document mousemove 检测拖动经过的单元格（避免输入框内文本选中导致 mouseenter 不触发）
+        document.addEventListener('mousemove', function(e) {
+            if (!dragSelect.active) return;
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            if (!el) return;
+            const input = el.closest('.cell-input');
+            if (!input) return;
+            if (input.dataset.col !== dragSelect.colKey) return;
+            const rowId = parseInt(input.dataset.id);
+            if (rowId !== dragSelect.endRowId) {
+                dragSelect.endRowId = rowId;
                 updateDragHighlight();
-            });
+            }
         });
 
         document.addEventListener('mouseup', function() {
@@ -1346,6 +1351,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Ctrl+V 粘贴到选中的单元格
         document.addEventListener('paste', function(e) {
             if (!dragSelect.startRowId || !dragSelect.endRowId || !dragSelect.colKey) return;
+            if (dragSelect.startRowId === dragSelect.endRowId) return; // 单点不算拖选
+
             const startId = dragSelect.startRowId;
             const endId = dragSelect.endRowId;
             const colKey = dragSelect.colKey;
@@ -1353,21 +1360,18 @@ document.addEventListener('DOMContentLoaded', function() {
             const clipboardText = (e.clipboardData || window.clipboardData).getData('text');
             if (!clipboardText) return;
 
-            // 解析剪贴板：按行分割
             const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
             if (lines.length === 0) return;
 
             const minId = Math.min(startId, endId);
             const maxId = Math.max(startId, endId);
 
-            // 获取选中范围内的行（按表格中出现的顺序）
             const selectedInputs = getTextInputCells().filter(input => {
                 if (input.dataset.col !== colKey) return false;
                 const rowId = parseInt(input.dataset.id);
                 return rowId >= minId && rowId <= maxId;
             });
 
-            // 逐个填入
             let changed = 0;
             selectedInputs.forEach((input, index) => {
                 if (index < lines.length) {
@@ -1385,7 +1389,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // 按 Escape 清除拖选
+        // 按 Escape 或点击非输入区域清除拖选
+        document.addEventListener('mousedown', function(e) {
+            if (dragSelect.startRowId && !dragSelect.active) {
+                // 点击非文本输入框区域时清除选区
+                if (!e.target.closest('.cell-input')) {
+                    clearDragHighlight();
+                    dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
+                }
+            }
+        });
+
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 clearDragHighlight();
