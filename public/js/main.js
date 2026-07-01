@@ -1586,17 +1586,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
         $$('.open-link').forEach(btn => {
             btn.onclick = function() {
+                const tr = this.closest('tr');
                 const address = this.dataset.address;
                 if (!address) { setStatus('⚠️ 请先选择地址类型'); return; }
-                const ip = this.dataset.ip || '';
-                const domain = this.dataset.domain || '';
-                let base = '';
-                let suffix = '';
+                // 优先从 data 属性获取，其次从输入框当前值获取（用户可能刚输入未保存）
+                let ip = this.dataset.ip || '';
+                let domain = this.dataset.domain || '';
                 if (address === 'IP地址' || address === 'IP') {
+                    if (!ip) {
+                        const ipInput = tr.querySelector('input[data-col="ip_address"]');
+                        if (ipInput && ipInput.value.trim()) ip = ipInput.value.trim();
+                    }
                     if (!ip) { setStatus('⚠️ IP地址为空'); return; }
                     base = ip;
                     suffix = state.ipPortSuffix || '';
                 } else if (address === '域名地址' || address === '域名') {
+                    if (!domain) {
+                        const domainInput = tr.querySelector('input[data-col="domain"]');
+                        if (domainInput && domainInput.value.trim()) domain = domainInput.value.trim();
+                    }
                     if (!domain) { setStatus('⚠️ 域名为空'); return; }
                     base = domain;
                     suffix = state.domainPortSuffix || '';
