@@ -1736,8 +1736,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
         saveRecord(record);
         // 只有联动更新其他字段时才重新渲染，普通文本修改不渲染（避免输入框丢失焦点）
-        // ip_address / domain 修改后需要更新 open-link 按钮的 data 属性
-        if (colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address' || colKey === 'ip_address' || colKey === 'domain') {
+        // ip_address / domain 修改后只需更新 open-link 按钮的 data 属性，不需要重新渲染整个表格
+        if (colKey === 'ip_address' || colKey === 'domain') {
+            const tr = input.closest('tr');
+            if (tr) {
+                const openBtn = tr.querySelector('.open-link');
+                if (openBtn) {
+                    if (colKey === 'ip_address') openBtn.dataset.ip = val;
+                    if (colKey === 'domain') openBtn.dataset.domain = val;
+                }
+            }
+        } else if (colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address') {
             renderTable(false);
         }
     }
