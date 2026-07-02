@@ -233,24 +233,37 @@ router.get('/filter-options', requireAuth, async (req, res) => {
         const { tabId, colKey, search } = req.query;
         if (!tabId || !colKey) return res.status(400).json({ error: '缺少参数' });
 
+        // 解析其他列的筛选条件（排除当前列，避免循环）
+        let otherFilters = {};
+        try {
+            const allFilters = req.query.filters ? JSON.parse(req.query.filters) : {};
+            for (const [k, v] of Object.entries(allFilters)) {
+                if (k !== colKey) otherFilters[k] = v;
+            }
+        } catch (e) {}
+
+        const filterResult = buildFilterConditions(otherFilters, []);
+        const filterWhere = filterResult.where;
+        const filterParams = filterResult.params;
+
         let options = [];
 
         if (colKey === 'is_expired') {
-            const baseParams = [userId, tabId];
+            const baseParams = [userId, tabId, ...filterParams];
             const validCount = await queryOne(
-                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND (
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND (
                     (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
                     (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
                 )`, baseParams
             );
             const expiredCount = await queryOne(
-                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND (
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND (
                     (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
                     (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
                 )`, baseParams
             );
             const unknownCount = await queryOne(
-                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND record_type = 'server' AND json_extract(data, '$.host_expire') = ''`, baseParams
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND record_type = 'server' AND json_extract(data, '$.host_expire') = ''`, baseParams
             );
             options = [
                 { value: '有效', count: validCount?.cnt || 0 },
@@ -262,15 +275,15 @@ router.get('/filter-options', requireAuth, async (req, res) => {
         } else if (colKey === 'ip_info') {
             const searchLike = search ? `%${search}%` : '%';
             const rows = await query(
-                `SELECT json_extract(data, '$.ip_address') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.ip_address') != '' AND json_extract(data, '$.ip_address') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
-                [userId, tabId, searchLike]
+                `SELECT json_extract(data, '$.ip_address') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND json_extract(data, '$.ip_address') != '' AND json_extract(data, '$.ip_address') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
+                [userId, tabId, ...filterParams, searchLike]
             );
             options = rows.filter(r => r.val).map(r => ({ value: r.val, count: r.cnt }));
         } else {
             const searchLike = search ? `%${search}%` : '%';
             const rows = await query(
-                `SELECT json_extract(data, '$.${colKey}') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ? AND json_extract(data, '$.${colKey}') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
-                [userId, tabId, searchLike]
+                `SELECT json_extract(data, '$.${colKey}') as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND json_extract(data, '$.${colKey}') LIKE ? GROUP BY val ORDER BY val LIMIT 200`,
+                [userId, tabId, ...filterParams, searchLike]
             );
             options = rows.filter(r => r.val !== null && r.val !== undefined && String(r.val).trim() !== '')
                 .map(r => ({ value: String(r.val).trim(), count: r.cnt }));
