@@ -1579,46 +1579,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const record = state.records.find(r => r.id === id);
                 if (!record) return;
                 record.data.ip_info = this.value.trim();
-                renderTable(false);
+                // 不调用 renderTable，避免销毁 open-link 按钮。handleCellChange 会更新 data-ip。
                 saveRecord(record);
             };
         });
 
-        $$('.open-link').forEach(btn => {
-            btn.onclick = function() {
-                const tr = this.closest('tr');
-                const address = this.dataset.address;
-                if (!address) { setStatus('⚠️ 请先选择地址类型'); return; }
-                // 优先从 data 属性获取，其次从输入框当前值获取（用户可能刚输入未保存）
-                let ip = this.dataset.ip || '';
-                let domain = this.dataset.domain || '';
-                let base = '';
-                let suffix = '';
-                if (address === 'IP地址' || address === 'IP') {
-                    if (!ip) {
-                        const ipInput = tr.querySelector('input[data-col="ip_address"]');
-                        if (ipInput && ipInput.value.trim()) ip = ipInput.value.trim();
-                    }
-                    if (!ip) { setStatus('⚠️ IP地址为空'); return; }
-                    base = ip;
-                    suffix = state.ipPortSuffix || '';
-                } else if (address === '域名地址' || address === '域名') {
-                    if (!domain) {
-                        const domainInput = tr.querySelector('input[data-col="domain"]');
-                        if (domainInput && domainInput.value.trim()) domain = domainInput.value.trim();
-                    }
-                    if (!domain) { setStatus('⚠️ 域名为空'); return; }
-                    base = domain;
-                    suffix = state.domainPortSuffix || '';
-                }
-                if (base) {
-                    const url = base + suffix;
-                    let fullUrl = url;
-                    if (!/^https?:\/\//i.test(fullUrl)) fullUrl = 'http://' + fullUrl;
-                    window.open(fullUrl, '_blank');
-                }
-            };
-        });
+        // open-link 用事件委托绑定（不依赖 bindTableEvents 重新绑定）
+        // (已在 document 级别的 click 委托中处理，见下方)
 
         // 支出交互（点击显示文字切换为编辑）
         $$('.expense-display').forEach(display => {
@@ -3178,6 +3145,49 @@ document.addEventListener('DOMContentLoaded', function() {
             const tab = state.tabs.find(t => t.id === state.currentTabId);
             if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
             loadSettings();
+
+            // open-link 事件委托：绑定一次，不依赖 renderTable 重新绑定
+            document.addEventListener('click', function(e) {
+                const btn = e.target.closest('.open-link');
+                if (!btn) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const tr = btn.closest('tr');
+                // 从同一行的 address-select 下拉框读取当前选中值（最可靠）
+                const sel = tr ? tr.querySelector('.address-select') : null;
+                const address = sel ? sel.value : (btn.dataset.address || '');
+                if (!address) { setStatus('⚠️ 请先选择地址类型'); return; }
+                let ip = btn.dataset.ip || '';
+                let domain = btn.dataset.domain || '';
+                // 判断是否为 IP 类型：选中值包含 "IP" 或为 "地址"
+                const isIP = address.includes('IP') || address === '地址';
+                if (isIP) {
+                    if (!ip) {
+                        const ipInput = tr ? tr.querySelector('input[data-col="ip_address"]') : null;
+                        if (ipInput && ipInput.value.trim()) ip = ipInput.value.trim();
+                    }
+                    if (!ip) { setStatus('⚠️ IP地址为空'); return; }
+                    let base = ip;
+                    let suffix = state.ipPortSuffix || '';
+                    const url = base + suffix;
+                    let fullUrl = url;
+                    if (!/^https?:\/\//i.test(fullUrl)) fullUrl = 'http://' + fullUrl;
+                    window.open(fullUrl, '_blank');
+                } else {
+                    // 域名类型
+                    if (!domain) {
+                        const domainInput = tr ? tr.querySelector('input[data-col="domain"]') : null;
+                        if (domainInput && domainInput.value.trim()) domain = domainInput.value.trim();
+                    }
+                    if (!domain) { setStatus('⚠️ 域名为空'); return; }
+                    let base = domain;
+                    let suffix = state.domainPortSuffix || '';
+                    const url = base + suffix;
+                    let fullUrl = url;
+                    if (!/^https?:\/\//i.test(fullUrl)) fullUrl = 'http://' + fullUrl;
+                    window.open(fullUrl, '_blank');
+                }
+            });
         } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); }
     }
     init();
