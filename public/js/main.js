@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', function() {
         domainPortSuffix: '',
         // 分页
         page: 1,
-        pageSize: 50,
+        pageSize: 1000,
         total: 0,
         totalPages: 1,
         // 收入弹窗
@@ -129,6 +129,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const nextPageBtn = $('#nextPageBtn');
     const pageIndicator = $('#pageIndicator');
     const pageSizeSelect = $('#pageSizeSelect');
+    // 同步 state.pageSize 与下拉框初始值
+    state.pageSize = parseInt(pageSizeSelect ? pageSizeSelect.value : 1000) || 1000;
     const pageJumpInput = $('#pageJumpInput');
     const pageJumpBtn = $('#pageJumpBtn');
 
@@ -1024,7 +1026,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // 从后端获取该列的全部去重值和计数
         let options = [];
         try {
-            options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey));
+            const filtersParam = Object.keys(state.filters).length > 0
+                ? '&filters=' + encodeURIComponent(JSON.stringify(state.filters)) : '';
+            options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey) + filtersParam);
         } catch (e) {
             setStatus('加载筛选选项失败');
             return;
@@ -1156,7 +1160,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (checkedValues.length === 0) {
                     delete state.filters[colKey];
-                } else if (checkedValues.length === allValues.length) {
+                } else if (searchText === '' && checkedValues.length === allValues.length) {
+                    // 未搜索时全选等于不筛选
                     delete state.filters[colKey];
                 } else {
                     state.filters[colKey] = checkedValues;
@@ -1217,7 +1222,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     let options = [];
                     try {
                         const searchParam = searchText ? '&search=' + encodeURIComponent(searchText) : '';
-                        options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey) + searchParam);
+                        // 传递当前已有的筛选条件给 filter-options API
+                        const filtersParam = Object.keys(state.filters).length > 0
+                            ? '&filters=' + encodeURIComponent(JSON.stringify(state.filters)) : '';
+                        options = await API.get('/records/filter-options?tabId=' + state.currentTabId + '&colKey=' + encodeURIComponent(colKey) + searchParam + filtersParam);
                     } catch (e) { /* ignore */ }
 
                     const selectAllHtml = `
