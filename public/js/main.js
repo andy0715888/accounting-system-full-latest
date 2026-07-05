@@ -20,6 +20,9 @@ document.addEventListener('DOMContentLoaded', function() {
         isAdmin: false,
         ipPortSuffix: '',
         domainPortSuffix: '',
+        // 统计时间范围（0=所有）
+        statsMonthRange: 6,
+        statsYearRange: 6,
         // 分页
         page: 1,
         pageSize: 1000,
@@ -1359,7 +1362,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Ctrl+V 粘贴到选中的单元格
         document.addEventListener('paste', function(e) {
             if (!dragSelect.startRowId || !dragSelect.endRowId || !dragSelect.colKey) return;
-            if (dragSelect.startRowId === dragSelect.endRowId) return; // 单点不算拖选
 
             const startId = dragSelect.startRowId;
             const endId = dragSelect.endRowId;
@@ -1382,8 +1384,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             let changed = 0;
             selectedInputs.forEach((input, index) => {
-                if (index < lines.length) {
-                    input.value = lines[index].trim();
+                // 单值粘贴：复制1个值，填到所有选中行
+                // 多值粘贴：复制多行，逐行填入
+                const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
+                if (value !== null) {
+                    input.value = value;
                     handleCellChange(input);
                     changed++;
                 }
@@ -2086,7 +2091,7 @@ document.addEventListener('DOMContentLoaded', function() {
         incomeList.innerHTML = state.incomeRecords.map(r => `
             <div class="income-item">
                 <div class="income-item-info">
-                    <span class="income-item-amount">${Math.round(r.amount)}</span>
+                    <span class="income-item-amount">${Number(r.amount).toFixed(2)}</span>
                     <span class="income-item-date">${escapeHtml(r.income_date || '')}</span>
                     <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
                 </div>
@@ -2162,7 +2167,7 @@ document.addEventListener('DOMContentLoaded', function() {
         expenseList.innerHTML = state.expenseRecords.map(r => `
             <div class="income-item">
                 <div class="income-item-info">
-                    <span class="income-item-amount" style="color:#c62828;">${Math.round(r.amount)}</span>
+                    <span class="income-item-amount" style="color:#c62828;">${Number(r.amount).toFixed(2)}</span>
                     <span class="income-item-date">${escapeHtml(r.expense_date || '')}</span>
                     <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
                 </div>
@@ -2454,10 +2459,15 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             const months = Object.values(monthMap).sort((a, b) => a.label.localeCompare(b.label));
-            const recentMonths = months.slice(-12);
             const years = Object.values(yearMap).sort((a, b) => a.label.localeCompare(b.label));
             const tabs = Object.values(tabMap).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
             const providers = Object.values(providerMap).sort((a, b) => Math.abs(b.net) - Math.abs(a.net)).slice(0, 8);
+
+            // 从 state 获取或默认时间范围
+            const monthRange = state.statsMonthRange || 6;
+            const yearRange = state.statsYearRange || 6;
+            const recentMonths = monthRange === 0 ? months : months.slice(-monthRange);
+            const recentYears = yearRange === 0 ? years : years.slice(-yearRange);
             const maxMonthAmount = Math.max(1, ...recentMonths.map(m => Math.max(Math.abs(m.income), Math.abs(m.expense), Math.abs(m.net))));
             const maxTabNet = Math.max(1, ...tabs.map(t => Math.abs(t.net)));
             const maxProviderNet = Math.max(1, ...providers.map(p => Math.abs(p.net)));
@@ -2475,7 +2485,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </tr>
             `).join('');
 
-            const yearRows = years.map(item => `
+            const yearRows = recentYears.map(item => `
                 <tr>
                     <td>${escapeHtml(item.label)}</td>
                     <td class="positive">${formatMoney(item.income)}</td>
@@ -2507,7 +2517,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 <div class="stats-insight-grid">
                     <div class="stats-panel">
-                        <h3>近 12 个月趋势</h3>
+                        <h3>近 ${monthRange === 0 ? '所有' : monthRange} 个月趋势</h3>
                         <div class="stats-month-bars">
                             ${recentMonths.map(item => `
                                 <div class="month-bar-card">
@@ -2546,12 +2556,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
 
                 <div class="stats-detail premium-table">
-                    <h3>年度对比</h3>
+                    <div class="stats-detail-header"><h3>年度对比</h3><select class="stats-range-select" data-range-type="year" style="margin-left:8px;padding:2px 6px;font-size:13px;border-radius:4px;border:1px solid #dcdfe6;"><option value="6" ${yearRange===6?'selected':''}>近6年</option><option value="12" ${yearRange===12?'selected':''}>近12年</option><option value="0" ${yearRange===0?'selected':''}>所有年份</option></select></div>
                     <table><thead><tr><th>年份</th><th>收入</th><th>支出</th><th>净额</th><th>记录数</th></tr></thead><tbody>${yearRows}</tbody></table>
                 </div>
 
                 <div class="stats-detail premium-table">
-                    <h3>月份明细</h3>
+                    <div class="stats-detail-header"><h3>月份明细</h3><select class="stats-range-select" data-range-type="month" style="margin-left:8px;padding:2px 6px;font-size:13px;border-radius:4px;border:1px solid #dcdfe6;"><option value="6" ${monthRange===6?'selected':''}>近6月</option><option value="12" ${monthRange===12?'selected':''}>近12月</option><option value="24" ${monthRange===24?'selected':''}>近24月</option><option value="0" ${monthRange===0?'selected':''}>所有月份</option></select></div>
                     <table><thead><tr><th>月份</th><th>收入</th><th>支出</th><th>净额</th><th>记录数</th></tr></thead><tbody>${monthRows}</tbody></table>
                 </div>
             `;
@@ -2559,6 +2569,19 @@ document.addEventListener('DOMContentLoaded', function() {
             statsContainer.innerHTML = `<div class="stats-empty large">统计加载失败：${escapeHtml(err.message)}</div>`;
         }
     }
+
+    // 统计时间范围下拉框事件委托
+    document.addEventListener('change', function(e) {
+        if (!e.target.classList.contains('stats-range-select')) return;
+        const rangeType = e.target.dataset.rangeType;
+        const rangeVal = parseInt(e.target.value);
+        if (rangeType === 'month') {
+            state.statsMonthRange = rangeVal;
+        } else if (rangeType === 'year') {
+            state.statsYearRange = rangeVal;
+        }
+        renderStats();
+    });
 
     // --- 密码修改 ---
     async function changePassword() {
@@ -2909,6 +2932,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 sort_order: sortOrder
             });
             state.total++;
+            // 插入新行后清除筛选，否则新行可能不匹配筛选条件而不显示
+            state.filters = {};
+            state.page = 1;
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
