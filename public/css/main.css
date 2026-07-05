@@ -357,10 +357,11 @@ body {
 
 /* 单元格样式 */
 #dataTable td {
-    padding: 4px 6px;
+    padding: 2px 6px;
     border-bottom: 1px solid #ebeef5;
     vertical-align: middle;
     text-align: center;
+    font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -392,9 +393,9 @@ body {
 #dataTable td .cell-input {
     width: 100%;
     border: 1px solid transparent;
-    padding: 4px 6px;
+    padding: 1px 4px;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 13px;
     background: transparent;
     outline: none;
     transition: all 0.15s;
@@ -645,6 +646,8 @@ body {
 .stat-card .stat-value.negative { color:#f56c6c; }
 .stat-card .stat-value.neutral { color:#7dd3fc; }
 .stats-detail { margin-top:20px; }
+.stats-detail-header { display:flex; align-items:center; margin-bottom:8px; }
+.stats-detail-header h3 { margin:0; }
 .stats-detail table {
     width:100%;
     border-collapse:collapse;
