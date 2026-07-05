@@ -1300,7 +1300,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function updateDragHighlight() {
             clearDragHighlight();
-            if (!dragSelect.active || !dragSelect.colKey) return;
+            if (!dragSelect.colKey) return;
             const startId = dragSelect.startRowId;
             const endId = dragSelect.endRowId;
             if (!startId || !endId) return;
@@ -1315,13 +1315,25 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        getTextInputCells().forEach(input => {
-            input.addEventListener('mousedown', function(e) {
-                const colKey = this.dataset.col;
-                const rowId = parseInt(this.dataset.id);
-                dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId };
+        // 使用事件委托监听 mousedown（避免 renderTable 后事件丢失）
+        document.addEventListener('mousedown', function(e) {
+            const input = e.target.closest('.cell-input');
+            if (!input) return;
+            // 排除非文本输入类型
+            if (input.classList.contains('address-select') || input.classList.contains('provider-search-input') ||
+                input.classList.contains('months-input') || input.classList.contains('date-input') ||
+                input.classList.contains('expense-input') || input.classList.contains('fee-input')) return;
+            const colKey = input.dataset.col;
+            const rowId = parseInt(input.dataset.id);
+            // Shift+Click：从上次点击到当前行范围选择
+            if (e.shiftKey && dragSelect.lastClickRowId && dragSelect.lastClickCol === colKey) {
+                dragSelect = { active: false, colKey, startRowId: dragSelect.lastClickRowId, endRowId: rowId };
                 updateDragHighlight();
-            });
+                e.preventDefault();
+                return;
+            }
+            dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
+            updateDragHighlight();
         });
 
         // 使用 document mousemove 检测拖动经过的单元格（避免输入框内文本选中导致 mouseenter 不触发）
@@ -1363,6 +1375,8 @@ document.addEventListener('DOMContentLoaded', function() {
         document.addEventListener('paste', function(e) {
             if (!dragSelect.startRowId || !dragSelect.endRowId || !dragSelect.colKey) return;
 
+            e.preventDefault(); // 阻止浏览器默认粘贴行为
+
             const startId = dragSelect.startRowId;
             const endId = dragSelect.endRowId;
             const colKey = dragSelect.colKey;
@@ -1382,6 +1396,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 return rowId >= minId && rowId <= maxId;
             });
 
+            if (selectedInputs.length === 0) return;
+
             let changed = 0;
             selectedInputs.forEach((input, index) => {
                 // 单值粘贴：复制1个值，填到所有选中行
@@ -1395,7 +1411,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             if (changed > 0) {
-                e.preventDefault();
                 setStatus(`已粘贴 ${changed} 条数据`);
                 clearDragHighlight();
                 dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
