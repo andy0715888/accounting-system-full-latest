@@ -1300,7 +1300,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             function getTextInputCells() {
-                return $$('input.cell-input:not(.address-select):not(.provider-search-input):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input):not(.password-input)');
+                return $$('input.cell-input:not(.address-select):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input):not(.password-input)');
             }
 
             function updateDragHighlight() {
@@ -1346,7 +1346,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 // 排除非文本输入类型
-                if (input.classList.contains('address-select') || input.classList.contains('provider-search-input') ||
+                if (input.classList.contains('address-select') ||
                     input.classList.contains('months-input') || input.classList.contains('date-input') ||
                     input.classList.contains('expense-input') || input.classList.contains('fee-input') ||
                     input.classList.contains('password-input')) return;
