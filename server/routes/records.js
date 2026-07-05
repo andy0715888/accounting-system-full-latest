@@ -49,20 +49,11 @@ function buildFilterConditions(filters, params) {
             if (expiredClauses.length > 0) {
                 conditions.push(`(${expiredClauses.join(' OR ')})`);
             }
-        } else if (colKey === 'host_remaining' || colKey === 'client_remaining') {
-            // days_remaining 类型：基于日期差计算，前端展示，后端不好直接筛选，跳过
-            continue;
         } else if (colKey === 'ip_info') {
             // ip_info 等于 ip_address
             const placeholders = values.map(() => '?').join(',');
             allParams.push(...values);
             conditions.push(`json_extract(data, '$.ip_address') IN (${placeholders})`);
-        } else if (colKey === 'fee') {
-            // fee 可能有计算表达式，不好后端筛选，跳过
-            continue;
-        } else if (colKey === 'expense') {
-            // expense 可能有月数计算，不好后端筛选，跳过
-            continue;
         } else {
             // 通用列: json_extract
             const placeholders = values.map(() => '?').join(',');
