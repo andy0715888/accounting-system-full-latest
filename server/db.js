@@ -116,8 +116,9 @@ function createTables() {
         db.run(`ALTER TABLE records ADD COLUMN sort_order INTEGER DEFAULT 0`, () => {});
 
         createDefaultAdmin();
-        // 默认关闭注册功能
-        db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_register', 'false')`);
+        // 默认关闭注册功能（INSERT OR IGNORE 不更新已有记录，所以额外用 UPDATE 确保）
+        db.run(`INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (1, 'allow_register', 'false')`);
+        db.run(`UPDATE settings SET value = 'false' WHERE key = 'allow_register' AND user_id = 1`);
     });
 }
 
