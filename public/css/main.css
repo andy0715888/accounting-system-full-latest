@@ -357,11 +357,11 @@ body {
 
 /* 单元格样式 */
 #dataTable td {
-    padding: 2px 6px;
+    padding: 1px 6px;
     border-bottom: 1px solid #ebeef5;
     vertical-align: middle;
     text-align: center;
-    font-size: 13px;
+    font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -393,9 +393,9 @@ body {
 #dataTable td .cell-input {
     width: 100%;
     border: 1px solid transparent;
-    padding: 1px 4px;
+    padding: 0px 3px;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
     background: transparent;
     outline: none;
     transition: all 0.15s;
