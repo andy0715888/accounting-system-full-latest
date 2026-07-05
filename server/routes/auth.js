@@ -6,7 +6,7 @@ const { getDB } = require('../db');
 const router = express.Router();
 
 async function isRegisterAllowed() {
-    const setting = await queryOne("SELECT value FROM settings WHERE key = 'allow_register'");
+    const setting = await queryOne("SELECT value FROM settings WHERE key = 'allow_register' AND user_id = 1");
     if (!setting) return true;
     try {
         return JSON.parse(setting.value) === true;
