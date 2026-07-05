@@ -962,6 +962,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             <span class="fee-add-icon">+</span>
                         </div>
                     `;
+                } else if (colKey === 'password') {
+                    const masked = val ? '***' : '';
+                    inputHtml = `<div class="password-cell" data-id="${record.id}" data-col="password"><span class="password-mask" style="cursor:pointer;">${escapeHtml(masked)}</span><input type="text" class="cell-input password-input" data-col="password" data-id="${record.id}" value="${escapeAttr(val || '')}" style="display:none;" /></div>`;
                 } else {
                     const inputType = col.col_type === 'number' ? 'number' : 'text';
                     const step = col.col_type === 'number' ? 'step="0.01"' : '';
@@ -1287,78 +1290,38 @@ document.addEventListener('DOMContentLoaded', function() {
             if (input.tagName === 'SELECT') input.onchange = () => handleCellChange(input);
         });
 
-        // --- 拖选粘贴功能 ---
-        let dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
+        // --- 拖选粘贴功能（只初始化一次，避免重复绑定） ---
+        if (!window._dragSelectBound) {
+            window._dragSelectBound = true;
+            window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
 
-        function clearDragHighlight() {
-            $$('.cell-input.drag-selected').forEach(el => el.classList.remove('drag-selected'));
-        }
+            function clearDragHighlight() {
+                $$('.cell-input.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+            }
 
-        function getTextInputCells() {
-            return $$('input.cell-input:not(.address-select):not(.provider-search-input):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input)');
-        }
+            function getTextInputCells() {
+                return $$('input.cell-input:not(.address-select):not(.provider-search-input):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input):not(.password-input)');
+            }
 
-        function updateDragHighlight() {
-            clearDragHighlight();
-            if (!dragSelect.colKey) return;
-            const startId = dragSelect.startRowId;
-            const endId = dragSelect.endRowId;
-            if (!startId || !endId) return;
-            getTextInputCells().forEach(input => {
-                if (input.dataset.col === dragSelect.colKey) {
-                    const rowId = parseInt(input.dataset.id);
-                    if (rowId === startId || rowId === endId ||
-                        (rowId > Math.min(startId, endId) && rowId < Math.max(startId, endId))) {
-                        input.classList.add('drag-selected');
+            function updateDragHighlight() {
+                clearDragHighlight();
+                var ds = window._dragSelect;
+                if (!ds.colKey) return;
+                const startId = ds.startRowId;
+                const endId = ds.endRowId;
+                if (!startId || !endId) return;
+                getTextInputCells().forEach(input => {
+                    if (input.dataset.col === ds.colKey) {
+                        const rowId = parseInt(input.dataset.id);
+                        if (rowId === startId || rowId === endId ||
+                            (rowId > Math.min(startId, endId) && rowId < Math.max(startId, endId))) {
+                            input.classList.add('drag-selected');
+                        }
                     }
-                }
-            });
-        }
-
-        // 使用事件委托监听 mousedown（避免 renderTable 后事件丢失）
-        document.addEventListener('mousedown', function(e) {
-            const input = e.target.closest('.cell-input');
-            if (!input) return;
-            // 排除非文本输入类型
-            if (input.classList.contains('address-select') || input.classList.contains('provider-search-input') ||
-                input.classList.contains('months-input') || input.classList.contains('date-input') ||
-                input.classList.contains('expense-input') || input.classList.contains('fee-input')) return;
-            const colKey = input.dataset.col;
-            const rowId = parseInt(input.dataset.id);
-            // Shift+Click：从上次点击到当前行范围选择
-            if (e.shiftKey && dragSelect.lastClickRowId && dragSelect.lastClickCol === colKey) {
-                dragSelect = { active: false, colKey, startRowId: dragSelect.lastClickRowId, endRowId: rowId };
-                updateDragHighlight();
-                e.preventDefault();
-                return;
+                });
             }
-            dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
-            updateDragHighlight();
-        });
 
-        // 使用 document mousemove 检测拖动经过的单元格（避免输入框内文本选中导致 mouseenter 不触发）
-        document.addEventListener('mousemove', function(e) {
-            if (!dragSelect.active) return;
-            const el = document.elementFromPoint(e.clientX, e.clientY);
-            if (!el) return;
-            const input = el.closest('.cell-input');
-            if (!input) return;
-            if (input.dataset.col !== dragSelect.colKey) return;
-            const rowId = parseInt(input.dataset.id);
-            if (rowId !== dragSelect.endRowId) {
-                dragSelect.endRowId = rowId;
-                updateDragHighlight();
-            }
-        });
-
-        document.addEventListener('mouseup', function() {
-            if (dragSelect.active) {
-                dragSelect.active = false;
-            }
-        });
-
-        // 添加拖选粘贴的 CSS 样式
-        if (!document.getElementById('drag-select-style')) {
+            // 添加拖选粘贴的 CSS 样式
             const style = document.createElement('style');
             style.id = 'drag-select-style';
             style.textContent = `
@@ -1369,71 +1332,111 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             `;
             document.head.appendChild(style);
-        }
 
-        // Ctrl+V 粘贴到选中的单元格
-        document.addEventListener('paste', function(e) {
-            if (!dragSelect.startRowId || !dragSelect.endRowId || !dragSelect.colKey) return;
-
-            e.preventDefault(); // 阻止浏览器默认粘贴行为
-
-            const startId = dragSelect.startRowId;
-            const endId = dragSelect.endRowId;
-            const colKey = dragSelect.colKey;
-
-            const clipboardText = (e.clipboardData || window.clipboardData).getData('text');
-            if (!clipboardText) return;
-
-            const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
-            if (lines.length === 0) return;
-
-            const minId = Math.min(startId, endId);
-            const maxId = Math.max(startId, endId);
-
-            const selectedInputs = getTextInputCells().filter(input => {
-                if (input.dataset.col !== colKey) return false;
+            // 使用事件委托监听 mousedown（避免 renderTable 后事件丢失）
+            document.addEventListener('mousedown', function(e) {
+                var ds = window._dragSelect;
+                const input = e.target.closest('.cell-input');
+                if (!input) {
+                    // 点击非输入区域时清除选区
+                    if (ds.startRowId && !ds.active) {
+                        clearDragHighlight();
+                        window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
+                    }
+                    return;
+                }
+                // 排除非文本输入类型
+                if (input.classList.contains('address-select') || input.classList.contains('provider-search-input') ||
+                    input.classList.contains('months-input') || input.classList.contains('date-input') ||
+                    input.classList.contains('expense-input') || input.classList.contains('fee-input') ||
+                    input.classList.contains('password-input')) return;
+                const colKey = input.dataset.col;
                 const rowId = parseInt(input.dataset.id);
-                return rowId >= minId && rowId <= maxId;
+                // Shift+Click：从上次点击到当前行范围选择
+                if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
+                    window._dragSelect = { active: false, colKey: colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
+                    updateDragHighlight();
+                    e.preventDefault();
+                    return;
+                }
+                window._dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
+                updateDragHighlight();
             });
 
-            if (selectedInputs.length === 0) return;
-
-            let changed = 0;
-            selectedInputs.forEach((input, index) => {
-                // 单值粘贴：复制1个值，填到所有选中行
-                // 多值粘贴：复制多行，逐行填入
-                const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
-                if (value !== null) {
-                    input.value = value;
-                    handleCellChange(input);
-                    changed++;
+            // mousemove 检测拖动经过的单元格
+            document.addEventListener('mousemove', function(e) {
+                var ds = window._dragSelect;
+                if (!ds.active) return;
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                if (!el) return;
+                const input = el.closest('.cell-input');
+                if (!input) return;
+                if (input.dataset.col !== ds.colKey) return;
+                const rowId = parseInt(input.dataset.id);
+                if (rowId !== ds.endRowId) {
+                    ds.endRowId = rowId;
+                    updateDragHighlight();
                 }
             });
 
-            if (changed > 0) {
-                setStatus(`已粘贴 ${changed} 条数据`);
-                clearDragHighlight();
-                dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
-            }
-        });
+            document.addEventListener('mouseup', function() {
+                if (window._dragSelect.active) {
+                    window._dragSelect.active = false;
+                }
+            });
 
-        // 按 Escape 或点击非输入区域清除拖选
-        document.addEventListener('mousedown', function(e) {
-            if (dragSelect.startRowId && !dragSelect.active) {
-                // 点击非文本输入框区域时清除选区
-                if (!e.target.closest('.cell-input')) {
+            // Ctrl+V 粘贴到选中的单元格
+            document.addEventListener('paste', function(e) {
+                var ds = window._dragSelect;
+                if (!ds.startRowId || !ds.endRowId || !ds.colKey) return;
+
+                e.preventDefault();
+
+                const startId = ds.startRowId;
+                const endId = ds.endRowId;
+                const colKey = ds.colKey;
+
+                const clipboardText = (e.clipboardData || window.clipboardData).getData('text');
+                if (!clipboardText) return;
+
+                const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
+                if (lines.length === 0) return;
+
+                const minId = Math.min(startId, endId);
+                const maxId = Math.max(startId, endId);
+
+                const selectedInputs = getTextInputCells().filter(input => {
+                    if (input.dataset.col !== colKey) return false;
+                    const rowId = parseInt(input.dataset.id);
+                    return rowId >= minId && rowId <= maxId;
+                });
+
+                if (selectedInputs.length === 0) return;
+
+                let changed = 0;
+                selectedInputs.forEach((input, index) => {
+                    const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
+                    if (value !== null) {
+                        input.value = value;
+                        handleCellChange(input);
+                        changed++;
+                    }
+                });
+
+                if (changed > 0) {
+                    setStatus(`已粘贴 ${changed} 条数据`);
                     clearDragHighlight();
-                    dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
+                    window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
                 }
-            }
-        });
+            });
 
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                clearDragHighlight();
-                dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null };
-            }
-        });
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    clearDragHighlight();
+                    window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
+                }
+            });
+        }
 
         $$('.col-resize').forEach(handle => {
             let startX, startWidth, colKey;
@@ -1461,6 +1464,29 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                 };
+            };
+        });
+
+        // 密码列：点击***显示明文input，失焦恢复***
+        $$('.password-cell').forEach(cell => {
+            const mask = cell.querySelector('.password-mask');
+            const input = cell.querySelector('.password-input');
+            if (!mask || !input) return;
+            mask.onclick = function() {
+                mask.style.display = 'none';
+                input.style.display = '';
+                input.focus();
+                input.select();
+            };
+            input.onblur = function() {
+                const val = input.value;
+                mask.textContent = val ? '***' : '';
+                mask.style.display = '';
+                input.style.display = 'none';
+                handleCellChange(input);
+            };
+            input.onkeydown = function(e) {
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
             };
         });
     }
@@ -2947,9 +2973,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 sort_order: sortOrder
             });
             state.total++;
-            // 插入新行后清除筛选，否则新行可能不匹配筛选条件而不显示
-            state.filters = {};
-            state.page = 1;
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
