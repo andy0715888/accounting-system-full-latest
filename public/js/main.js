@@ -1385,10 +1385,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
 
-            // Ctrl+V 粘贴到选中的单元格
+            // Ctrl+V 粘贴到选中的单元格（仅多行选择时生效，单行由浏览器默认粘贴）
             document.addEventListener('paste', function(e) {
                 var ds = window._dragSelect;
+                // 单行选择时由浏览器默认粘贴处理，不拦截
                 if (!ds.startRowId || !ds.endRowId || !ds.colKey) return;
+                if (ds.startRowId === ds.endRowId) return;
 
                 e.preventDefault();
 
