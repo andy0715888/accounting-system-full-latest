@@ -203,7 +203,7 @@ body {
     table-layout: fixed !important;
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
+    font-size: 13px;
     min-width: 600px;
 }
 #dataTable th, #dataTable td {
@@ -361,7 +361,7 @@ body {
     border-bottom: 1px solid #ebeef5;
     vertical-align: middle;
     text-align: center;
-    font-size: 12px;
+    font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -395,7 +395,7 @@ body {
     border: 1px solid transparent;
     padding: 0px 3px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 13px;
     background: transparent;
     outline: none;
     transition: all 0.15s;
