@@ -1393,13 +1393,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (ds.startRowId === ds.endRowId) return;
 
                 e.preventDefault();
+                e.stopPropagation();
 
+                var clipboardText = '';
+                try { clipboardText = (e.clipboardData || window.clipboardData).getData('text'); } catch(ex) {}
+                
+                // 如果 clipboardData 无法获取，尝试异步读取
+                if (!clipboardText && navigator.clipboard && navigator.clipboard.readText) {
+                    navigator.clipboard.readText().then(function(text) {
+                        if (text) doMultiPaste(ds, text);
+                    }).catch(function() {});
+                    return;
+                }
+                if (!clipboardText) return;
+                
+                doMultiPaste(ds, clipboardText);
+            });
+
+            function doMultiPaste(ds, clipboardText) {
                 const startId = ds.startRowId;
                 const endId = ds.endRowId;
                 const colKey = ds.colKey;
-
-                const clipboardText = (e.clipboardData || window.clipboardData).getData('text');
-                if (!clipboardText) return;
 
                 const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
                 if (lines.length === 0) return;
@@ -1426,11 +1440,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
 
                 if (changed > 0) {
-                    setStatus(`已粘贴 ${changed} 条数据`);
+                    setStatus('已粘贴 ' + changed + ' 条数据');
                     clearDragHighlight();
                     window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
                 }
-            });
+            }
 
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') {
@@ -2878,18 +2892,24 @@ document.addEventListener('DOMContentLoaded', function() {
         state.page--;
         await loadRecords(state.currentTabId);
         renderTable(false);
+        const tw = $('#tableWrapper');
+        if (tw) tw.scrollTop = 0;
     });
     nextPageBtn.addEventListener('click', async () => {
         if (state.page >= state.totalPages) return;
         state.page++;
         await loadRecords(state.currentTabId);
         renderTable(false);
+        const tw = $('#tableWrapper');
+        if (tw) tw.scrollTop = 0;
     });
     pageSizeSelect.addEventListener('change', async () => {
         state.pageSize = parseInt(pageSizeSelect.value) || 50;
         state.page = 1;
         await loadRecords(state.currentTabId);
         renderTable(false);
+        const tw = $('#tableWrapper');
+        if (tw) tw.scrollTop = 0;
     });
 
     if (pageJumpBtn) {
