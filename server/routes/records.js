@@ -100,7 +100,7 @@ router.get('/', requireAuth, async (req, res) => {
         const limit = allMode ? total : pageSize;
 
         const records = await query(
-            `SELECT records.* FROM records LEFT JOIN records AS parent_rec ON records.parent_id = parent_rec.id WHERE records.user_id = ? AND records.tab_id = ?${filterWhere} ORDER BY CASE WHEN records.parent_id IS NULL THEN records.sort_order ELSE COALESCE(parent_rec.sort_order, records.sort_order) END, CASE WHEN records.parent_id IS NULL THEN 0 ELSE 1 END, records.sort_order, records.id LIMIT ? OFFSET ?`,
+            `SELECT * FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} ORDER BY CASE WHEN parent_id IS NULL THEN sort_order ELSE COALESCE((SELECT sort_order FROM records r2 WHERE r2.id = records.parent_id), sort_order) END, CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, sort_order, id LIMIT ? OFFSET ?`,
             [userId, tabId, ...filterParams, limit, offset]
         );
         const parsed = records.map(r => {
