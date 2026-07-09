@@ -601,6 +601,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 切换标签时重置剪切/复制状态
         state.copiedClientData = null;
         state.copiedClientRecordId = null;
+        state.copiedClientParentId = null;
         state.copiedServerData = null;
         // 独享/共享标签：默认只显示"有效"记录
         const tab = state.tabs.find(t => t.id === tabId);
@@ -3172,10 +3173,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!contextTargetId) return;
         const record = state.records.find(r => r.id === contextTargetId);
         if (!record || record.record_type !== 'client') return;
-        // Copy client-related fields (for later paste)
         state.copiedClientData = { ...record.data };
         state.copiedClientRecordId = record.id;
-        // 视觉提示：原行标记为已剪切
+        state.copiedClientParentId = record.parent_id;
         $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
         const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
         if (tr) tr.classList.add('cut-pending');
@@ -3195,8 +3195,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const oldId = state.copiedClientRecordId;
         if (oldId) {
-            const oldRec = state.records.find(r => r.id === oldId);
-            if (oldRec && oldRec.parent_id === contextTargetId) {
+            if (state.copiedClientParentId === contextTargetId) {
                 setStatus('无法粘贴：源客户已在当前服务器下');
                 return;
             }
@@ -3224,6 +3223,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             state.copiedClientData = null;
             state.copiedClientRecordId = null;
+            state.copiedClientParentId = null;
             $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
 
             await loadRecords(state.currentTabId);
