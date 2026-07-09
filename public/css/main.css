@@ -92,7 +92,7 @@ body {
     background: #f0f2f5;
     padding: 12px 20px 12px 20px;
 }
-.view-panel { display: none !important; flex-direction: column; height: 100%; }
+.view-panel { display: none !important; flex-direction: column; height: 100%; position: relative; }
 .view-panel.active { display: flex !important; }
 
 /* 标签栏 */
@@ -1567,4 +1567,47 @@ tr.server-row.has-children td:first-child {
     font-size: 16px;
     letter-spacing: 2px;
     opacity: 0.8;
+}
+
+.table-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+.table-loading-overlay.hidden {
+    display: none;
+}
+.loading-dots {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+}
+.loading-dots span {
+    width: 10px;
+    height: 10px;
+    background: #4a6cf7;
+    border-radius: 50%;
+    animation: dotBounce 1.2s ease-in-out infinite;
+}
+.loading-dots span:nth-child(1) { animation-delay: 0s; }
+.loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+.loading-dots span:nth-child(4) { animation-delay: 0.45s; }
+@keyframes dotBounce {
+    0%, 80%, 100% {
+        transform: scale(0.6);
+        opacity: 0.5;
+    }
+    40% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
 }

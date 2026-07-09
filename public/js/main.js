@@ -592,6 +592,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function switchTab(tabId, force = false) {
         if (tabId === state.currentTabId && !force) return;
+        showTableLoading();
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
@@ -607,6 +608,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 确保服务商选项已加载（避免切换标签后选项为空）
         if (!state.providerOptions.length) await loadProviderOptions();
         renderTable(false);
+        hideTableLoading();
         const currentTab = state.tabs.find(t => t.id === tabId);
         if (currentTab) document.getElementById('columnModalTabName').textContent = currentTab.name;
     }
@@ -1410,42 +1412,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 doMultiPaste(ds, clipboardText);
             });
 
-            function doMultiPaste(ds, clipboardText) {
-                const startId = ds.startRowId;
-                const endId = ds.endRowId;
-                const colKey = ds.colKey;
-
-                const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
-                if (lines.length === 0) return;
-
-                const minId = Math.min(startId, endId);
-                const maxId = Math.max(startId, endId);
-
-                const selectedInputs = getTextInputCells().filter(input => {
-                    if (input.dataset.col !== colKey) return false;
-                    const rowId = parseInt(input.dataset.id);
-                    return rowId >= minId && rowId <= maxId;
-                });
-
-                if (selectedInputs.length === 0) return;
-
-                let changed = 0;
-                selectedInputs.forEach((input, index) => {
-                    const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
-                    if (value !== null) {
-                        input.value = value;
-                        handleCellChange(input);
-                        changed++;
-                    }
-                });
-
-                if (changed > 0) {
-                    setStatus('已粘贴 ' + changed + ' 条数据');
-                    clearDragHighlight();
-                    window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
-                }
-            }
-
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') {
                     clearDragHighlight();
@@ -1738,6 +1704,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 openExpenseModal(recordId);
             });
         });
+    }
+
+    function getTextInputCellsAll() {
+        return $$('input.cell-input:not(.address-select):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input):not(.password-input)');
+    }
+
+    function doMultiPaste(ds, clipboardText) {
+        const startId = ds.startRowId;
+        const endId = ds.endRowId;
+        const colKey = ds.colKey;
+        const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
+        if (lines.length === 0) return;
+        const minId = Math.min(startId, endId);
+        const maxId = Math.max(startId, endId);
+        const selectedInputs = getTextInputCellsAll().filter(input => {
+            if (input.dataset.col !== colKey) return false;
+            const rowId = parseInt(input.dataset.id);
+            return rowId >= minId && rowId <= maxId;
+        });
+        if (selectedInputs.length === 0) return;
+        let changed = 0;
+        selectedInputs.forEach((input, index) => {
+            const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
+            if (value !== null) {
+                input.value = value;
+                handleCellChange(input);
+                changed++;
+            }
+        });
+        if (changed > 0) {
+            setStatus('已粘贴 ' + changed + ' 条数据');
+            $$('.cell-input.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+            window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
+        }
     }
 
     function handleCellChange(input) {
@@ -2520,17 +2520,24 @@ document.addEventListener('DOMContentLoaded', function() {
             const tabs = Object.values(tabMap).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
             const providers = Object.values(providerMap).sort((a, b) => Math.abs(b.net) - Math.abs(a.net)).slice(0, 8);
 
+            // 过滤掉未来的年份和月份（只显示当前年月及之前）
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = `${currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            const filteredMonths = months.filter(m => m.label <= currentMonth);
+            const filteredYears = years.filter(y => parseInt(y.label) <= currentYear);
+
             // 从 state 获取或默认时间范围
             const monthRange = state.statsMonthRange || 6;
             const yearRange = state.statsYearRange || 6;
-            const recentMonths = monthRange === 0 ? months : months.slice(-monthRange);
-            const recentYears = yearRange === 0 ? years : years.slice(-yearRange);
+            const recentMonths = monthRange === 0 ? filteredMonths : filteredMonths.slice(-monthRange);
+            const recentYears = yearRange === 0 ? filteredYears : filteredYears.slice(-yearRange);
             const maxMonthAmount = Math.max(1, ...recentMonths.map(m => Math.max(Math.abs(m.income), Math.abs(m.expense), Math.abs(m.net))));
             const maxTabNet = Math.max(1, ...tabs.map(t => Math.abs(t.net)));
             const maxProviderNet = Math.max(1, ...providers.map(p => Math.abs(p.net)));
 
-            const bestMonth = months.length ? months.reduce((best, item) => item.net > best.net ? item : best, months[0]) : null;
-            const worstMonth = months.length ? months.reduce((worst, item) => item.net < worst.net ? item : worst, months[0]) : null;
+            const bestMonth = filteredMonths.length ? filteredMonths.reduce((best, item) => item.net > best.net ? item : best, filteredMonths[0]) : null;
+            const worstMonth = filteredMonths.length ? filteredMonths.reduce((worst, item) => item.net < worst.net ? item : worst, filteredMonths[0]) : null;
 
             const monthRows = recentMonths.map(item => `
                 <tr>
@@ -2847,9 +2854,10 @@ document.addEventListener('DOMContentLoaded', function() {
     importBtn.addEventListener('click', showImportModal);
     refreshBtn.addEventListener('click', function() {
         if (state.currentTabId) {
+            showTableLoading();
             state.page = 1;
             invalidateCurrentTabCache();
-            loadRecords(state.currentTabId).then(() => renderTable(false));
+            loadRecords(state.currentTabId).then(() => { renderTable(false); hideTableLoading(); });
         }
     });
     manageColumnsBtn.addEventListener('click', showColumnManager);
@@ -3222,6 +3230,21 @@ document.addEventListener('DOMContentLoaded', function() {
         if (loadingOverlay) loadingOverlay.classList.add('hidden');
     }
 
+    let tableLoadingStartTime = 0;
+    const TABLE_LOADING_MIN_TIME = 300;
+    function showTableLoading() {
+        const el = document.getElementById('tableLoading');
+        if (el) { el.classList.remove('hidden'); tableLoadingStartTime = Date.now(); }
+    }
+    function hideTableLoading() {
+        const el = document.getElementById('tableLoading');
+        if (!el) return;
+        const elapsed = Date.now() - tableLoadingStartTime;
+        const remaining = TABLE_LOADING_MIN_TIME - elapsed;
+        if (remaining > 0) setTimeout(() => el.classList.add('hidden'), remaining);
+        else el.classList.add('hidden');
+    }
+
     // --- 初始化 ---
     async function init() {
         try {
@@ -3289,7 +3312,8 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             hideLoading();
-        } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideLoading(); }
+            hideTableLoading();
+        } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideLoading(); hideTableLoading(); }
     }
     init();
 });
