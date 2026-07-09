@@ -1,4 +1,9 @@
 document.addEventListener('DOMContentLoaded', function() {
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    setTimeout(() => {
+        if (loadingOverlay) loadingOverlay.classList.add('hidden');
+    }, 1500);
+
     const usernameInput = document.getElementById('username');
     const passwordInput = document.getElementById('password');
     const loginBtn = document.getElementById('loginBtn');

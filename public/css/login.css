@@ -166,6 +166,61 @@ body {
     display: none;
 }
 .error-msg.show { display: block; }
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    transition: opacity 0.5s ease;
+}
+.loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+.loading-spinner {
+    position: relative;
+    width: 100px;
+    height: 100px;
+}
+.loading-circle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: linear-gradient(135deg, #4a6cf7, #6a3de8);
+    border-radius: 50%;
+    animation: loadingOrbit 2s ease-in-out infinite;
+}
+@keyframes loadingOrbit {
+    0% {
+        transform: rotate(0deg) translateX(40px) rotate(0deg);
+        opacity: 1;
+        box-shadow: 0 0 10px rgba(74, 108, 247, 0.8);
+    }
+    50% {
+        opacity: 0.5;
+        box-shadow: 0 0 20px rgba(74, 108, 247, 0.4);
+    }
+    100% {
+        transform: rotate(360deg) translateX(40px) rotate(-360deg);
+        opacity: 1;
+        box-shadow: 0 0 10px rgba(74, 108, 247, 0.8);
+    }
+}
+.loading-text {
+    margin-top: 30px;
+    color: #fff;
+    font-size: 16px;
+    letter-spacing: 2px;
+    opacity: 0.8;
+}
+
 @media (max-width: 768px) {
     .login-container { justify-content: center; padding: 20px; }
     .login-card {

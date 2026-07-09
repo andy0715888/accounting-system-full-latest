@@ -3217,6 +3217,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Delete' && !e.target.closest('input') && !e.target.closest('select')) deleteSelected();
     });
 
+    function hideLoading() {
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        if (loadingOverlay) loadingOverlay.classList.add('hidden');
+    }
+
     // --- 初始化 ---
     async function init() {
         try {
@@ -3282,7 +3287,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     window.open(fullUrl, '_blank');
                 }
             });
-        } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); }
+
+            hideLoading();
+        } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideLoading(); }
     }
     init();
 });
