@@ -3177,7 +3177,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.copiedClientData = { ...record.data };
         state.copiedClientRecordId = record.id;
         state.copiedClientParentId = record.parent_id;
-        console.log('剪切客户:', { clientId: record.id, parentId: record.parent_id, parentName: state.records.find(r => r.id === record.parent_id)?.data?.provider });
+        console.log('剪切客户 - clientId:', record.id, ', parentId:', record.parent_id, ', parentName:', state.records.find(r => r.id === record.parent_id)?.data?.provider);
         $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
         const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
         if (tr) tr.classList.add('cut-pending');
@@ -3195,13 +3195,11 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
-        console.log('粘贴客户:', { 
-            copiedClientRecordId: state.copiedClientRecordId, 
-            copiedClientParentId: state.copiedClientParentId, 
-            targetServerId: contextTargetId, 
-            targetServerName: parentRecord.data?.provider,
-            isSameServer: state.copiedClientParentId === contextTargetId 
-        });
+        console.log('粘贴客户 - copiedClientRecordId:', state.copiedClientRecordId, 
+            ', copiedClientParentId:', state.copiedClientParentId, 
+            ', targetServerId:', contextTargetId, 
+            ', targetServerName:', parentRecord.data?.provider,
+            ', isSameServer:', state.copiedClientParentId === contextTargetId);
         const oldId = state.copiedClientRecordId;
         if (oldId) {
             if (state.copiedClientParentId === contextTargetId) {
