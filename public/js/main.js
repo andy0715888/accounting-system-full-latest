@@ -445,6 +445,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Server-only columns (inherited by client rows, not editable)
     const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info', 'address']);
+    const CLIENT_INHERITED_COLS = new Set(['ip_address', 'password', 'domain', 'remark']);
     // Client-only columns (only meaningful for client rows, empty/readonly on server rows)
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
@@ -734,46 +735,62 @@ document.addEventListener('DOMContentLoaded', function() {
         const tabBar = document.querySelector('.tab-bar');
         if (!tabBar) return;
 
-        tabBar.addEventListener('dragstart', function(e) {
+        const newTabBar = tabBar.cloneNode(true);
+        tabBar.parentNode.replaceChild(newTabBar, tabBar);
+
+        newTabBar.addEventListener('dragstart', function(e) {
             const tabItem = e.target.closest('.tab-item');
-            if (!tabItem || !state.tabManageMode) { e.preventDefault(); return; }
+            if (!tabItem || !state.tabManageMode) {
+                e.preventDefault();
+                return;
+            }
             dragTabId = parseInt(tabItem.dataset.tabId);
             tabItem.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', String(dragTabId));
         });
 
-        tabBar.addEventListener('dragend', function(e) {
+        newTabBar.addEventListener('dragend', function(e) {
             document.querySelectorAll('.tab-item.dragging').forEach(el => el.classList.remove('dragging'));
             document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
             dragTabId = null;
         });
 
-        tabBar.addEventListener('dragover', function(e) {
+        newTabBar.addEventListener('dragover', function(e) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             const tabItem = e.target.closest('.tab-item');
-            if (!tabItem) return;
+            if (!tabItem || !state.tabManageMode) return;
             document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
             tabItem.classList.add('drag-over');
         });
 
-        tabBar.addEventListener('dragleave', function(e) {
+        newTabBar.addEventListener('dragleave', function(e) {
             const tabItem = e.target.closest('.tab-item');
             if (tabItem) tabItem.classList.remove('drag-over');
         });
 
-        tabBar.addEventListener('drop', async function(e) {
+        newTabBar.addEventListener('drop', async function(e) {
             e.preventDefault();
             document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
-            if (!dragTabId) return;
+            
+            if (!state.tabManageMode) return;
+            
             const tabItem = e.target.closest('.tab-item');
             if (!tabItem) return;
+            
             const targetTabId = parseInt(tabItem.dataset.tabId);
-            if (dragTabId === targetTabId) return;
+            if (!dragTabId || dragTabId === targetTabId) {
+                dragTabId = null;
+                return;
+            }
 
             const fromIdx = state.tabs.findIndex(t => t.id === dragTabId);
             const toIdx = state.tabs.findIndex(t => t.id === targetTabId);
-            if (fromIdx < 0 || toIdx < 0) return;
+            if (fromIdx < 0 || toIdx < 0) {
+                dragTabId = null;
+                return;
+            }
 
             const [moved] = state.tabs.splice(fromIdx, 1);
             state.tabs.splice(toIdx, 0, moved);
@@ -782,7 +799,11 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const tabIds = state.tabs.map(t => t.id);
                 await API.post('/tabs/reorder', { tabIds });
-            } catch (err) { setStatus('排序保存失败: ' + err.message); }
+            } catch (err) { 
+                setStatus('排序保存失败: ' + err.message); 
+            } finally {
+                dragTabId = null;
+            }
         });
     }
 
@@ -859,6 +880,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Client row: server columns show empty (inherited from parent, not editable)
                 if (isClient && isServerOnlyCol) {
                     tbodyHtml += `<td class="inherited-cell"></td>`;
+                    return;
+                }
+                // Client row in shared tab: ip_address/password/domain/remark inherited from server, gray and not editable
+                if (isClient && isSharedTab() && CLIENT_INHERITED_COLS.has(colKey)) {
+                    const displayVal = colKey === 'password' && val ? '***' : val;
+                    tbodyHtml += `<td class="inherited-cell">${escapeHtml(String(displayVal))}</td>`;
                     return;
                 }
                 // Server row in shared tab: client date columns sync from host, not editable
@@ -973,7 +1000,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                 } else if (colKey === 'password') {
                     const isEmpty = !val;
-                    const displayMask = val ? '***' : '✎ 点击设置密码';
+                    const displayMask = val ? '***' : '✎ 点击设置';
                     const emptyClass = isEmpty ? ' password-empty' : '';
                     inputHtml = `<div class="password-cell" data-id="${record.id}" data-col="password"><span class="password-mask${emptyClass}">${escapeHtml(displayMask)}</span><input type="text" class="cell-input password-input" data-col="password" data-id="${record.id}" value="${escapeAttr(val || '')}" /></div>`;
                 } else {
@@ -1512,7 +1539,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     mask.textContent = '***';
                     mask.classList.remove('password-empty');
                 } else {
-                    mask.textContent = '✎ 点击设置密码';
+                    mask.textContent = '✎ 点击设置';
                     mask.classList.add('password-empty');
                 }
             };
@@ -1833,7 +1860,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             mask.textContent = '***';
                             mask.classList.remove('password-empty');
                         } else {
-                            mask.textContent = '✎ 点击设置密码';
+                            mask.textContent = '✎ 点击设置';
                             mask.classList.add('password-empty');
                         }
                     }
@@ -3166,7 +3193,6 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
-        // 防止粘贴到同一服务器下（无意义操作）
         const oldId = state.copiedClientRecordId;
         if (oldId) {
             const oldRec = state.records.find(r => r.id === oldId);
@@ -3177,7 +3203,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try {
             setStatus('移动中...');
-            // 仅保留当前标签的列 + copiedClientData 中的键
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
             Object.keys(state.copiedClientData || {}).forEach(k => { data[k] = state.copiedClientData[k]; });
@@ -3190,12 +3215,10 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const newRecordId = result && result.id;
 
-            // Migrate income records from old record to new record
             if (oldId && newRecordId) {
                 await API.post('/income/migrate', { from_record_id: oldId, to_record_id: newRecordId });
                 await API.delete('/records/' + oldId);
             } else if (oldId) {
-                // 新记录创建失败但有旧记录，保留旧记录，避免数据丢失
                 setStatus('新记录创建失败，已保留原客户信息');
                 return;
             }
