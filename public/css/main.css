@@ -1514,6 +1514,33 @@ tr.server-row.has-children td:first-child {
     border-left: 3px solid #4a90d9;
 }
 
+/* === 密码列样式 === */
+.password-cell { position: relative; min-width: 80px; width: 100%; }
+.password-mask { display: block; cursor: pointer; padding: 2px 4px; box-sizing: border-box; }
+.password-mask.password-empty { color: #bbb; font-style: italic; }
+.password-cell .password-input { display: none; width: 100%; box-sizing: border-box; }
+.password-cell.editing .password-mask { display: none; }
+.password-cell.editing .password-input { display: block; }
+
+/* === 已剪切的客户行样式（视觉提示） === */
+tr.client-row.cut-pending {
+    opacity: 0.45;
+    background: #fff7e6 !important;
+    position: relative;
+}
+tr.client-row.cut-pending::before {
+    content: '✂️ 已剪切';
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #fa8c16;
+    font-size: 11px;
+    font-weight: 600;
+    pointer-events: none;
+    z-index: 1;
+}
+
 .loading-overlay {
     position: fixed;
     top: 0;

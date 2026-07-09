@@ -597,6 +597,10 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
+        // 切换标签时重置剪切/复制状态
+        state.copiedClientData = null;
+        state.copiedClientRecordId = null;
+        state.copiedServerData = null;
         // 独享/共享标签：默认只显示"有效"记录
         const tab = state.tabs.find(t => t.id === tabId);
         if (tab && (tab.tab_type === 'dedicated' || tab.tab_type === 'shared')) {
@@ -839,7 +843,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const isClient = record.record_type === 'client';
             const isServer = !isClient && isSharedTab();
             const hasChildren = isServer && state.records.some(r => r.parent_id === record.id);
-            tbodyHtml += `<tr class="${isSelected ? 'selected' : ''} ${isClient ? 'client-row' : ''} ${isServer ? 'server-row' : ''} ${hasChildren ? 'has-children' : ''}" data-id="${record.id}" data-type="${record.record_type || 'server'}" data-parent="${record.parent_id || ''}">`;
+            const isCut = state.copiedClientRecordId === record.id;
+            const cutClass = isCut ? ' cut-pending' : '';
+            tbodyHtml += `<tr class="${isSelected ? 'selected' : ''} ${isClient ? 'client-row' : ''} ${isServer ? 'server-row' : ''} ${hasChildren ? 'has-children' : ''}${cutClass}" data-id="${record.id}" data-type="${record.record_type || 'server'}" data-parent="${record.parent_id || ''}">`;
             if (state.rowManageMode) {
                 tbodyHtml += `<td><input type="checkbox" class="row-checkbox" data-id="${record.id}" ${isSelected ? 'checked' : ''} /></td>`;
             }
@@ -966,8 +972,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     `;
                 } else if (colKey === 'password') {
-                    const masked = val ? '***' : '';
-                    inputHtml = `<div class="password-cell" data-id="${record.id}" data-col="password"><span class="password-mask" style="cursor:pointer;">${escapeHtml(masked)}</span><input type="text" class="cell-input password-input" data-col="password" data-id="${record.id}" value="${escapeAttr(val || '')}" style="display:none;" /></div>`;
+                    const isEmpty = !val;
+                    const displayMask = val ? '***' : '✎ 点击设置密码';
+                    const emptyClass = isEmpty ? ' password-empty' : '';
+                    inputHtml = `<div class="password-cell" data-id="${record.id}" data-col="password"><span class="password-mask${emptyClass}">${escapeHtml(displayMask)}</span><input type="text" class="cell-input password-input" data-col="password" data-id="${record.id}" value="${escapeAttr(val || '')}" /></div>`;
                 } else {
                     const inputType = col.col_type === 'number' ? 'number' : 'text';
                     const step = col.col_type === 'number' ? 'step="0.01"' : '';
@@ -1298,12 +1306,13 @@ document.addEventListener('DOMContentLoaded', function() {
             window._dragSelectBound = true;
             window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
 
-            function clearDragHighlight() {
-                $$('.cell-input.drag-selected').forEach(el => el.classList.remove('drag-selected'));
-            }
-
+            // 拖选支持的输入框类型（已排除：地址选择、月数步进、支出/收入等计算列）
+            // 包含：普通文本、数字、日期、密码、客户名、域名、备注等所有可编辑列
             function getTextInputCells() {
-                return $$('input.cell-input:not(.address-select):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input):not(.password-input)');
+                return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input)');
+            }
+            function clearDragHighlight() {
+                $$('.cell-input.drag-selected, .password-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
             }
 
             function updateDragHighlight() {
@@ -1313,15 +1322,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 const startId = ds.startRowId;
                 const endId = ds.endRowId;
                 if (!startId || !endId) return;
+                const minId = Math.min(startId, endId);
+                const maxId = Math.max(startId, endId);
+                // 普通 input 单元格
                 getTextInputCells().forEach(input => {
-                    if (input.dataset.col === ds.colKey) {
-                        const rowId = parseInt(input.dataset.id);
-                        if (rowId === startId || rowId === endId ||
-                            (rowId > Math.min(startId, endId) && rowId < Math.max(startId, endId))) {
-                            input.classList.add('drag-selected');
-                        }
+                    if (input.dataset.col !== ds.colKey) return;
+                    const rowId = parseInt(input.dataset.id);
+                    if (rowId >= minId && rowId <= maxId) {
+                        input.classList.add('drag-selected');
                     }
                 });
+                // 密码单元格特殊处理（需要选整个 cell 而不是 input）
+                if (ds.colKey === 'password') {
+                    $$('.password-cell').forEach(cell => {
+                        if (cell.dataset.col !== 'password') return;
+                        const rowId = parseInt(cell.dataset.id);
+                        if (rowId >= minId && rowId <= maxId) {
+                            cell.classList.add('drag-selected');
+                        }
+                    });
+                }
             }
 
             // 添加拖选粘贴的 CSS 样式
@@ -1333,13 +1353,33 @@ document.addEventListener('DOMContentLoaded', function() {
                     outline-offset: -2px;
                     background-color: #e6f7ff !important;
                 }
+                .password-cell.drag-selected {
+                    outline: 2px solid #1890ff !important;
+                    outline-offset: -2px;
+                    background-color: #e6f7ff !important;
+                }
             `;
             document.head.appendChild(style);
 
             // 使用事件委托监听 mousedown（避免 renderTable 后事件丢失）
             document.addEventListener('mousedown', function(e) {
                 var ds = window._dragSelect;
-                const input = e.target.closest('.cell-input');
+                // 优先判断密码单元格
+                let input = e.target.closest('.password-cell');
+                if (input) {
+                    const colKey = input.dataset.col;
+                    const rowId = parseInt(input.dataset.id);
+                    if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
+                        window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
+                        updateDragHighlight();
+                        e.preventDefault();
+                        return;
+                    }
+                    window._dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
+                    updateDragHighlight();
+                    return;
+                }
+                input = e.target.closest('.cell-input');
                 if (!input) {
                     // 点击非输入区域时清除选区
                     if (ds.startRowId && !ds.active) {
@@ -1350,14 +1390,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 // 排除非文本输入类型
                 if (input.classList.contains('address-select') ||
-                    input.classList.contains('months-input') || input.classList.contains('date-input') ||
-                    input.classList.contains('expense-input') || input.classList.contains('fee-input') ||
-                    input.classList.contains('password-input')) return;
+                    input.classList.contains('months-input') || input.classList.contains('expense-input') ||
+                    input.classList.contains('fee-input') || input.classList.contains('provider-search-input')) return;
                 const colKey = input.dataset.col;
                 const rowId = parseInt(input.dataset.id);
                 // Shift+Click：从上次点击到当前行范围选择
                 if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
-                    window._dragSelect = { active: false, colKey: colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
+                    window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
                     updateDragHighlight();
                     e.preventDefault();
                     return;
@@ -1372,7 +1411,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!ds.active) return;
                 const el = document.elementFromPoint(e.clientX, e.clientY);
                 if (!el) return;
-                const input = el.closest('.cell-input');
+                // 优先检查密码单元格
+                let input = el.closest('.password-cell');
+                if (input) {
+                    if (input.dataset.col !== ds.colKey) return;
+                    const rowId = parseInt(input.dataset.id);
+                    if (rowId !== ds.endRowId) {
+                        ds.endRowId = rowId;
+                        updateDragHighlight();
+                    }
+                    return;
+                }
+                input = el.closest('.cell-input');
                 if (!input) return;
                 if (input.dataset.col !== ds.colKey) return;
                 const rowId = parseInt(input.dataset.id);
@@ -1400,7 +1450,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 var clipboardText = '';
                 try { clipboardText = (e.clipboardData || window.clipboardData).getData('text'); } catch(ex) {}
-                
+
                 // 如果 clipboardData 无法获取，尝试异步读取
                 if (!clipboardText && navigator.clipboard && navigator.clipboard.readText) {
                     navigator.clipboard.readText().then(function(text) {
@@ -1409,7 +1459,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 if (!clipboardText) return;
-                
+
                 doMultiPaste(ds, clipboardText);
             });
 
@@ -1455,18 +1505,35 @@ document.addEventListener('DOMContentLoaded', function() {
             const mask = cell.querySelector('.password-mask');
             const input = cell.querySelector('.password-input');
             if (!mask || !input) return;
-            mask.onclick = function() {
-                mask.style.display = 'none';
-                input.style.display = '';
+            // 显示密码遮罩（带"点击编辑"占位符，避免删除后无法再次点击）
+            const updateMaskDisplay = function() {
+                const val = input.value;
+                if (val) {
+                    mask.textContent = '***';
+                    mask.classList.remove('password-empty');
+                } else {
+                    mask.textContent = '✎ 点击设置密码';
+                    mask.classList.add('password-empty');
+                }
+            };
+            updateMaskDisplay();
+            // 使用 class 切换显示，避免 CSS 默认 display:none 干扰
+            const showInput = function() {
+                cell.classList.add('editing');
                 input.focus();
                 input.select();
             };
-            input.onblur = function() {
-                const val = input.value;
-                mask.textContent = val ? '***' : '';
-                mask.style.display = '';
-                input.style.display = 'none';
+            const hideInput = function() {
+                cell.classList.remove('editing');
+                updateMaskDisplay();
                 handleCellChange(input);
+            };
+            mask.onclick = function(e) {
+                e.stopPropagation();
+                showInput();
+            };
+            input.onblur = function() {
+                hideInput();
             };
             input.onkeydown = function(e) {
                 if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
@@ -1708,7 +1775,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getTextInputCellsAll() {
-        return $$('input.cell-input:not(.address-select):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input):not(.password-input)');
+        return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input)');
     }
 
     function doMultiPaste(ds, clipboardText) {
@@ -1719,25 +1786,77 @@ document.addEventListener('DOMContentLoaded', function() {
         if (lines.length === 0) return;
         const minId = Math.min(startId, endId);
         const maxId = Math.max(startId, endId);
-        const selectedInputs = getTextInputCellsAll().filter(input => {
-            if (input.dataset.col !== colKey) return false;
-            const rowId = parseInt(input.dataset.id);
-            return rowId >= minId && rowId <= maxId;
-        });
-        if (selectedInputs.length === 0) return;
+
+        // 收集目标行 ID（按行号排序）
+        const targetRowIds = [];
+        if (colKey === 'password') {
+            $$('.password-cell').forEach(cell => {
+                if (cell.dataset.col !== colKey) return;
+                const rowId = parseInt(cell.dataset.id);
+                if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+            });
+        } else {
+            getTextInputCellsAll().forEach(input => {
+                if (input.dataset.col !== colKey) return;
+                const rowId = parseInt(input.dataset.id);
+                if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+            });
+        }
+        targetRowIds.sort((a, b) => a - b);
+        if (targetRowIds.length === 0) return;
+
         let changed = 0;
-        selectedInputs.forEach((input, index) => {
+        targetRowIds.forEach((rowId, index) => {
+            // 单行复制：用同一内容填所有；多行：按行对应
             const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
-            if (value !== null) {
-                input.value = value;
-                handleCellChange(input);
-                changed++;
+            if (value === null) return;
+            const record = state.records.find(r => r.id === rowId);
+            if (!record) return;
+            const col = state.columns.find(c => c.col_key === colKey);
+            if (!col) return;
+            // 跳过 readonly 列
+            if (colKey === 'expense' || colKey === 'fee' || colKey === 'host_expire' || col.col_type === 'days_remaining' || colKey === 'is_expired') return;
+
+            if (record.data[colKey] === value) return; // 没有变化
+            record.data[colKey] = value;
+            record._updated = true;
+
+            // 同步更新 input 的值（密码/日期）
+            if (colKey === 'password') {
+                const cell = document.querySelector(`.password-cell[data-id="${rowId}"][data-col="password"]`);
+                if (cell) {
+                    const input = cell.querySelector('.password-input');
+                    const mask = cell.querySelector('.password-mask');
+                    if (input) input.value = value;
+                    if (mask) {
+                        if (value) {
+                            mask.textContent = '***';
+                            mask.classList.remove('password-empty');
+                        } else {
+                            mask.textContent = '✎ 点击设置密码';
+                            mask.classList.add('password-empty');
+                        }
+                    }
+                }
+            } else {
+                const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
+                if (input) input.value = value;
             }
+
+            // 联动计算
+            if (colKey === 'ip_address') record.data.ip_info = value;
+            saveRecord(record);
+            changed++;
         });
+
         if (changed > 0) {
             setStatus('已粘贴 ' + changed + ' 条数据');
-            $$('.cell-input.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+            $$('.cell-input.drag-selected, .password-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
             window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
+            // 重新渲染表格以更新联动列（如 open-link 按钮、host_expire 计算等）
+            if (colKey === 'ip_address' || colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address') {
+                renderTable(false);
+            }
         }
     }
 
@@ -3029,7 +3148,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Copy client-related fields (for later paste)
         state.copiedClientData = { ...record.data };
         state.copiedClientRecordId = record.id;
-        setStatus('客户信息已剪切，可在其他服务器行右键粘贴（原记录将删除）');
+        // 视觉提示：原行标记为已剪切
+        $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+        const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
+        if (tr) tr.classList.add('cut-pending');
+        setStatus('客户信息已剪切 ✂️，请在其他服务器行右键粘贴（粘贴时原记录会删除）');
     });
 
     ctxPasteClient.addEventListener('click', async () => {
@@ -3043,11 +3166,21 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
+        // 防止粘贴到同一服务器下（无意义操作）
+        const oldId = state.copiedClientRecordId;
+        if (oldId) {
+            const oldRec = state.records.find(r => r.id === oldId);
+            if (oldRec && oldRec.parent_id === contextTargetId) {
+                setStatus('无法粘贴：源客户已在当前服务器下');
+                return;
+            }
+        }
         try {
             setStatus('移动中...');
+            // 仅保留当前标签的列 + copiedClientData 中的键
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
-            Object.keys(state.copiedClientData).forEach(k => { data[k] = state.copiedClientData[k]; });
+            Object.keys(state.copiedClientData || {}).forEach(k => { data[k] = state.copiedClientData[k]; });
 
             const result = await API.post('/records', {
                 tab_id: state.currentTabId,
@@ -3055,24 +3188,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 record_type: 'client',
                 parent_id: contextTargetId
             });
-            const newRecordId = result.id;
+            const newRecordId = result && result.id;
 
             // Migrate income records from old record to new record
-            const oldId = state.copiedClientRecordId;
             if (oldId && newRecordId) {
                 await API.post('/income/migrate', { from_record_id: oldId, to_record_id: newRecordId });
                 await API.delete('/records/' + oldId);
-            } else {
-                // No old record to delete (shouldn't happen, but safe)
-                if (oldId) await API.delete('/records/' + oldId);
+            } else if (oldId) {
+                // 新记录创建失败但有旧记录，保留旧记录，避免数据丢失
+                setStatus('新记录创建失败，已保留原客户信息');
+                return;
             }
             state.copiedClientData = null;
             state.copiedClientRecordId = null;
+            $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
 
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            setStatus('客户已移动到新服务器');
+            setStatus('客户已移动到新服务器 ✓');
         } catch (err) { setStatus('移动失败: ' + err.message); }
     });
 
@@ -3139,12 +3273,22 @@ document.addEventListener('DOMContentLoaded', function() {
         contextMenu.style.display = 'none';
         const ds = window._dragSelect;
         if (!ds || !ds.startRowId || !ds.endRowId || ds.startRowId === ds.endRowId || !ds.colKey) return;
+        // 多种方式读取剪贴板
+        let text = '';
         try {
-            const text = await navigator.clipboard.readText();
-            if (text) doMultiPaste(ds, text);
-        } catch (err) {
-            setStatus('无法读取剪贴板，请使用 Ctrl+V 粘贴');
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                text = await navigator.clipboard.readText();
+            }
+        } catch (e) {}
+        if (!text) {
+            // 提示用户使用 Ctrl+V
+            setStatus('请使用 Ctrl+V 进行批量粘贴（菜单无法直接读取剪贴板）');
+            // 触发一次 paste 事件
+            const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: new DataTransfer() });
+            // 无法通过 ClipboardEvent 设置剪贴板内容，提示用户手动粘贴
+            return;
         }
+        if (text) doMultiPaste(ds, text);
     });
 
     async function addRowClient(parentId) {
