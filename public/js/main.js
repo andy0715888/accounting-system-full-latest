@@ -3100,6 +3100,8 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
+        const targetRec = state.records.find(r => r.id === contextTargetId);
+        console.log('右键 - id:', contextTargetId, 'type:', recordType, 'parent_id:', targetRec?.parent_id, 'name:', targetRec?.data?.provider || targetRec?.data?.client_name);
 
         // 独享标签：在上方插入一行
         ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
