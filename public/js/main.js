@@ -456,6 +456,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const ctxCopyServer = $('#ctxCopyServer');
     const ctxPasteServer = $('#ctxPasteServer');
     const ctxDeleteRecord = $('#ctxDeleteRecord');
+    const ctxBatchPaste = $('#ctxBatchPaste');
 
     async function loadRecords(tabId) {
         await flushPendingSaves();
@@ -2966,6 +2967,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // 共享标签：服务器行不显示删除（有客户关联），客户行可以删除；独享标签不显示删除
         const canDelete = isShared ? (recordType === 'client') : false;
         ctxDeleteRecord.style.display = canDelete ? 'block' : 'none';
+        // 批量粘贴：当选中了多个单元格时显示
+        const ds = window._dragSelect;
+        const hasMultiSelection = ds && ds.startRowId && ds.endRowId && ds.startRowId !== ds.endRowId && ds.colKey;
+        ctxBatchPaste.style.display = hasMultiSelection ? 'block' : 'none';
 
         contextMenu.style.display = 'block';
         contextMenu.style.left = e.clientX + 'px';
@@ -3128,6 +3133,18 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTable(false);
             setStatus('已删除');
         } catch (err) { setStatus('删除失败: ' + err.message); }
+    });
+
+    ctxBatchPaste.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        const ds = window._dragSelect;
+        if (!ds || !ds.startRowId || !ds.endRowId || ds.startRowId === ds.endRowId || !ds.colKey) return;
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text) doMultiPaste(ds, text);
+        } catch (err) {
+            setStatus('无法读取剪贴板，请使用 Ctrl+V 粘贴');
+        }
     });
 
     async function addRowClient(parentId) {
