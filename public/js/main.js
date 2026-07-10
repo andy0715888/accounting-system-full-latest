@@ -3096,6 +3096,10 @@ document.addEventListener('DOMContentLoaded', function() {
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
+        console.log('=== 右键点击调试 ===');
+        console.log('contextTargetId:', contextTargetId, '类型:', typeof contextTargetId);
+        console.log('recordType:', recordType);
+        console.log('行数据:', targetRec?.data?.provider || targetRec?.data?.client_name);
         // 独享标签：在上方插入一行
         ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
         // 共享标签菜单项
@@ -3188,6 +3192,11 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
+        console.log('=== 粘贴客户调试 ===');
+        console.log('contextTargetId:', contextTargetId, '类型:', typeof contextTargetId);
+        console.log('目标服务器:', parentRecord.data?.provider, 'ID:', parentRecord.id);
+        console.log('待粘贴客户ID:', state.copiedClientRecordId);
+        console.log('待粘贴客户原父ID:', state.copiedClientParentId);
         const oldId = state.copiedClientRecordId;
         if (oldId) {
             if (state.copiedClientParentId === contextTargetId) {
@@ -3207,6 +3216,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 record_type: 'client',
                 parent_id: contextTargetId
             });
+            console.log('创建新记录结果:', result);
             const newRecordId = result && result.id;
 
             if (oldId && newRecordId) {
@@ -3437,6 +3447,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (state.tabs.length === 0) await createDefaultTab();
             else {
                 state.currentTabId = state.tabs[0].id;
+                state.filters = { is_expired: ['有效'] };
                 await loadDataForTab(state.currentTabId);
             }
             collectProviderOptionsFromRecords();
