@@ -45,7 +45,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // 行管理模式
         rowManageMode: false,
         // 待保存记录追踪
-        pendingSaves: new Set()
+        pendingSaves: new Set(),
+        // 撤销栈
+        undoStack: []
     };
 
     // DOM 引用
@@ -1829,6 +1831,20 @@ document.addEventListener('DOMContentLoaded', function() {
         targetRowIds.sort((a, b) => a - b);
         if (targetRowIds.length === 0) return;
 
+        // 保存原始数据到撤销栈
+        const undoData = [];
+        targetRowIds.forEach(rowId => {
+            const record = state.records.find(r => r.id === rowId);
+            if (record) {
+                undoData.push({
+                    recordId: rowId,
+                    colKey: colKey,
+                    oldValue: record.data[colKey]
+                });
+            }
+        });
+        state.undoStack.push({ type: 'multi_paste', data: undoData });
+
         let changed = 0;
         targetRowIds.forEach((rowId, index) => {
             // 单行复制：用同一内容填所有；多行：按行对应
@@ -3206,24 +3222,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try {
             setStatus('移动中...');
-            const data = {};
-            state.columns.forEach(col => { data[col.col_key] = ''; });
-            Object.keys(state.copiedClientData || {}).forEach(k => { data[k] = state.copiedClientData[k]; });
-
-            const result = await API.post('/records', {
-                tab_id: state.currentTabId,
-                data,
-                record_type: 'client',
-                parent_id: contextTargetId
+            console.log('直接移动客户记录:', oldId, '-> parent_id:', contextTargetId);
+            const result = await API.post('/records/move', {
+                record_id: oldId,
+                new_parent_id: contextTargetId
             });
-            console.log('创建新记录结果:', result);
-            const newRecordId = result && result.id;
-
-            if (oldId && newRecordId) {
-                await API.post('/income/migrate', { from_record_id: oldId, to_record_id: newRecordId });
-                await API.delete('/records/' + oldId);
-            } else if (oldId) {
-                setStatus('新记录创建失败，已保留原客户信息');
+            console.log('移动结果:', result);
+            if (!result.success) {
+                setStatus('移动失败: ' + result.error);
                 return;
             }
             state.copiedClientData = null;
@@ -3409,9 +3415,30 @@ document.addEventListener('DOMContentLoaded', function() {
     saveRegisterSwitchBtn.addEventListener('click', saveRegisterSwitch);
     saveSuffixBtn.addEventListener('click', saveSuffixSettings);
 
+    async function undoLastAction() {
+        if (state.undoStack.length === 0) {
+            setStatus('⚠️ 没有可撤销的操作');
+            return;
+        }
+        const lastAction = state.undoStack.pop();
+        if (lastAction.type === 'multi_paste') {
+            lastAction.data.forEach(item => {
+                const record = state.records.find(r => r.id === item.recordId);
+                if (record) {
+                    record.data[item.colKey] = item.oldValue;
+                    record._updated = true;
+                }
+            });
+            await flushPendingSaves();
+            renderTable(false);
+            setStatus('✅ 已撤销批量粘贴操作');
+        }
+    }
+
     document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.key === 'n') { e.preventDefault(); addRow(); }
         if (e.key === 'Delete' && !e.target.closest('input') && !e.target.closest('select')) deleteSelected();
+        if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undoLastAction(); }
     });
 
     function hideLoading() {
@@ -3452,7 +3479,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             collectProviderOptionsFromRecords();
             renderTabs();
-            renderTable(true);
+            renderTable(false);
             setStatus('✅ 加载完成');
             const tab = state.tabs.find(t => t.id === state.currentTabId);
             if (tab) document.getElementById('columnModalTabName').textContent = tab.name;

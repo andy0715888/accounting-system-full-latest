@@ -323,6 +323,24 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 });
 
+router.post('/move', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { record_id, new_parent_id } = req.body;
+        if (!record_id) return res.status(400).json({ error: '缺少 record_id' });
+
+        const existing = await queryOne('SELECT id, parent_id, record_type FROM records WHERE id = ? AND user_id = ?', [record_id, userId]);
+        if (!existing) return res.status(404).json({ error: '记录不存在' });
+        if (existing.record_type !== 'client') return res.status(400).json({ error: '只能移动客户记录' });
+
+        await execute('UPDATE records SET parent_id = ? WHERE id = ?', [new_parent_id, record_id]);
+        res.json({ success: true, message: '移动成功' });
+    } catch (err) {
+        console.error('移动记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 router.post('/batch-delete', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
