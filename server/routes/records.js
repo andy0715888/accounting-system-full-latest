@@ -335,10 +335,26 @@ router.post('/move', requireAuth, async (req, res) => {
         const userId = req.session.userId;
         const { record_id, new_parent_id } = req.body;
         if (!record_id) return res.status(400).json({ error: '缺少 record_id' });
+        if (!new_parent_id) return res.status(400).json({ error: '缺少 new_parent_id' });
 
-        const existing = await queryOne('SELECT id, parent_id, record_type FROM records WHERE id = ? AND user_id = ?', [record_id, userId]);
-        if (!existing) return res.status(404).json({ error: '记录不存在' });
-        if (existing.record_type !== 'client') return res.status(400).json({ error: '只能移动客户记录' });
+        const clientRec = await queryOne(
+            'SELECT id, parent_id, record_type, tab_id FROM records WHERE id = ? AND user_id = ?',
+            [record_id, userId]
+        );
+        if (!clientRec) return res.status(404).json({ error: '客户记录不存在' });
+        if (clientRec.record_type !== 'client') return res.status(400).json({ error: '只能移动客户记录' });
+
+        const parentRec = await queryOne(
+            'SELECT id, record_type, tab_id FROM records WHERE id = ? AND user_id = ?',
+            [new_parent_id, userId]
+        );
+        if (!parentRec) return res.status(404).json({ error: '目标服务器不存在' });
+        if (parentRec.record_type !== 'server') return res.status(400).json({ error: '目标必须是服务器记录' });
+        if (clientRec.tab_id !== parentRec.tab_id) return res.status(400).json({ error: '不能跨标签移动' });
+
+        if (clientRec.parent_id === new_parent_id) {
+            return res.status(400).json({ error: '客户已在该服务器下' });
+        }
 
         await execute('UPDATE records SET parent_id = ? WHERE id = ?', [new_parent_id, record_id]);
         res.json({ success: true, message: '移动成功' });

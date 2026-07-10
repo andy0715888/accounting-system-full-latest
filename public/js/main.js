@@ -35,9 +35,7 @@ document.addEventListener('DOMContentLoaded', function() {
         expenseRecordId: null,
         expenseRecords: [],
         // 客户信息复制
-        copiedClientData: null,
         copiedClientRecordId: null,
-        copiedClientParentId: null,
         // 服务器信息复制
         copiedServerData: null,
         // 列定义缓存
@@ -602,9 +600,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.selectedRows.clear();
         state.page = 1;
         // 切换标签时重置剪切/复制状态
-        state.copiedClientData = null;
         state.copiedClientRecordId = null;
-        state.copiedClientParentId = null;
         state.copiedServerData = null;
         // 所有标签：默认只显示"有效"记录
         state.filters = { is_expired: ['有效'] };
@@ -3117,7 +3113,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 共享标签菜单项
         ctxAddClient.style.display = (isShared && recordType === 'server') ? 'block' : 'none';
         ctxCopyClient.style.display = (isShared && recordType === 'client') ? 'block' : 'none';
-        ctxPasteClient.style.display = (isShared && recordType === 'server' && state.copiedClientData) ? 'block' : 'none';
+        ctxPasteClient.style.display = (isShared && recordType === 'server' && state.copiedClientRecordId) ? 'block' : 'none';
         // 独享标签菜单项
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
         ctxCopyServer.style.display = (isDedicated && recordType === 'server') ? 'block' : 'none';
@@ -3184,9 +3180,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!contextTargetId) return;
         const record = state.records.find(r => r.id === contextTargetId);
         if (!record || record.record_type !== 'client') return;
-        state.copiedClientData = { ...record.data };
         state.copiedClientRecordId = record.id;
-        state.copiedClientParentId = record.parent_id;
         $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
         const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
         if (tr) tr.classList.add('cut-pending');
@@ -3195,7 +3189,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     ctxPasteClient.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
-        if (!contextTargetId || !state.copiedClientData || !state.currentTabId) {
+        if (!contextTargetId || !state.copiedClientRecordId || !state.currentTabId) {
             setStatus('无法粘贴：缺少目标或数据');
             return;
         }
@@ -3204,26 +3198,13 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
-        const oldId = state.copiedClientRecordId;
-        if (oldId) {
-            // 从最新的 state.records 中获取当前 parent_id
-            const currentRec = state.records.find(r => r.id === oldId);
-            const currentParentId = currentRec ? currentRec.parent_id : state.copiedClientParentId;
-            if (currentParentId === contextTargetId) {
-                setStatus('无法粘贴：源客户已在当前服务器下');
-                return;
-            }
-        }
         try {
             setStatus('移动中...');
-            // 直接更新记录的 parent_id，不创建新记录也不删除旧记录
-            await API.put('/records/' + oldId, {
-                data: state.copiedClientData,
-                parent_id: contextTargetId
+            await API.post('/records/move', {
+                record_id: state.copiedClientRecordId,
+                new_parent_id: contextTargetId
             });
-            state.copiedClientData = null;
             state.copiedClientRecordId = null;
-            state.copiedClientParentId = null;
             $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
 
             await loadRecords(state.currentTabId);
