@@ -3112,10 +3112,6 @@ document.addEventListener('DOMContentLoaded', function() {
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
-        console.log('=== 右键点击调试 ===');
-        console.log('contextTargetId:', contextTargetId, '类型:', typeof contextTargetId);
-        console.log('recordType:', recordType);
-        console.log('行数据:', targetRec?.data?.provider || targetRec?.data?.client_name);
         // 独享标签：在上方插入一行
         ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
         // 共享标签菜单项
@@ -3194,7 +3190,7 @@ document.addEventListener('DOMContentLoaded', function() {
         $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
         const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
         if (tr) tr.classList.add('cut-pending');
-        setStatus('客户信息已剪切 ✂️，请在其他服务器行右键粘贴（粘贴时原记录会删除）');
+        setStatus('客户信息已剪切 ✂️，请在目标服务器行右键粘贴');
     });
 
     ctxPasteClient.addEventListener('click', async () => {
@@ -3208,30 +3204,23 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
-        console.log('=== 粘贴客户调试 ===');
-        console.log('contextTargetId:', contextTargetId, '类型:', typeof contextTargetId);
-        console.log('目标服务器:', parentRecord.data?.provider, 'ID:', parentRecord.id);
-        console.log('待粘贴客户ID:', state.copiedClientRecordId);
-        console.log('待粘贴客户原父ID:', state.copiedClientParentId);
         const oldId = state.copiedClientRecordId;
         if (oldId) {
-            if (state.copiedClientParentId === contextTargetId) {
+            // 从最新的 state.records 中获取当前 parent_id
+            const currentRec = state.records.find(r => r.id === oldId);
+            const currentParentId = currentRec ? currentRec.parent_id : state.copiedClientParentId;
+            if (currentParentId === contextTargetId) {
                 setStatus('无法粘贴：源客户已在当前服务器下');
                 return;
             }
         }
         try {
             setStatus('移动中...');
-            console.log('直接移动客户记录:', oldId, '-> parent_id:', contextTargetId);
-            const result = await API.post('/records/move', {
-                record_id: oldId,
-                new_parent_id: contextTargetId
+            // 直接更新记录的 parent_id，不创建新记录也不删除旧记录
+            await API.put('/records/' + oldId, {
+                data: state.copiedClientData,
+                parent_id: contextTargetId
             });
-            console.log('移动结果:', result);
-            if (!result.success) {
-                setStatus('移动失败: ' + result.error);
-                return;
-            }
             state.copiedClientData = null;
             state.copiedClientRecordId = null;
             state.copiedClientParentId = null;

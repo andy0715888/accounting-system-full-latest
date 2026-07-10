@@ -291,16 +291,23 @@ router.put('/:id', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const recordId = req.params.id;
-        const { data } = req.body;
+        const { data, parent_id } = req.body;
         if (!data || typeof data !== 'object') return res.status(400).json({ error: '数据格式错误' });
 
         const existing = await queryOne('SELECT id FROM records WHERE id = ? AND user_id = ?', [recordId, userId]);
         if (!existing) return res.status(404).json({ error: '记录不存在' });
 
-        await execute(
-            'UPDATE records SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [JSON.stringify(data), recordId]
-        );
+        if (parent_id !== undefined) {
+            await execute(
+                'UPDATE records SET data = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [JSON.stringify(data), parent_id, recordId]
+            );
+        } else {
+            await execute(
+                'UPDATE records SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                [JSON.stringify(data), recordId]
+            );
+        }
         res.json({ success: true, message: '更新成功' });
     } catch (err) {
         console.error('更新记录错误:', err);
