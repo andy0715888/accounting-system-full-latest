@@ -3096,8 +3096,6 @@ document.addEventListener('DOMContentLoaded', function() {
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
-        console.log('右键 - id:', contextTargetId, 'type:', recordType, 'parent_id:', targetRec?.parent_id, 'name:', targetRec?.data?.provider || targetRec?.data?.client_name);
-
         // 独享标签：在上方插入一行
         ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
         // 共享标签菜单项
@@ -3105,7 +3103,6 @@ document.addEventListener('DOMContentLoaded', function() {
         ctxCopyClient.style.display = (isShared && recordType === 'client') ? 'block' : 'none';
         ctxPasteClient.style.display = (isShared && recordType === 'server' && state.copiedClientData) ? 'block' : 'none';
         // 独享标签菜单项
-        const targetRec = state.records.find(r => r.id === contextTargetId);
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
         ctxCopyServer.style.display = (isDedicated && recordType === 'server') ? 'block' : 'none';
         ctxPasteServer.style.display = (isDedicated && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
@@ -3174,7 +3171,6 @@ document.addEventListener('DOMContentLoaded', function() {
         state.copiedClientData = { ...record.data };
         state.copiedClientRecordId = record.id;
         state.copiedClientParentId = record.parent_id;
-        console.log('剪切客户 - clientId:', record.id, ', parentId:', record.parent_id, ', parentName:', state.records.find(r => r.id === record.parent_id)?.data?.provider);
         $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
         const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
         if (tr) tr.classList.add('cut-pending');
@@ -3192,11 +3188,6 @@ document.addEventListener('DOMContentLoaded', function() {
             setStatus('无法粘贴：请在服务器行上右键粘贴');
             return;
         }
-        console.log('粘贴客户 - copiedClientRecordId:', state.copiedClientRecordId, 
-            ', copiedClientParentId:', state.copiedClientParentId, 
-            ', targetServerId:', contextTargetId, 
-            ', targetServerName:', parentRecord.data?.provider,
-            ', isSameServer:', state.copiedClientParentId === contextTargetId);
         const oldId = state.copiedClientRecordId;
         if (oldId) {
             if (state.copiedClientParentId === contextTargetId) {
