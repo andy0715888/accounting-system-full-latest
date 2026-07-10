@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
         statsYearRange: 6,
         // 分页
         page: 1,
-        pageSize: 1000,
+        pageSize: 100,
         total: 0,
         totalPages: 1,
         // 收入弹窗
@@ -604,13 +604,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.copiedClientRecordId = null;
         state.copiedClientParentId = null;
         state.copiedServerData = null;
-        // 独享/共享标签：默认只显示"有效"记录
-        const tab = state.tabs.find(t => t.id === tabId);
-        if (tab && (tab.tab_type === 'dedicated' || tab.tab_type === 'shared')) {
-            state.filters = { is_expired: ['有效'] };
-        } else {
-            state.filters = {};
-        }
+        // 所有标签：默认只显示"有效"记录
+        state.filters = { is_expired: ['有效'] };
         renderTabs();
         await loadDataForTab(tabId, force);
         // 确保服务商选项已加载（避免切换标签后选项为空）
