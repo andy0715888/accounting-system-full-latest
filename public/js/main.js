@@ -669,7 +669,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function saveTabFiltersToStorage() {
         try {
-            localStorage.setItem('tabFilters_' + auth.user.id, JSON.stringify(state.tabFilters));
+            if (state.userId) {
+                localStorage.setItem('tabFilters_' + state.userId, JSON.stringify(state.tabFilters));
+            }
         } catch(e) {}
     }
 
@@ -3252,6 +3254,11 @@ document.addEventListener('DOMContentLoaded', function() {
     manageColumnsBtn.addEventListener('click', showColumnManager);
     logoutBtn.addEventListener('click', async function() {
         if (!await showConfirm('确定退出吗？')) return;
+        // 退出前保存当前筛选状态
+        if (state.currentTabId) {
+            state.tabFilters[state.currentTabId] = { ...state.filters };
+            saveTabFiltersToStorage();
+        }
         try { await API.post('/auth/logout'); window.location.href = '/login'; } catch (err) { setStatus('❌ 退出失败: ' + err.message); }
     });
 
@@ -3716,6 +3723,7 @@ document.addEventListener('DOMContentLoaded', function() {
             usernameDisplay.textContent = auth.user.username;
             state.userName = auth.user.username;
             state.isAdmin = (auth.user.id === 1);
+            state.userId = auth.user.id;
             await loadProviderOptions();
             await loadTabs();
             // 从 localStorage 恢复筛选状态
