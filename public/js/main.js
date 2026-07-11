@@ -460,6 +460,72 @@ document.addEventListener('DOMContentLoaded', function() {
     window.addEventListener('online', () => updateNetworkStatus(true));
     window.addEventListener('offline', () => updateNetworkStatus(false));
 
+    // 流量统计
+    const trafficStats = {
+        uploadBytes: 0,
+        downloadBytes: 0,
+        uploadWindow: [],
+        downloadWindow: [],
+        lastUpdateTime: Date.now()
+    };
+
+    function formatTrafficSpeed(bytes) {
+        if (bytes < 1024) return bytes.toFixed(0) + ' B/s';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB/s';
+        return (bytes / 1024 / 1024).toFixed(2) + ' MB/s';
+    }
+
+    function addUploadTraffic(bytes) {
+        trafficStats.uploadBytes += bytes;
+        trafficStats.uploadWindow.push({ bytes, time: Date.now() });
+    }
+
+    function addDownloadTraffic(bytes) {
+        trafficStats.downloadBytes += bytes;
+        trafficStats.downloadWindow.push({ bytes, time: Date.now() });
+    }
+
+    function updateTrafficDisplay() {
+        const now = Date.now();
+        const windowMs = 2000;
+        // 清理2秒前的数据
+        while (trafficStats.uploadWindow.length > 0 && now - trafficStats.uploadWindow[0].time > windowMs) {
+            trafficStats.uploadWindow.shift();
+        }
+        while (trafficStats.downloadWindow.length > 0 && now - trafficStats.downloadWindow[0].time > windowMs) {
+            trafficStats.downloadWindow.shift();
+        }
+        // 计算2秒平均速度，转换为每秒
+        const uploadBytes = trafficStats.uploadWindow.reduce((sum, x) => sum + x.bytes, 0);
+        const downloadBytes = trafficStats.downloadWindow.reduce((sum, x) => sum + x.bytes, 0);
+        const uploadSpeed = uploadBytes / (windowMs / 1000);
+        const downloadSpeed = downloadBytes / (windowMs / 1000);
+        const uploadEl = document.getElementById('uploadSpeed');
+        const downloadEl = document.getElementById('downloadSpeed');
+        if (uploadEl) uploadEl.textContent = formatTrafficSpeed(uploadSpeed);
+        if (downloadEl) downloadEl.textContent = formatTrafficSpeed(downloadSpeed);
+    }
+    setInterval(updateTrafficDisplay, 1000);
+
+    // 拦截 fetch 统计流量
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const [input, init] = args;
+        // 统计上传（请求体）
+        if (init && init.body) {
+            const bodyStr = typeof init.body === 'string' ? init.body : JSON.stringify(init.body);
+            addUploadTraffic(new Blob([bodyStr]).size);
+        }
+        const response = await originalFetch.apply(this, args);
+        // 统计下载（响应体）—— 克隆 response 以便读取
+        try {
+            const cloned = response.clone();
+            const buf = await cloned.arrayBuffer();
+            addDownloadTraffic(buf.byteLength);
+        } catch(e) {}
+        return response;
+    };
+
     async function parseResponse(response) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data.error) {

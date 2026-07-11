@@ -45,6 +45,31 @@ body {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
 }
+.traffic-display {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    padding: 4px 10px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 12px;
+    line-height: 1.4;
+}
+.traffic-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: rgba(255,255,255,0.75);
+    min-width: 55px;
+}
+.traffic-arrow {
+    font-size: 10px;
+}
+.traffic-item:first-child .traffic-arrow { color: #f5a623; }
+.traffic-item:last-child .traffic-arrow { color: #67c23a; }
+.traffic-speed {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-weight: 500;
+}
 .nav-btn {
     background: rgba(255,255,255,0.1);
     border: none;
