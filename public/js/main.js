@@ -813,8 +813,17 @@ document.addEventListener('DOMContentLoaded', function() {
         return selectedValues.includes(normalizeFilterValue(getDisplayValue(record, col)));
     }
     function getFilteredRecords() {
-        // 后端已根据 filters 做了过滤，前端直接返回当前页数据
-        return state.records;
+        const records = state.records;
+        if (!isSharedTab()) return records;
+        const servers = records.filter(r => r.record_type === 'server').sort((a, b) => (a.sort_order - b.sort_order) || (a.id - b.id));
+        const clients = records.filter(r => r.record_type === 'client');
+        const result = [];
+        servers.forEach(server => {
+            result.push(server);
+            const serverClients = clients.filter(c => c.parent_id === server.id).sort((a, b) => (a.sort_order - b.sort_order) || (a.id - b.id));
+            result.push(...serverClients);
+        });
+        return result;
     }
 
     // 渲染表格（刷新时不自动适配列宽）
