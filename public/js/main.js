@@ -857,10 +857,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const tabBar = document.querySelector('.tab-bar');
         if (!tabBar) return;
 
-        const newTabBar = tabBar.cloneNode(true);
-        tabBar.parentNode.replaceChild(newTabBar, tabBar);
+        // 使用事件委托，避免 cloneNode 丢失事件监听器
+        if (tabBar._dragBound) return;
+        tabBar._dragBound = true;
 
-        newTabBar.addEventListener('dragstart', function(e) {
+        tabBar.addEventListener('dragstart', function(e) {
             const tabItem = e.target.closest('.tab-item');
             if (!tabItem || !state.tabManageMode) {
                 e.preventDefault();
@@ -872,13 +873,13 @@ document.addEventListener('DOMContentLoaded', function() {
             e.dataTransfer.setData('text/plain', String(dragTabId));
         });
 
-        newTabBar.addEventListener('dragend', function(e) {
+        tabBar.addEventListener('dragend', function(e) {
             document.querySelectorAll('.tab-item.dragging').forEach(el => el.classList.remove('dragging'));
             document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
             dragTabId = null;
         });
 
-        newTabBar.addEventListener('dragover', function(e) {
+        tabBar.addEventListener('dragover', function(e) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             const tabItem = e.target.closest('.tab-item');
@@ -887,12 +888,12 @@ document.addEventListener('DOMContentLoaded', function() {
             tabItem.classList.add('drag-over');
         });
 
-        newTabBar.addEventListener('dragleave', function(e) {
+        tabBar.addEventListener('dragleave', function(e) {
             const tabItem = e.target.closest('.tab-item');
             if (tabItem) tabItem.classList.remove('drag-over');
         });
 
-        newTabBar.addEventListener('drop', async function(e) {
+        tabBar.addEventListener('drop', async function(e) {
             e.preventDefault();
             document.querySelectorAll('.tab-item.drag-over').forEach(el => el.classList.remove('drag-over'));
             
