@@ -497,6 +497,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function invalidateTabCache(tabId) {
         if (!tabId) return;
         delete state.tabCache[tabId];
+        delete state.tabFilters[tabId];
     }
 
     function invalidateCurrentTabCache() {
@@ -955,7 +956,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const dateVal = val || '';
                     const display = formatDisplayDate(dateVal);
                     const emptyClass = !dateVal ? ' date-empty' : '';
-                    inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span class="date-display">${escapeHtml(display || '✎ 点击设置')}</span><input type="date" class="cell-input date-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" style="display:none;" /></div>`;
+                    if (colKey === 'host_expire') {
+                        // 主机到期时间：只读，由购买时间+月数自动计算
+                        inputHtml = `<div class="date-cell date-readonly${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span class="date-display" style="cursor:default;">${escapeHtml(display || '-')}</span></div>`;
+                    } else {
+                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span class="date-display">${escapeHtml(display || '✎ 点击设置')}</span><input type="date" class="cell-input date-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" style="display:none;" /></div>`;
+                    }
                 } else if (colKey === 'provider') {
                     const currentProvider = val || '';
                     const providerOptions = [...state.providerOptions];
@@ -1388,7 +1394,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                 }
                 // 日期单元格特殊处理（需要选整个 cell 而不是 input）
-                if (ds.colKey === 'host_purchase' || ds.colKey === 'client_purchase' || ds.colKey === 'host_expire' || ds.colKey === 'client_expire') {
+                if (ds.colKey === 'host_purchase' || ds.colKey === 'client_purchase' || ds.colKey === 'client_expire') {
                     $$('.date-cell').forEach(cell => {
                         if (cell.dataset.col !== ds.colKey) return;
                         const rowId = parseInt(cell.dataset.id);
@@ -1439,9 +1445,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateDragHighlight();
                     return;
                 }
-                // 判断日期单元格（点击的是 date-display span，不是 input）
+                // 判断日期单元格（点击的是 date-display span，不是 input；排除只读日期如 host_expire）
                 let dateCell = e.target.closest('.date-cell');
-                if (dateCell) {
+                if (dateCell && !dateCell.classList.contains('date-readonly')) {
                     const colKey = dateCell.dataset.col;
                     const rowId = parseInt(dateCell.dataset.id);
                     if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
@@ -1497,9 +1503,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     return;
                 }
-                // 检查日期单元格
+                // 检查日期单元格（排除只读日期）
                 let dateCell = el.closest('.date-cell');
-                if (dateCell) {
+                if (dateCell && !dateCell.classList.contains('date-readonly')) {
                     if (dateCell.dataset.col !== ds.colKey) return;
                     const rowId = parseInt(dateCell.dataset.id);
                     if (rowId !== ds.endRowId) {
@@ -1919,7 +1925,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const minId = Math.min(startId, endId);
         const maxId = Math.max(startId, endId);
 
-        const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'host_expire' || colKey === 'client_expire');
+        const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'client_expire');
 
         // 收集目标行 ID（按行号排序）
         const targetRowIds = [];

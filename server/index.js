@@ -27,7 +27,15 @@ dirs.forEach(dir => {
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
+app.use(express.static('public', {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+    }
+}));
 // 托管上传目录，使背景图片等可被浏览器访问
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
