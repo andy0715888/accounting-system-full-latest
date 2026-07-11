@@ -1524,21 +1524,8 @@ tr.server-row.has-children td:first-child {
 
 /* === 已剪切的客户行样式（视觉提示） === */
 tr.client-row.cut-pending {
-    opacity: 0.45;
+    opacity: 0.5;
     background: #fff7e6 !important;
-    position: relative;
-}
-tr.client-row.cut-pending::before {
-    content: '✂️ 已剪切';
-    position: absolute;
-    left: 4px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #fa8c16;
-    font-size: 11px;
-    font-weight: 600;
-    pointer-events: none;
-    z-index: 1;
 }
 
 .loading-overlay {
