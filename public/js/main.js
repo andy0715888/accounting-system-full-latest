@@ -3781,9 +3781,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
 
-            hideLoading();
             hideTableLoading();
-        } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideLoading(); hideTableLoading(); }
+        } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideTableLoading(); }
     }
     init();
 });
