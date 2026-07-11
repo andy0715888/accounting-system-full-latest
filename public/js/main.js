@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
         selectedRows: new Set(),
         filters: {},
         filterOptions: {},
+        tabFilters: {},
         tabCache: {},
         tabManageMode: false,
         selectedTabs: new Set(),
@@ -608,13 +609,18 @@ document.addEventListener('DOMContentLoaded', function() {
     async function switchTab(tabId, force = false) {
         if (tabId === state.currentTabId && !force) return;
         showTableLoading();
+        // 保存当前标签的筛选状态
+        if (state.currentTabId) {
+            state.tabFilters[state.currentTabId] = { ...state.filters };
+        }
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
-        // 切换标签时重置剪切/复制状态和筛选条件
+        // 切换标签时重置剪切/复制状态
         state.copiedClientRecordId = null;
         state.copiedServerData = null;
-        state.filters = {};
+        // 恢复目标标签的筛选状态
+        state.filters = state.tabFilters[tabId] ? { ...state.tabFilters[tabId] } : {};
         renderTabs();
         await loadDataForTab(tabId, force);
         // 确保服务商选项已加载（避免切换标签后选项为空）
@@ -1351,7 +1357,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input)');
             }
             function clearDragHighlight() {
-                $$('.cell-input.drag-selected, .password-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+                $$('.cell-input.drag-selected, .password-cell.drag-selected, .date-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
             }
 
             function updateDragHighlight() {
@@ -1381,6 +1387,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     });
                 }
+                // 日期单元格特殊处理（需要选整个 cell 而不是 input）
+                if (ds.colKey === 'host_purchase' || ds.colKey === 'client_purchase' || ds.colKey === 'host_expire' || ds.colKey === 'client_expire') {
+                    $$('.date-cell').forEach(cell => {
+                        if (cell.dataset.col !== ds.colKey) return;
+                        const rowId = parseInt(cell.dataset.id);
+                        if (rowId >= minId && rowId <= maxId) {
+                            cell.classList.add('drag-selected');
+                        }
+                    });
+                }
             }
 
             // 添加拖选粘贴的 CSS 样式
@@ -1397,6 +1413,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     outline-offset: -2px;
                     background-color: #e6f7ff !important;
                 }
+                .date-cell.drag-selected {
+                    outline: 2px solid #1890ff !important;
+                    outline-offset: -2px;
+                    background-color: #e6f7ff !important;
+                }
             `;
             document.head.appendChild(style);
 
@@ -1408,6 +1429,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (input) {
                     const colKey = input.dataset.col;
                     const rowId = parseInt(input.dataset.id);
+                    if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
+                        window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
+                        updateDragHighlight();
+                        e.preventDefault();
+                        return;
+                    }
+                    window._dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
+                    updateDragHighlight();
+                    return;
+                }
+                // 判断日期单元格（点击的是 date-display span，不是 input）
+                let dateCell = e.target.closest('.date-cell');
+                if (dateCell) {
+                    const colKey = dateCell.dataset.col;
+                    const rowId = parseInt(dateCell.dataset.id);
                     if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
                         window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
                         updateDragHighlight();
@@ -1455,6 +1491,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (input) {
                     if (input.dataset.col !== ds.colKey) return;
                     const rowId = parseInt(input.dataset.id);
+                    if (rowId !== ds.endRowId) {
+                        ds.endRowId = rowId;
+                        updateDragHighlight();
+                    }
+                    return;
+                }
+                // 检查日期单元格
+                let dateCell = el.closest('.date-cell');
+                if (dateCell) {
+                    if (dateCell.dataset.col !== ds.colKey) return;
+                    const rowId = parseInt(dateCell.dataset.id);
                     if (rowId !== ds.endRowId) {
                         ds.endRowId = rowId;
                         updateDragHighlight();
@@ -1569,6 +1616,9 @@ document.addEventListener('DOMContentLoaded', function() {
             };
             mask.onclick = function(e) {
                 e.stopPropagation();
+                // 如果是拖选操作（多行选择），不进入编辑模式
+                var ds = window._dragSelect;
+                if (ds && ds.startRowId && ds.endRowId && ds.startRowId !== ds.endRowId) return;
                 showInput();
             };
             input.onblur = function() {
@@ -1581,12 +1631,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function bindSpecialEvents() {
-        // 日期单元格：点击切换编辑模式
+        // 日期单元格：点击切换编辑模式（拖选多行时不触发编辑）
         $$('.date-cell').forEach(cell => {
             const display = cell.querySelector('.date-display');
             const input = cell.querySelector('.date-input');
             if (!display || !input) return;
             display.addEventListener('click', () => {
+                // 如果是拖选操作（多行选择），不进入编辑模式
+                var ds = window._dragSelect;
+                if (ds && ds.startRowId && ds.endRowId && ds.startRowId !== ds.endRowId) return;
                 display.style.display = 'none';
                 input.style.display = 'inline-block';
                 input.focus();
@@ -1866,10 +1919,18 @@ document.addEventListener('DOMContentLoaded', function() {
         const minId = Math.min(startId, endId);
         const maxId = Math.max(startId, endId);
 
+        const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'host_expire' || colKey === 'client_expire');
+
         // 收集目标行 ID（按行号排序）
         const targetRowIds = [];
         if (colKey === 'password') {
             $$('.password-cell').forEach(cell => {
+                if (cell.dataset.col !== colKey) return;
+                const rowId = parseInt(cell.dataset.id);
+                if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+            });
+        } else if (isDateCol) {
+            $$('.date-cell').forEach(cell => {
                 if (cell.dataset.col !== colKey) return;
                 const rowId = parseInt(cell.dataset.id);
                 if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
@@ -1889,11 +1950,14 @@ document.addEventListener('DOMContentLoaded', function() {
         targetRowIds.forEach(rowId => {
             const record = state.records.find(r => r.id === rowId);
             if (record) {
-                undoData.push({
+                const item = {
                     recordId: rowId,
                     colKey: colKey,
                     oldValue: record.data[colKey]
-                });
+                };
+                if (colKey === 'host_purchase') item.oldHostExpire = record.data.host_expire;
+                if (colKey === 'client_purchase') item.oldClientExpire = record.data.client_expire;
+                undoData.push(item);
             }
         });
         state.undoStack.push({ type: 'multi_paste', data: undoData });
@@ -1931,6 +1995,18 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                 }
+            } else if (isDateCol) {
+                const cell = document.querySelector(`.date-cell[data-id="${rowId}"][data-col="${colKey}"]`);
+                if (cell) {
+                    const input = cell.querySelector('.date-input');
+                    const display = cell.querySelector('.date-display');
+                    if (input) input.value = value;
+                    if (display) {
+                        const formatted = formatDisplayDate(value);
+                        display.textContent = formatted || '✎ 点击设置';
+                        cell.classList.toggle('date-empty', !value);
+                    }
+                }
             } else {
                 const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
                 if (input) input.value = value;
@@ -1938,16 +2014,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 联动计算
             if (colKey === 'ip_address') record.data.ip_info = value;
+            if (colKey === 'host_purchase') {
+                const months = parseInt(record.data.months) || 0;
+                record.data.host_expire = calcHostExpire(value, months);
+            }
+            if (colKey === 'client_purchase') {
+                if (value) {
+                    const d = new Date(value);
+                    d.setMonth(d.getMonth() + 1);
+                    record.data.client_expire = d.toISOString().split('T')[0];
+                }
+            }
             saveRecord(record);
             changed++;
         });
 
         if (changed > 0) {
             setStatus('已粘贴 ' + changed + ' 条数据');
-            $$('.cell-input.drag-selected, .password-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+            $$('.cell-input.drag-selected, .password-cell.drag-selected, .date-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
             window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
             // 重新渲染表格以更新联动列（如 open-link 按钮、host_expire 计算等）
-            if (colKey === 'ip_address' || colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address') {
+            if (colKey === 'ip_address' || colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address' || isDateCol) {
                 renderTable(false);
             }
         }
@@ -3492,6 +3579,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     const record = state.records.find(r => r.id === item.recordId);
                     if (record) {
                         record.data[item.colKey] = item.oldValue;
+                        if (item.oldHostExpire !== undefined) record.data.host_expire = item.oldHostExpire;
+                        if (item.oldClientExpire !== undefined) record.data.client_expire = item.oldClientExpire;
                         record._updated = true;
                     }
                 });
