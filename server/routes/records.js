@@ -31,14 +31,14 @@ function buildFilterConditions(filters, params) {
             const expiredClauses = [];
             if (values.includes('有效')) {
                 expiredClauses.push(`(
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
-                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now', 'localtime')) OR
+                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now', 'localtime'))
                 )`);
             }
             if (values.includes('过期')) {
                 expiredClauses.push(`(
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
-                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now', 'localtime')) OR
+                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now', 'localtime')))
                 )`);
             }
             if (values.includes('未知')) {
@@ -243,14 +243,14 @@ router.get('/filter-options', requireAuth, async (req, res) => {
             const baseParams = [userId, tabId, ...filterParams];
             const validCount = await queryOne(
                 `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND (
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now')) OR
-                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now'))
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) >= date('now', 'localtime')) OR
+                    (record_type = 'client' AND json_extract(data, '$.client_expire') != '' AND date(json_extract(data, '$.client_expire')) >= date('now', 'localtime'))
                 )`, baseParams
             );
             const expiredCount = await queryOne(
                 `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND (
-                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now')) OR
-                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now')))
+                    (record_type = 'server' AND json_extract(data, '$.host_expire') != '' AND date(json_extract(data, '$.host_expire')) < date('now', 'localtime')) OR
+                    (record_type = 'client' AND (json_extract(data, '$.client_expire') = '' OR date(json_extract(data, '$.client_expire')) < date('now', 'localtime')))
                 )`, baseParams
             );
             const unknownCount = await queryOne(
