@@ -209,20 +209,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const yesHandler = () => { close(); resolve(true); };
             const noHandler = () => { close(); resolve(false); };
-            const escHandler = (e) => { if (e.key === 'Escape') { close(); resolve(false); } };
+            const keyHandler = (e) => {
+                if (e.key === 'Escape') { close(); resolve(false); }
+                else if (e.key === 'Enter') { e.preventDefault(); close(); resolve(true); }
+            };
 
             function close() {
                 confirmModal.classList.remove('show');
                 confirmModalYes.removeEventListener('click', yesHandler);
                 confirmModalNo.removeEventListener('click', noHandler);
                 closeConfirmModal.removeEventListener('click', noHandler);
-                document.removeEventListener('keydown', escHandler);
+                document.removeEventListener('keydown', keyHandler);
             }
 
             confirmModalYes.addEventListener('click', yesHandler);
             confirmModalNo.addEventListener('click', noHandler);
             closeConfirmModal.addEventListener('click', noHandler);
-            document.addEventListener('keydown', escHandler);
+            document.addEventListener('keydown', keyHandler);
         });
     }
 
