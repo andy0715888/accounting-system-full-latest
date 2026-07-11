@@ -26,6 +26,25 @@ body {
 .nav-center { flex:1; text-align:center; }
 .nav-user { font-size:14px; opacity:0.85; }
 .nav-right { display:flex; align-items:center; gap:16px; }
+.network-status {
+    font-size:12px;
+    padding:4px 10px;
+    border-radius:12px;
+    transition: all 0.3s ease;
+}
+.network-status.online {
+    background: rgba(103, 194, 58, 0.2);
+    color: #67c23a;
+}
+.network-status.offline {
+    background: rgba(245, 108, 108, 0.2);
+    color: #f56c6c;
+    animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
 .nav-btn {
     background: rgba(255,255,255,0.1);
     border: none;

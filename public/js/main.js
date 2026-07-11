@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
         filters: {},
         filterOptions: {},
         tabFilters: {},
+        isOnline: true,
         tabCache: {},
         tabManageMode: false,
         selectedTabs: new Set(),
@@ -426,6 +427,39 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { return expr; }
     }
 
+    // 网络状态检测
+    function updateNetworkStatus(isOnline) {
+        state.isOnline = isOnline;
+        const statusEl = document.getElementById('networkStatus');
+        if (!statusEl) return;
+        if (isOnline) {
+            statusEl.textContent = '🟢 在线';
+            statusEl.className = 'network-status online';
+        } else {
+            statusEl.textContent = '🔴 离线';
+            statusEl.className = 'network-status offline';
+            setStatus('⚠️ 网络连接已断开，数据无法保存！');
+        }
+    }
+
+    // 定期心跳检测（每10秒检测一次）
+    let heartbeatInterval;
+    function startHeartbeat() {
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        heartbeatInterval = setInterval(async () => {
+            try {
+                await fetch('/api/auth/check', { credentials: 'include', signal: AbortSignal.timeout(3000) });
+                if (!state.isOnline) updateNetworkStatus(true);
+            } catch {
+                if (state.isOnline) updateNetworkStatus(false);
+            }
+        }, 10000);
+    }
+
+    // 监听浏览器在线状态
+    window.addEventListener('online', () => updateNetworkStatus(true));
+    window.addEventListener('offline', () => updateNetworkStatus(false));
+
     async function parseResponse(response) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data.error) {
@@ -610,9 +644,10 @@ document.addEventListener('DOMContentLoaded', function() {
     async function switchTab(tabId, force = false) {
         if (tabId === state.currentTabId && !force) return;
         showTableLoading();
-        // 保存当前标签的筛选状态
+        // 保存当前标签的筛选状态到内存和 localStorage
         if (state.currentTabId) {
             state.tabFilters[state.currentTabId] = { ...state.filters };
+            saveTabFiltersToStorage();
         }
         state.currentTabId = tabId;
         state.selectedRows.clear();
@@ -630,6 +665,12 @@ document.addEventListener('DOMContentLoaded', function() {
         hideTableLoading();
         const currentTab = state.tabs.find(t => t.id === tabId);
         if (currentTab) document.getElementById('columnModalTabName').textContent = currentTab.name;
+    }
+
+    function saveTabFiltersToStorage() {
+        try {
+            localStorage.setItem('tabFilters_' + auth.user.id, JSON.stringify(state.tabFilters));
+        } catch(e) {}
     }
 
     async function createTab(name, tabType) {
@@ -1234,6 +1275,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     state.filters[colKey] = checkedValues;
                 }
+                state.tabFilters[state.currentTabId] = { ...state.filters };
+                saveTabFiltersToStorage();
                 panel.classList.remove('show');
                 // 筛选条件变更，重新从后端加载
                 state.page = 1;
@@ -1250,6 +1293,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (e.target.classList.contains('filter-clear')) {
                 const colKey = e.target.dataset.col;
                 delete state.filters[colKey];
+                state.tabFilters[state.currentTabId] = { ...state.filters };
+                saveTabFiltersToStorage();
                 const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
                 if (panel) panel.classList.remove('show');
                 state.page = 1;
@@ -3673,10 +3718,15 @@ document.addEventListener('DOMContentLoaded', function() {
             state.isAdmin = (auth.user.id === 1);
             await loadProviderOptions();
             await loadTabs();
+            // 从 localStorage 恢复筛选状态
+            try {
+                const savedFilters = localStorage.getItem('tabFilters_' + auth.user.id);
+                if (savedFilters) state.tabFilters = JSON.parse(savedFilters);
+            } catch(e) {}
             if (state.tabs.length === 0) await createDefaultTab();
             else {
                 state.currentTabId = state.tabs[0].id;
-                state.filters = {};
+                state.filters = state.tabFilters[state.tabs[0].id] ? { ...state.tabFilters[state.tabs[0].id] } : {};
                 await loadDataForTab(state.currentTabId);
             }
             collectProviderOptionsFromRecords();
@@ -3686,6 +3736,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const tab = state.tabs.find(t => t.id === state.currentTabId);
             if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
             loadSettings();
+            startHeartbeat();
 
             // open-link 事件委托：绑定一次，不依赖 renderTable 重新绑定
             document.addEventListener('click', function(e) {
