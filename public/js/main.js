@@ -3648,11 +3648,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undoLastAction(); }
     });
 
-    function hideLoading() {
-        const loadingOverlay = document.getElementById('loadingOverlay');
-        if (loadingOverlay) loadingOverlay.classList.add('hidden');
-    }
-
     let tableLoadingStartTime = 0;
     const TABLE_LOADING_MIN_TIME = 300;
     function showTableLoading() {
