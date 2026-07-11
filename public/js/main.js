@@ -191,7 +191,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     function formatDisplayDate(d) {
         if (!d) return '';
-        try { const dt = new Date(d); if (isNaN(dt)) return d; return dt.toLocaleDateString('zh-CN'); } catch { return d; }
+        try {
+            const dt = new Date(d);
+            if (isNaN(dt)) return d;
+            const y = dt.getFullYear();
+            const m = String(dt.getMonth() + 1).padStart(2, '0');
+            const day = String(dt.getDate()).padStart(2, '0');
+            return `${y}年${m}月${day}日`;
+        } catch { return d; }
     }
     function getCellValue(record, colKey) { return record.data[colKey] ?? ''; }
 
@@ -266,7 +273,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!record || !col) return '';
         const colKey = col.col_key;
         const val = getCellValue(record, colKey);
-        if (col.col_type === 'days_remaining') {
+        if (col.col_type === 'date') {
+            return formatDisplayDate(val);
+        } else if (col.col_type === 'days_remaining') {
             let dateKey = colKey === 'host_remaining' ? 'host_expire' : (colKey === 'client_remaining' ? 'client_expire' : '');
             const days = computeDaysRemaining(record.data[dateKey]);
             return days !== '' ? days + ' 天' : '';
@@ -602,11 +611,10 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
-        // 切换标签时重置剪切/复制状态
+        // 切换标签时重置剪切/复制状态和筛选条件
         state.copiedClientRecordId = null;
         state.copiedServerData = null;
-        // 所有标签：默认只显示"有效"记录
-        state.filters = { is_expired: ['有效'] };
+        state.filters = {};
         renderTabs();
         await loadDataForTab(tabId, force);
         // 确保服务商选项已加载（避免切换标签后选项为空）
@@ -939,12 +947,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                 } else if (col.col_type === 'date') {
                     const dateVal = val || '';
-                    if (colKey === 'host_expire') {
-                        const display = formatDisplayDate(dateVal);
-                        inputHtml = `<span style="color:#333;">${escapeHtml(display)}</span>`;
-                    } else {
-                        inputHtml = `<div class="date-control"><input type="date" class="cell-input date-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" /></div>`;
-                    }
+                    const display = formatDisplayDate(dateVal);
+                    const emptyClass = !dateVal ? ' date-empty' : '';
+                    inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span class="date-display">${escapeHtml(display || '✎ 点击设置')}</span><input type="date" class="cell-input date-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" style="display:none;" /></div>`;
                 } else if (colKey === 'provider') {
                     const currentProvider = val || '';
                     const providerOptions = [...state.providerOptions];
@@ -1576,14 +1581,54 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function bindSpecialEvents() {
-        // 日期
+        // 日期单元格：点击切换编辑模式
+        $$('.date-cell').forEach(cell => {
+            const display = cell.querySelector('.date-display');
+            const input = cell.querySelector('.date-input');
+            if (!display || !input) return;
+            display.addEventListener('click', () => {
+                display.style.display = 'none';
+                input.style.display = 'inline-block';
+                input.focus();
+                input.click();
+            });
+            input.addEventListener('blur', () => {
+                const displayVal = formatDisplayDate(input.value);
+                display.textContent = displayVal || '✎ 点击设置';
+                cell.classList.toggle('date-empty', !input.value);
+                display.style.display = 'inline';
+                input.style.display = 'none';
+            });
+        });
+
+        // 日期输入框 change 事件（保持原有逻辑）
         $$('.date-input').forEach(input => {
             input.onchange = function() {
                 const col = this.dataset.col;
                 const id = parseInt(this.dataset.id);
                 const record = state.records.find(r => r.id === id);
                 if (!record) return;
+                const oldValue = record.data[col] || '';
+                let oldHostExpire = null;
+                let oldClientExpire = null;
+                if (col === 'host_purchase') {
+                    oldHostExpire = record.data.host_expire || null;
+                }
+                if (col === 'client_purchase') {
+                    oldClientExpire = record.data.client_expire || null;
+                }
                 const dateVal = this.value;
+
+                state.undoStack.push({
+                    type: 'cell_edit',
+                    recordId: id,
+                    colKey: col,
+                    oldValue: oldValue,
+                    newValue: dateVal,
+                    oldHostExpire: oldHostExpire,
+                    oldClientExpire: oldClientExpire
+                });
+
                 record.data[col] = dateVal;
                 record._updated = true;
                 if (col === 'host_purchase') {
@@ -1919,6 +1964,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const record = state.records.find(r => r.id === id);
         if (!record) return;
 
+        const oldValue = record.data[colKey] !== undefined ? record.data[colKey] : '';
+
         if (col.col_type === 'number') {
             if (val !== '' && !isNaN(val)) val = parseFloat(val);
             else val = 0;
@@ -1929,6 +1976,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (record.data[colKey] === val || (record.data[colKey] === undefined && val === '')) return;
+
+        let oldHostExpire = null;
+        let oldIpInfo = null;
+        if (colKey === 'months') {
+            oldHostExpire = record.data.host_expire || null;
+        }
+        if (colKey === 'ip_address') {
+            oldIpInfo = record.data.ip_info || null;
+        }
+
+        state.undoStack.push({
+            type: 'cell_edit',
+            recordId: id,
+            colKey: colKey,
+            oldValue: oldValue,
+            newValue: val,
+            oldHostExpire: oldHostExpire,
+            oldIpInfo: oldIpInfo
+        });
+
         record.data[colKey] = val;
         record._updated = true;
 
@@ -2018,6 +2085,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const result = await API.post('/records', { tab_id: state.currentTabId, data });
             state.total++;
+
+            state.undoStack.push({
+                type: 'add_row',
+                recordId: result.id
+            });
+
             // 跳转到最后一页
             state.page = Math.ceil(state.total / state.pageSize);
             await loadRecords(state.currentTabId);
@@ -2035,6 +2108,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!await showConfirm(`确定删除 ${ids.length} 条记录吗？`)) return;
         try {
             setStatus('删除中...');
+
+            const deletedRecords = state.records
+                .filter(r => ids.includes(r.id))
+                .map(r => ({ ...r, data: { ...r.data } }));
+
+            state.undoStack.push({
+                type: 'delete_rows',
+                records: deletedRecords
+            });
+
             await API.post('/records/batch-delete', { ids });
             state.selectedRows.clear();
             await loadRecords(state.currentTabId);
@@ -2317,7 +2400,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="income-item">
                 <div class="income-item-info">
                     <span class="income-item-amount">${Number(r.amount).toFixed(2)}</span>
-                    <span class="income-item-date">${escapeHtml(r.income_date || '')}</span>
+                    <span class="income-item-date">${escapeHtml(formatDisplayDate(r.income_date || ''))}</span>
                     <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
                 </div>
                 <button class="income-item-delete" data-id="${r.id}">删除</button>
@@ -2393,7 +2476,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="income-item">
                 <div class="income-item-info">
                     <span class="income-item-amount" style="color:#c62828;">${Number(r.amount).toFixed(2)}</span>
-                    <span class="income-item-date">${escapeHtml(r.expense_date || '')}</span>
+                    <span class="income-item-date">${escapeHtml(formatDisplayDate(r.expense_date || ''))}</span>
                     <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
                 </div>
                 <button class="income-item-delete" data-id="${r.id}">删除</button>
@@ -3403,17 +3486,64 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         const lastAction = state.undoStack.pop();
-        if (lastAction.type === 'multi_paste') {
-            lastAction.data.forEach(item => {
-                const record = state.records.find(r => r.id === item.recordId);
+        try {
+            if (lastAction.type === 'multi_paste') {
+                lastAction.data.forEach(item => {
+                    const record = state.records.find(r => r.id === item.recordId);
+                    if (record) {
+                        record.data[item.colKey] = item.oldValue;
+                        record._updated = true;
+                    }
+                });
+                await flushPendingSaves();
+                renderTable(false);
+                setStatus('✅ 已撤销批量粘贴操作');
+            } else if (lastAction.type === 'cell_edit') {
+                const record = state.records.find(r => r.id === lastAction.recordId);
                 if (record) {
-                    record.data[item.colKey] = item.oldValue;
+                    record.data[lastAction.colKey] = lastAction.oldValue;
+                    if (lastAction.colKey === 'months' && lastAction.oldHostExpire !== null) {
+                        record.data.host_expire = lastAction.oldHostExpire;
+                    }
+                    if (lastAction.colKey === 'ip_address' && lastAction.oldIpInfo !== null) {
+                        record.data.ip_info = lastAction.oldIpInfo;
+                    }
+                    if (lastAction.colKey === 'host_purchase' && lastAction.oldHostExpire !== null) {
+                        record.data.host_expire = lastAction.oldHostExpire;
+                    }
+                    if (lastAction.colKey === 'client_purchase' && lastAction.oldClientExpire !== null) {
+                        record.data.client_expire = lastAction.oldClientExpire;
+                    }
                     record._updated = true;
+                    await saveRecord(record);
+                    renderTable(false);
+                    setStatus('✅ 已撤销单元格编辑');
                 }
-            });
-            await flushPendingSaves();
-            renderTable(false);
-            setStatus('✅ 已撤销批量粘贴操作');
+            } else if (lastAction.type === 'add_row') {
+                await API.delete('/records/' + lastAction.recordId);
+                state.selectedRows.delete(lastAction.recordId);
+                await loadRecords(state.currentTabId);
+                updateTabCache(state.currentTabId);
+                renderTable(false);
+                setStatus('✅ 已撤销添加行');
+            } else if (lastAction.type === 'delete_rows') {
+                const records = lastAction.records || [];
+                for (const rec of records) {
+                    await API.post('/records', {
+                        tab_id: state.currentTabId,
+                        data: rec.data,
+                        record_type: rec.record_type,
+                        parent_id: rec.parent_id,
+                        sort_order: rec.sort_order
+                    });
+                }
+                await loadRecords(state.currentTabId);
+                updateTabCache(state.currentTabId);
+                renderTable(false);
+                setStatus(`✅ 已撤销删除 ${records.length} 条记录`);
+            }
+        } catch (err) {
+            setStatus('❌ 撤销失败: ' + err.message);
         }
     }
 
@@ -3456,7 +3586,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (state.tabs.length === 0) await createDefaultTab();
             else {
                 state.currentTabId = state.tabs[0].id;
-                state.filters = { is_expired: ['有效'] };
+                state.filters = {};
                 await loadDataForTab(state.currentTabId);
             }
             collectProviderOptionsFromRecords();
