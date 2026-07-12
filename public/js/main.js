@@ -187,6 +187,46 @@ document.addEventListener('DOMContentLoaded', function() {
     updateClock();
 
     function setStatus(msg) { statusText.textContent = msg; }
+    function parseDate(str) {
+        if (!str) return '';
+        const s = String(str).trim();
+        if (!s) return '';
+        let y, m, d;
+        let match;
+        match = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+        if (match) {
+            y = parseInt(match[1]);
+            m = parseInt(match[2]) - 1;
+            d = parseInt(match[3]);
+        }
+        if (!match) {
+            match = s.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日$/);
+            if (match) {
+                y = parseInt(match[1]);
+                m = parseInt(match[2]) - 1;
+                d = parseInt(match[3]);
+            }
+        }
+        if (!match) {
+            match = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/);
+            if (match) {
+                y = parseInt(match[3]);
+                m = parseInt(match[1]) - 1;
+                d = parseInt(match[2]);
+            }
+        }
+        if (y !== undefined && m !== undefined && d !== undefined) {
+            const dt = new Date(y, m, d);
+            if (!isNaN(dt)) {
+                return dt.toISOString().split('T')[0];
+            }
+        }
+        const dt = new Date(s);
+        if (!isNaN(dt)) {
+            return dt.toISOString().split('T')[0];
+        }
+        return '';
+    }
     function formatDate(d) {
         if (!d) return '';
         try { const dt = new Date(d); if (isNaN(dt)) return d; return dt.toISOString().split('T')[0]; } catch { return d; }
@@ -1645,6 +1685,79 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             // Ctrl+V 粘贴到选中的单元格（仅多行选择时生效，单行由浏览器默认粘贴）
+            document.addEventListener('copy', function(e) {
+                var ds = window._dragSelect;
+                if (!ds.startRowId || !ds.endRowId || !ds.colKey) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                const minId = Math.min(ds.startRowId, ds.endRowId);
+                const maxId = Math.max(ds.startRowId, ds.endRowId);
+                const colKey = ds.colKey;
+                const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'client_expire');
+
+                // 收集目标行 ID
+                const targetRowIds = [];
+                if (colKey === 'password') {
+                    $$('.password-cell').forEach(cell => {
+                        if (cell.dataset.col !== colKey) return;
+                        const rowId = parseInt(cell.dataset.id);
+                        if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+                    });
+                } else if (isDateCol) {
+                    $$('.date-cell').forEach(cell => {
+                        if (cell.dataset.col !== colKey) return;
+                        const rowId = parseInt(cell.dataset.id);
+                        if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+                    });
+                } else {
+                    getTextInputCells().forEach(input => {
+                        if (input.dataset.col !== colKey) return;
+                        const rowId = parseInt(input.dataset.id);
+                        if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+                    });
+                }
+                targetRowIds.sort((a, b) => a - b);
+                if (targetRowIds.length === 0) return;
+
+                // 收集值（优先从 DOM 中的 input 读取当前值，处理正在编辑但未保存的情况）
+                const values = targetRowIds.map(rowId => {
+                    if (colKey === 'password') {
+                        const cell = document.querySelector(`.password-cell[data-id="${rowId}"][data-col="${colKey}"]`);
+                        if (cell) {
+                            const input = cell.querySelector('.password-input');
+                            if (input && input.style.display !== 'none') return input.value || '';
+                        }
+                    } else if (isDateCol) {
+                        const cell = document.querySelector(`.date-cell[data-id="${rowId}"][data-col="${colKey}"]`);
+                        if (cell) {
+                            const input = cell.querySelector('.date-input');
+                            if (input && input.style.display !== 'none') return input.value || '';
+                        }
+                    } else {
+                        const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
+                        if (input && document.activeElement === input) return input.value || '';
+                    }
+                    const record = state.records.find(r => r.id === rowId);
+                    return record ? (record.data[colKey] || '') : '';
+                });
+                const text = values.join('\n');
+
+                try {
+                    if (e.clipboardData) {
+                        e.clipboardData.setData('text/plain', text);
+                    } else if (window.clipboardData) {
+                        window.clipboardData.setData('text', text);
+                    }
+                } catch(ex) {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).catch(() => {});
+                    }
+                }
+                setStatus('已复制 ' + values.length + ' 条数据');
+            });
+
             document.addEventListener('paste', function(e) {
                 var ds = window._dragSelect;
                 // 单行选择时由浏览器默认粘贴处理，不拦截
@@ -2085,7 +2198,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let changed = 0;
         targetRowIds.forEach((rowId, index) => {
             // 单行复制：用同一内容填所有；多行：按行对应
-            const value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
+            let value = lines.length === 1 ? lines[0].trim() : (index < lines.length ? lines[index].trim() : null);
             if (value === null) return;
             const record = state.records.find(r => r.id === rowId);
             if (!record) return;
@@ -2093,6 +2206,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!col) return;
             // 跳过 readonly 列
             if (colKey === 'expense' || colKey === 'fee' || colKey === 'host_expire' || col.col_type === 'days_remaining' || colKey === 'is_expired') return;
+
+            // 日期列：尝试解析多种格式
+            if (isDateCol && value) {
+                const parsed = parseDate(value);
+                if (parsed) value = parsed;
+            }
 
             if (record.data[colKey] === value) return; // 没有变化
             record.data[colKey] = value;
