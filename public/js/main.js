@@ -218,18 +218,22 @@ document.addEventListener('DOMContentLoaded', function() {
         if (y !== undefined && m !== undefined && d !== undefined) {
             const dt = new Date(y, m, d);
             if (!isNaN(dt)) {
-                return dt.toISOString().split('T')[0];
+                return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
             }
         }
         const dt = new Date(s);
         if (!isNaN(dt)) {
-            return dt.toISOString().split('T')[0];
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
         }
         return '';
     }
     function formatDate(d) {
         if (!d) return '';
-        try { const dt = new Date(d); if (isNaN(dt)) return d; return dt.toISOString().split('T')[0]; } catch { return d; }
+        try { 
+            const dt = new Date(d); 
+            if (isNaN(dt)) return d; 
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        } catch { return d; }
     }
     function formatDisplayDate(d) {
         if (!d) return '';
@@ -446,7 +450,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = new Date(purchaseDate);
         if (isNaN(d)) return '';
         d.setMonth(d.getMonth() + (parseInt(months) || 0));
-        return d.toISOString().split('T')[0];
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
     function getNextMonth(date) {
@@ -2237,13 +2241,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 const months = parseInt(record.data.months) || 0;
                 record.data.host_expire = calcHostExpire(value, months);
             }
-            if (colKey === 'client_purchase') {
-                if (value) {
-                    const d = new Date(value);
-                    d.setMonth(d.getMonth() + 1);
-                    record.data.client_expire = d.toISOString().split('T')[0];
-                }
-            }
             saveRecord(record);
             changed++;
         });
@@ -2307,16 +2304,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const months = parseInt(record.data.months) || 0;
             record.data.host_expire = calcHostExpire(val, months);
         }
-        if (colKey === 'client_purchase') {
-            if (val) {
-                const d = new Date(val);
-                d.setMonth(d.getMonth() + 1);
-                record.data.client_expire = d.toISOString().split('T')[0];
-            }
-        }
         saveRecord(record);
         // 联动列需要重新渲染
-        if (colKey === 'host_purchase' || colKey === 'client_purchase') {
+        if (colKey === 'host_purchase') {
             renderTable(false);
         }
     }
@@ -2441,12 +2431,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
             const now = new Date();
-            const today = now.toISOString().split('T')[0];
+            const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
             data.host_purchase = today;
             data.months = 1;
             data.host_expire = calcHostExpire(today, 1);
             data.client_purchase = today;
-            data.client_expire = getNextMonth(now).toISOString().split('T')[0];
+            data.client_expire = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
             data.expense = '0';
             data.fee = '';
             data.address = 'IP地址';
@@ -2742,7 +2732,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.incomeRecordId = recordId;
         incomeAmountInput.value = '';
         incomeRemarkInput.value = '';
-        incomeDateInput.value = new Date().toISOString().split('T')[0];
+        incomeDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         incomeStatus.textContent = '';
         incomeModal.classList.add('show');
         await loadIncomeRecords(recordId);
@@ -2818,7 +2808,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.expenseRecordId = recordId;
         expenseAmountInput.value = '';
         expenseRemarkInput.value = '';
-        expenseDateInput.value = new Date().toISOString().split('T')[0];
+        expenseDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         expenseStatus.textContent = '';
         expenseModal.classList.add('show');
         await loadExpenseRecords(recordId);
@@ -3612,12 +3602,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = {};
             state.columns.forEach(col => { data[col.col_key] = ''; });
             const now = new Date();
-            const today = now.toISOString().split('T')[0];
+            const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
             data.host_purchase = today;
             data.months = 1;
             data.host_expire = calcHostExpire(today, 1);
             data.client_purchase = today;
-            data.client_expire = getNextMonth(now).toISOString().split('T')[0];
+            data.client_expire = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
             data.expense = '0';
             data.fee = '';
             data.address = 'IP地址';
@@ -3771,7 +3761,7 @@ document.addEventListener('DOMContentLoaded', function() {
             state.columns.forEach(col => { data[col.col_key] = ''; });
             // New client defaults: today + 1 month (same day or last day of next month)
             const now = new Date();
-            data.client_purchase = now.toISOString().split('T')[0];
+            data.client_purchase = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
             // +1 month: same day next month, or last day if overflow (e.g. 8-31 → 9-30)
             const expDate = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
             // If day overflowed (e.g. 31 → next month has 30), JS auto-corrects to next-next month
@@ -3781,7 +3771,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const lastDay = new Date(now.getFullYear(), now.getMonth() + 2, 0);
                 expDate.setTime(lastDay.getTime() + 86400000); // +1 day
             }
-            data.client_expire = expDate.toISOString().split('T')[0];
+            data.client_expire = `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}-${String(expDate.getDate()).padStart(2, '0')}`;
             data.fee = '';
 
             const result = await API.post('/records', {
