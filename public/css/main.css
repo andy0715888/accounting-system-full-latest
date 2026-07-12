@@ -1567,10 +1567,14 @@ tr.server-row.has-children td:first-child {
 .password-cell.editing .password-input { display: block; }
 
 /* === 日期列样式 === */
-.date-cell { position: relative; min-width: 100px; width: 100%; }
-.date-display { display: inline; cursor: pointer; padding: 2px 4px; box-sizing: border-box; }
-.date-display.date-empty, .date-cell.date-empty .date-display { color: #bbb; font-style: italic; }
-.date-cell .date-input { display: none; width: 100%; box-sizing: border-box; }
+.date-cell { position: relative; min-width: 100px; width: 100%; display: flex; align-items: center; }
+.date-cell.date-empty .date-text-input { color: #bbb; font-style: italic; }
+.date-text-input { width: 100%; box-sizing: border-box; padding: 2px 4px; border: 1px solid transparent; background: transparent; font-size: 14px; }
+.date-text-input:focus { border-color: #1890ff; background: #fff; outline: none; }
+.date-text-input::placeholder { color: #bbb; font-style: italic; }
+.date-picker-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: 0; top: 0; border: none; padding: 0; }
+.date-picker-btn { flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1; opacity: 0.6; }
+.date-picker-btn:hover { opacity: 1; }
 
 /* === 已剪切的客户行样式（视觉提示） === */
 tr.client-row.cut-pending {

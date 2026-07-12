@@ -1104,13 +1104,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     `;
                 } else if (col.col_type === 'date') {
                     const dateVal = val || '';
-                    const display = formatDisplayDate(dateVal);
                     const emptyClass = !dateVal ? ' date-empty' : '';
                     if (colKey === 'host_expire') {
                         // 主机到期时间：只读，由购买时间+月数自动计算
-                        inputHtml = `<div class="date-cell date-readonly${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span class="date-display" style="cursor:default;">${escapeHtml(display || '-')}</span></div>`;
+                        const display = formatDisplayDate(dateVal);
+                        inputHtml = `<div class="date-cell date-readonly${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span style="cursor:default;">${escapeHtml(display || '-')}</span></div>`;
                     } else {
-                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span class="date-display">${escapeHtml(display || '✎ 点击设置')}</span><input type="date" class="cell-input date-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" style="display:none;" /></div>`;
+                        // 可编辑日期：始终可见的文本输入框 + 日历按钮
+                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><input type="text" class="cell-input date-text-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" placeholder="点击设置" autocomplete="off" /><input type="date" class="date-picker-hidden" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" tabindex="-1" /><button class="date-picker-btn" data-col="${escapeAttr(colKey)}" data-id="${record.id}" title="选择日期" tabindex="-1">📅</button></div>`;
                     }
                 } else if (colKey === 'provider') {
                     const currentProvider = val || '';
@@ -1498,7 +1499,7 @@ document.addEventListener('DOMContentLoaded', function() {
             };
         });
 
-        $$('.cell-input:not(.address-select):not(.provider-search-input):not(.months-input):not(.date-input):not(.expense-input):not(.fee-input)').forEach(input => {
+        $$('.cell-input:not(.address-select):not(.provider-search-input):not(.months-input):not(.date-input):not(.date-text-input):not(.expense-input):not(.fee-input)').forEach(input => {
             input.onblur = () => handleCellChange(input);
             input.onkeydown = (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
@@ -1514,7 +1515,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // 拖选支持的输入框类型（已排除：地址选择、月数步进、支出/收入等计算列）
             // 包含：普通文本、数字、日期、密码、客户名、域名、备注等所有可编辑列
             function getTextInputCells() {
-                return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input)');
+                return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input):not(.date-text-input)');
             }
             function clearDragHighlight() {
                 $$('.cell-input.drag-selected, .password-cell.drag-selected, .date-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
@@ -1578,12 +1579,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     outline-offset: -2px;
                     background-color: #e6f7ff !important;
                 }
+                .date-cell.drag-selected .date-text-input {
+                    background-color: #e6f7ff !important;
+                }
             `;
             document.head.appendChild(style);
 
             // 使用事件委托监听 mousedown（避免 renderTable 后事件丢失）
             document.addEventListener('mousedown', function(e) {
                 var ds = window._dragSelect;
+                // 日历按钮点击不启动拖选
+                if (e.target.closest('.date-picker-btn')) return;
                 // 优先判断密码单元格
                 let input = e.target.closest('.password-cell');
                 if (input) {
@@ -1599,21 +1605,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateDragHighlight();
                     return;
                 }
-                // 判断日期单元格（点击的是 date-display span，不是 input；排除只读日期如 host_expire）
-                let dateCell = e.target.closest('.date-cell');
-                if (dateCell && !dateCell.classList.contains('date-readonly')) {
-                    const colKey = dateCell.dataset.col;
-                    const rowId = parseInt(dateCell.dataset.id);
-                    if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
-                        window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
-                        updateDragHighlight();
-                        e.preventDefault();
-                        return;
-                    }
-                    window._dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
-                    updateDragHighlight();
-                    return;
-                }
+                // 只读日期单元格不启动拖选
+                let dateCell = e.target.closest('.date-cell.date-readonly');
+                if (dateCell) return;
                 input = e.target.closest('.cell-input');
                 if (!input) {
                     // 点击非输入区域时清除选区
@@ -1657,7 +1651,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     return;
                 }
-                // 检查日期单元格（排除只读日期）
+                // 检查日期单元格（用于拖选经过时高亮整行）
                 let dateCell = el.closest('.date-cell');
                 if (dateCell && !dateCell.classList.contains('date-readonly')) {
                     if (dateCell.dataset.col !== ds.colKey) return;
@@ -1732,8 +1726,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else if (isDateCol) {
                         const cell = document.querySelector(`.date-cell[data-id="${rowId}"][data-col="${colKey}"]`);
                         if (cell) {
-                            const input = cell.querySelector('.date-input');
-                            if (input && input.style.display !== 'none') return input.value || '';
+                            const input = cell.querySelector('.date-text-input');
+                            if (input) return input.value || '';
                         }
                     } else {
                         const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
@@ -1864,73 +1858,62 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function bindSpecialEvents() {
-        // 日期单元格：点击切换编辑模式（拖选多行时不触发编辑）
-        $$('.date-cell').forEach(cell => {
-            const display = cell.querySelector('.date-display');
-            const input = cell.querySelector('.date-input');
-            if (!display || !input) return;
-            display.addEventListener('click', () => {
-                // 如果是拖选操作（多行选择），不进入编辑模式
-                var ds = window._dragSelect;
-                if (ds && ds.startRowId && ds.endRowId && ds.startRowId !== ds.endRowId) return;
-                display.style.display = 'none';
-                input.style.display = 'inline-block';
-                input.focus();
-                input.click();
+        // 日期文本输入框：双击全选、失焦验证保存
+        $$('.date-text-input').forEach(input => {
+            // 双击全选
+            input.addEventListener('dblclick', function() {
+                this.select();
             });
-            input.addEventListener('blur', () => {
-                const displayVal = formatDisplayDate(input.value);
-                display.textContent = displayVal || '✎ 点击设置';
-                cell.classList.toggle('date-empty', !input.value);
-                display.style.display = 'inline';
-                input.style.display = 'none';
+            // 获焦全选
+            input.addEventListener('focus', function() {
+                this.select();
+            });
+            // 失焦时验证并保存
+            input.addEventListener('blur', function() {
+                handleDateTextChange(this);
+            });
+            // Enter 保存
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
             });
         });
 
-        // 日期输入框 change 事件（保持原有逻辑）
-        $$('.date-input').forEach(input => {
-            input.onchange = function() {
-                const col = this.dataset.col;
-                const id = parseInt(this.dataset.id);
-                const record = state.records.find(r => r.id === id);
-                if (!record) return;
-                const oldValue = record.data[col] || '';
-                let oldHostExpire = null;
-                let oldClientExpire = null;
-                if (col === 'host_purchase') {
-                    oldHostExpire = record.data.host_expire || null;
+        // 日历按钮：点击打开日期选择器
+        $$('.date-picker-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const cell = this.closest('.date-cell');
+                if (!cell) return;
+                const hiddenInput = cell.querySelector('.date-picker-hidden');
+                const textInput = cell.querySelector('.date-text-input');
+                if (!hiddenInput || !textInput) return;
+                // 同步当前值
+                const parsed = parseDate(textInput.value);
+                hiddenInput.value = parsed || '';
+                // 打开日期选择器
+                if (hiddenInput.showPicker) {
+                    try { hiddenInput.showPicker(); } catch(e) {}
+                } else {
+                    hiddenInput.style.position = 'static';
+                    hiddenInput.style.opacity = '1';
+                    hiddenInput.style.width = 'auto';
+                    hiddenInput.style.height = 'auto';
+                    hiddenInput.focus();
+                    hiddenInput.click();
                 }
-                if (col === 'client_purchase') {
-                    oldClientExpire = record.data.client_expire || null;
-                }
-                const dateVal = this.value;
+            });
+        });
 
-                state.undoStack.push({
-                    type: 'cell_edit',
-                    recordId: id,
-                    colKey: col,
-                    oldValue: oldValue,
-                    newValue: dateVal,
-                    oldHostExpire: oldHostExpire,
-                    oldClientExpire: oldClientExpire
-                });
-
-                record.data[col] = dateVal;
-                record._updated = true;
-                if (col === 'host_purchase') {
-                    const months = parseInt(record.data.months) || 0;
-                    record.data.host_expire = calcHostExpire(dateVal, months);
+        // 隐藏日期选择器：选择日期后更新文本输入框
+        $$('.date-picker-hidden').forEach(hiddenInput => {
+            hiddenInput.addEventListener('change', function() {
+                const cell = this.closest('.date-cell');
+                if (!cell) return;
+                const textInput = cell.querySelector('.date-text-input');
+                if (textInput && this.value) {
+                    textInput.value = this.value;
+                    handleDateTextChange(textInput);
                 }
-                if (col === 'client_purchase') {
-                    if (dateVal) {
-                        const d = new Date(dateVal);
-                        d.setMonth(d.getMonth() + 1);
-                        record.data.client_expire = d.toISOString().split('T')[0];
-                    }
-                }
-                renderTable(false);
-                saveRecord(record);
-            };
+            });
         });
 
         // 月数
@@ -2140,7 +2123,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getTextInputCellsAll() {
-        return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input)');
+        return $$('input.cell-input:not(.address-select):not(.months-input):not(.expense-input):not(.fee-input):not(.provider-search-input):not(.date-text-input)');
     }
 
     function doMultiPaste(ds, clipboardText) {
@@ -2237,14 +2220,11 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (isDateCol) {
                 const cell = document.querySelector(`.date-cell[data-id="${rowId}"][data-col="${colKey}"]`);
                 if (cell) {
-                    const input = cell.querySelector('.date-input');
-                    const display = cell.querySelector('.date-display');
+                    const input = cell.querySelector('.date-text-input');
+                    const hiddenInput = cell.querySelector('.date-picker-hidden');
                     if (input) input.value = value;
-                    if (display) {
-                        const formatted = formatDisplayDate(value);
-                        display.textContent = formatted || '✎ 点击设置';
-                        cell.classList.toggle('date-empty', !value);
-                    }
+                    if (hiddenInput) hiddenInput.value = value;
+                    cell.classList.toggle('date-empty', !value);
                 }
             } else {
                 const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
@@ -2276,6 +2256,68 @@ document.addEventListener('DOMContentLoaded', function() {
             if (colKey === 'ip_address' || colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address' || isDateCol) {
                 renderTable(false);
             }
+        }
+    }
+
+    function handleDateTextChange(input) {
+        const colKey = input.dataset.col;
+        const id = parseInt(input.dataset.id);
+        let val = input.value.trim();
+        const record = state.records.find(r => r.id === id);
+        if (!record) return;
+
+        const oldValue = record.data[colKey] !== undefined ? record.data[colKey] : '';
+
+        // 尝试解析日期（支持多种格式）
+        if (val) {
+            const parsed = parseDate(val);
+            if (parsed) {
+                val = parsed;
+            } else {
+                // 解析失败，恢复旧值
+                input.value = oldValue;
+                setStatus('⚠️ 日期格式无法识别，支持格式：YYYY-MM-DD、YYYY/MM/DD、YYYY年MM月DD日');
+                return;
+            }
+        }
+
+        // 更新输入框显示为标准格式
+        input.value = val;
+
+        if (record.data[colKey] === val) return;
+
+        let oldHostExpire = null;
+        let oldClientExpire = null;
+        if (colKey === 'host_purchase') oldHostExpire = record.data.host_expire || null;
+        if (colKey === 'client_purchase') oldClientExpire = record.data.client_expire || null;
+
+        state.undoStack.push({
+            type: 'cell_edit',
+            recordId: id,
+            colKey: colKey,
+            oldValue: oldValue,
+            newValue: val,
+            oldHostExpire: oldHostExpire,
+            oldClientExpire: oldClientExpire
+        });
+
+        record.data[colKey] = val;
+        record._updated = true;
+        if (colKey === 'host_purchase') {
+            const months = parseInt(record.data.months) || 0;
+            record.data.host_expire = calcHostExpire(val, months);
+        }
+        if (colKey === 'client_purchase') {
+            if (val) {
+                const d = new Date(val);
+                d.setMonth(d.getMonth() + 1);
+                record.data.client_expire = d.toISOString().split('T')[0];
+            }
+        }
+        saveRecord(record);
+        // 联动列需要重新渲染
+        if (colKey === 'host_purchase' || colKey === 'client_purchase') {
+            renderTable(false);
         }
     }
 
