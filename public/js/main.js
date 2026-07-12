@@ -2305,8 +2305,8 @@ document.addEventListener('DOMContentLoaded', function() {
             record.data.host_expire = calcHostExpire(val, months);
         }
         saveRecord(record);
-        // 联动列需要重新渲染
-        if (colKey === 'host_purchase') {
+        // 联动列需要重新渲染（剩余天数、是否过期等）
+        if (colKey === 'host_purchase' || colKey === 'host_expire' || colKey === 'client_purchase' || colKey === 'client_expire') {
             renderTable(false);
         }
     }
@@ -2423,31 +2423,83 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- 增删 ---
-    async function addRow() {
+    // --- 增删 ---}
+
+    function showAddRowModal() {
+        const modal = document.getElementById('addRowModal');
+        const confirmBtn = document.getElementById('addRowConfirm');
+        const cancelBtn = document.getElementById('addRowCancel');
+        const closeBtn = document.getElementById('closeAddRowModal');
+
+        modal.classList.add('show');
+
+        const closeModal = () => {
+            modal.classList.remove('show');
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', closeModal);
+            closeBtn.removeEventListener('click', closeModal);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+
+        const onConfirm = async () => {
+            const radios = document.querySelectorAll('input[name="addRowCount"]');
+            let count = 1;
+            for (const radio of radios) {
+                if (radio.checked) {
+                    count = parseInt(radio.value);
+                    break;
+                }
+            }
+            closeModal();
+            await addRow(count);
+        };
+
+        const onKeyDown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                onConfirm();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeModal();
+            }
+        };
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', closeModal);
+        closeBtn.addEventListener('click', closeModal);
+        document.addEventListener('keydown', onKeyDown);
+
+        confirmBtn.focus();
+    }
+
+    async function addRow(count = 1) {
         if (!state.currentTabId) return;
         try {
-            setStatus('添加中...');
-            const data = {};
-            state.columns.forEach(col => { data[col.col_key] = ''; });
+            setStatus(`添加 ${count} 行中...`);
             const now = new Date();
             const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-            data.host_purchase = today;
-            data.months = 1;
-            data.host_expire = calcHostExpire(today, 1);
-            data.client_purchase = today;
-            data.client_expire = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
-            data.expense = '0';
-            data.fee = '';
-            data.address = 'IP地址';
+            const nextMonth = getNextMonth(now);
 
-            const result = await API.post('/records', { tab_id: state.currentTabId, data });
-            state.total++;
+            for (let i = 0; i < count; i++) {
+                const data = {};
+                state.columns.forEach(col => { data[col.col_key] = ''; });
+                data.host_purchase = today;
+                data.months = 1;
+                data.host_expire = calcHostExpire(today, 1);
+                data.client_purchase = today;
+                data.client_expire = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
+                data.expense = '0';
+                data.fee = '';
+                data.address = 'IP地址';
 
-            state.undoStack.push({
-                type: 'add_row',
-                recordId: result.id
-            });
+                const result = await API.post('/records', { tab_id: state.currentTabId, data });
+                state.total++;
+
+                state.undoStack.push({
+                    type: 'add_row',
+                    recordId: result.id
+                });
+            }
 
             // 跳转到最后一页
             state.page = Math.ceil(state.total / state.pageSize);
@@ -3446,7 +3498,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- 事件绑定 ---
-    addRowBtn.addEventListener('click', addRow);
+    addRowBtn.addEventListener('click', showAddRowModal);
     manageRowsBtn.addEventListener('click', function() {
         state.rowManageMode = !state.rowManageMode;
         if (!state.rowManageMode) {
@@ -3603,6 +3655,7 @@ document.addEventListener('DOMContentLoaded', function() {
             state.columns.forEach(col => { data[col.col_key] = ''; });
             const now = new Date();
             const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            const nextMonth = getNextMonth(now);
             data.host_purchase = today;
             data.months = 1;
             data.host_expire = calcHostExpire(today, 1);
@@ -3913,7 +3966,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key === 'n') { e.preventDefault(); addRow(); }
+        if (e.ctrlKey && e.key === 'n') { e.preventDefault(); showAddRowModal(); }
         if (e.key === 'Delete' && !e.target.closest('input') && !e.target.closest('select')) deleteSelected();
         if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undoLastAction(); }
     });

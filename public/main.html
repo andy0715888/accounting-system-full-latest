@@ -325,6 +325,27 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="addRowModal">
+        <div class="modal modal-xs">
+            <div class="modal-header">
+                <h2>添加行</h2>
+                <button class="modal-close" id="closeAddRowModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="add-row-options">
+                    <label><input type="radio" name="addRowCount" value="1" checked> 添加 1 行</label>
+                    <label><input type="radio" name="addRowCount" value="3"> 添加 3 行</label>
+                    <label><input type="radio" name="addRowCount" value="5"> 添加 5 行</label>
+                    <label><input type="radio" name="addRowCount" value="10"> 添加 10 行</label>
+                </div>
+                <div class="add-row-actions">
+                    <button class="tool-btn primary" id="addRowConfirm">确定</button>
+                    <button class="tool-btn" id="addRowCancel">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="incomeModal">
         <div class="modal modal-sm">
             <div class="modal-header">

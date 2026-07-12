@@ -1679,3 +1679,37 @@ tr.client-row.cut-pending {
         opacity: 1;
     }
 }
+
+.add-row-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.add-row-options label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+
+.add-row-options label:hover {
+    background-color: #f0f5ff;
+}
+
+.add-row-options input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.add-row-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
