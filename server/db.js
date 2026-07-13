@@ -183,13 +183,15 @@ function createDefaultAdmin() {
         if (!row) {
             db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword], function(err) {
                 if (err) return;
+                const newUserId = this.lastID;
                 console.log('✅ 默认管理员账号已创建: andy / andy0715');
-                createDefaultTabForUser(1);
+                createDefaultTabForUser(newUserId);
             });
         } else {
-            db.get('SELECT id FROM tabs WHERE user_id = ? LIMIT 1', [1], (err, row) => {
+            const userId = row.id;
+            db.get('SELECT id FROM tabs WHERE user_id = ? LIMIT 1', [userId], (err, tabRow) => {
                 if (err) return;
-                if (!row) createDefaultTabForUser(1);
+                if (!tabRow) createDefaultTabForUser(userId);
             });
         }
     });
