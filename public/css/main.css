@@ -23,9 +23,10 @@ body {
     z-index: 10;
 }
 .nav-logo { font-size:18px; font-weight:600; }
-.nav-center { flex:1; text-align:center; }
+.nav-left { flex: 1; }
+.nav-center { flex: 0 0 auto; text-align:center; }
 .nav-user { font-size:14px; opacity:0.85; }
-.nav-right { display:flex; align-items:center; gap:16px; }
+.nav-right { flex: 1; display:flex; align-items:center; gap:16px; justify-content: flex-end; }
 .network-status {
     font-size:12px;
     padding:4px 10px;

@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>记账系统</title>
+    <title>网络管理系统</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="/css/main.css">
 </head>
 <body>
     <header class="navbar">
         <div class="nav-left">
-            <span class="nav-logo">📊 记账系统</span>
+            <span class="nav-logo">📊 网络管理系统</span>
         </div>
         <div class="nav-center">
             <span class="nav-user">👤 <span id="usernameDisplay">用户</span></span>
@@ -52,13 +52,14 @@
                         <button class="tab-action-btn" id="manageTabsBtn">管理</button>
                         <button class="tab-action-btn danger" id="deleteTabsBtn">删除</button>
                         <button class="tab-action-btn" id="providerManageBtn">🏢 服务商管理</button>
+                        <button class="tab-action-btn" id="addressSuffixBtn">🔗 地址后缀</button>
                     </div>
                 </div>
                 <div class="tab-toolbar">
                     <div class="toolbar-left">
                         <button class="tool-btn primary" id="addRowBtn">➕ 添加行</button>
-                        <button class="tool-btn" id="manageRowsBtn">📝 管理行</button>
                         <button class="tool-btn danger" id="deleteRowsBtn">🗑️ 删除行</button>
+                        <button class="tool-btn" id="manageRowsBtn">📝 管理行</button>
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="importBtn">📥 导入</button>
                         <button class="tool-btn" id="exportBtn">📤 导出</button>
@@ -66,7 +67,6 @@
                         <button class="tool-btn" id="refreshBtn">🔄 刷新</button>
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="manageColumnsBtn">📋 列管理</button>
-                        <button class="tool-btn" id="addressSuffixBtn">🔗 地址后缀</button>
                     </div>
                     <div class="toolbar-right">
                         <span class="record-count" id="recordCount">共 0 条记录</span>

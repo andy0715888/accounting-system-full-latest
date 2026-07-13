@@ -1,7 +1,7 @@
 {
   "name": "accounting-system",
   "version": "1.0.0",
-  "description": "个人记账系统 - 支持动态列、导入导出、自定义背景",
+  "description": "网络管理系统 - 支持动态列、导入导出、自定义背景",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

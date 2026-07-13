@@ -114,7 +114,7 @@ async function startServer() {
             const key = fs.readFileSync(keyPath);
             const httpsServer = https.createServer({ cert, key }, app);
             httpsServer.listen(PORT, () => {
-                console.log(`📊 记账系统已启动 (HTTPS) 端口 ${PORT}`);
+                console.log(`📊 网络管理系统已启动 (HTTPS) 端口 ${PORT}`);
             });
         } catch (err) {
             console.warn('HTTPS 启动失败，降级为 HTTP');
@@ -127,7 +127,7 @@ async function startServer() {
 
 function startHttp() {
     app.listen(PORT, () => {
-        console.log(`📊 记账系统已启动 (HTTP) 端口 ${PORT}`);
+        console.log(`📊 网络管理系统已启动 (HTTP) 端口 ${PORT}`);
     });
 }
 

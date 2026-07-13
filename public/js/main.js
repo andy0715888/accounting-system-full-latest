@@ -1078,7 +1078,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     let dateKey = colKey === 'host_remaining' ? 'host_expire' : (colKey === 'client_remaining' ? 'client_expire' : '');
                     const days = computeDaysRemaining(record.data[dateKey]);
                     const displayVal = days !== '' ? days + ' 天' : '';
-                    const color = days < 0 ? '#f56c6c' : (days <= 7 ? '#e6a23c' : '#333');
+                    // ≤3天为深红色（含已过期），≤5天为深黄色，其余默认色
+                    const color = days <= 3 ? '#c0392b' : (days <= 5 ? '#b8860b' : '#333');
                     inputHtml = `<span style="color:${color};">${escapeHtml(displayVal)}</span>`;
                 } else if (colKey === 'ip_info') {
                     inputHtml = `<span>${escapeHtml(record.data.ip_address || '')}</span>`;
@@ -1114,8 +1115,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         const display = formatDisplayDate(dateVal);
                         inputHtml = `<div class="date-cell date-readonly${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span style="cursor:default;">${escapeHtml(display || '-')}</span></div>`;
                     } else {
-                        // 可编辑日期：始终可见的文本输入框 + 日历按钮
-                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><input type="text" class="cell-input date-text-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" placeholder="点击设置" autocomplete="off" /><input type="date" class="date-picker-hidden" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" tabindex="-1" /><button class="date-picker-btn" data-col="${escapeAttr(colKey)}" data-id="${record.id}" title="选择日期" tabindex="-1">📅</button></div>`;
+                        // 可编辑日期：非编辑时显示 XXXX年XX月XX日，编辑时切换为 YYYY-MM-DD
+                        const displayVal = formatDisplayDate(dateVal);
+                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><input type="text" class="cell-input date-text-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(displayVal)}" placeholder="点击设置" autocomplete="off" /><input type="date" class="date-picker-hidden" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" tabindex="-1" /><button class="date-picker-btn" data-col="${escapeAttr(colKey)}" data-id="${record.id}" title="选择日期" tabindex="-1">📅</button></div>`;
                     }
                 } else if (colKey === 'provider') {
                     const currentProvider = val || '';
@@ -1728,10 +1730,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (input && input.style.display !== 'none') return input.value || '';
                         }
                     } else if (isDateCol) {
+                        // 日期列：仅在正在编辑时读取输入框值（YYYY-MM-DD），否则读取记录中的标准格式
                         const cell = document.querySelector(`.date-cell[data-id="${rowId}"][data-col="${colKey}"]`);
                         if (cell) {
                             const input = cell.querySelector('.date-text-input');
-                            if (input) return input.value || '';
+                            if (input && document.activeElement === input) return input.value || '';
                         }
                     } else {
                         const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
@@ -1862,17 +1865,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function bindSpecialEvents() {
-        // 日期文本输入框：双击全选、失焦验证保存
+        // 日期文本输入框：单击编辑不全选，双击全选；编辑时显示 YYYY-MM-DD，非编辑显示 XXXX年XX月XX日
         $$('.date-text-input').forEach(input => {
+            // 获焦：切换为 YYYY-MM-DD 标准格式以便编辑（不全选，光标按正常点击位置）
+            input.addEventListener('focus', function() {
+                const id = parseInt(this.dataset.id);
+                const colKey = this.dataset.col;
+                const record = state.records.find(r => r.id === id);
+                if (record) {
+                    this.value = record.data[colKey] || '';
+                }
+            });
             // 双击全选
             input.addEventListener('dblclick', function() {
                 this.select();
             });
-            // 获焦全选
-            input.addEventListener('focus', function() {
-                this.select();
-            });
-            // 失焦时验证并保存
+            // 失焦时验证并保存（handleDateTextChange 会切回 XXXX年XX月XX日 显示格式）
             input.addEventListener('blur', function() {
                 handleDateTextChange(this);
             });
@@ -2226,7 +2234,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (cell) {
                     const input = cell.querySelector('.date-text-input');
                     const hiddenInput = cell.querySelector('.date-picker-hidden');
-                    if (input) input.value = value;
+                    // 文本输入框显示 XXXX年XX月XX日，隐藏 date 输入框保持 YYYY-MM-DD
+                    if (input) input.value = formatDisplayDate(value);
                     if (hiddenInput) hiddenInput.value = value;
                     cell.classList.toggle('date-empty', !value);
                 }
@@ -2271,15 +2280,15 @@ document.addEventListener('DOMContentLoaded', function() {
             if (parsed) {
                 val = parsed;
             } else {
-                // 解析失败，恢复旧值
-                input.value = oldValue;
+                // 解析失败，恢复旧值（显示格式）
+                input.value = formatDisplayDate(oldValue);
                 setStatus('⚠️ 日期格式无法识别，支持格式：YYYY-MM-DD、YYYY/MM/DD、YYYY年MM月DD日');
                 return;
             }
         }
 
-        // 更新输入框显示为标准格式
-        input.value = val;
+        // 更新输入框显示为 XXXX年XX月XX日 格式（非编辑状态）
+        input.value = formatDisplayDate(val);
 
         if (record.data[colKey] === val) return;
 
