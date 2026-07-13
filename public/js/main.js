@@ -1178,8 +1178,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     const ipVal = record.data.ip_address || '';
                     const fmt = getConditionalFormat(colKey, ipVal);
                     const fmtStyle = applyFormatStyle(fmt);
-                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
-                    inputHtml = `<span class="ip-info-cell"${styleAttr} data-id="${record.id}" style="cursor:pointer;${fmtStyle}">${escapeHtml(ipVal)}${ipVal ? ' 🔗' : ''}</span>`;
+                    const cellStyle = `cursor:pointer;${fmtStyle || ''}`;
+                    inputHtml = `<span class="ip-info-cell" data-id="${record.id}" style="${cellStyle}">${escapeHtml(ipVal)}${ipVal ? ' 🔗' : ''}</span>`;
                 } else if (col.col_type === 'address_select') {
                     const optionsArr = col.col_options || [];
                     const options = optionsArr.map(opt => {
@@ -3372,8 +3372,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let savedHost = null;
         if (ipAddr) {
             try {
-                const res = await fetch(`/api/hosts/by-ip/${encodeURIComponent(ipAddr)}`);
-                if (res.ok) savedHost = await res.json();
+                savedHost = await API.get(`/hosts/by-ip/${encodeURIComponent(ipAddr)}`);
             } catch (e) { /* 忽略 */ }
         }
 
@@ -3405,9 +3404,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const closeBtn = overlay.querySelector('.modal-close');
         const cancelBtn = overlay.querySelector('.cancel-ip-info-btn');
-        const saveBtn = overlay.getElementById('ipInfoSaveBtn');
-        const saveConnBtn = overlay.getElementById('ipInfoSaveConnBtn');
-        const status = overlay.getElementById('ipInfoStatus');
+        const saveBtn = overlay.querySelector('#ipInfoSaveBtn');
+        const saveConnBtn = overlay.querySelector('#ipInfoSaveConnBtn');
+        const status = overlay.querySelector('#ipInfoStatus');
 
         function closeModal() { overlay.remove(); }
 
@@ -3416,33 +3415,24 @@ document.addEventListener('DOMContentLoaded', function() {
         overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
 
         async function saveHost() {
-            const name = overlay.getElementById('ipInfoName').value.trim();
-            const host = overlay.getElementById('ipInfoHost').value.trim();
-            const pwd = overlay.getElementById('ipInfoPwd').value.trim();
-            const port = parseInt(overlay.getElementById('ipInfoPort').value) || 22;
-            const username = overlay.getElementById('ipInfoUser').value.trim();
-            const remark = overlay.getElementById('ipInfoRemark').value.trim();
+            const name = overlay.querySelector('#ipInfoName').value.trim();
+            const host = overlay.querySelector('#ipInfoHost').value.trim();
+            const pwd = overlay.querySelector('#ipInfoPwd').value.trim();
+            const port = parseInt(overlay.querySelector('#ipInfoPort').value) || 22;
+            const username = overlay.querySelector('#ipInfoUser').value.trim();
+            const remark = overlay.querySelector('#ipInfoRemark').value.trim();
 
             if (!host) { status.style.color = '#f56c6c'; status.textContent = '主机地址不能为空'; return null; }
             if (!username) { status.style.color = '#f56c6c'; status.textContent = '用户名不能为空'; return null; }
 
             try {
                 if (savedHost && savedHost.id) {
-                    await fetch(`/api/hosts/${savedHost.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: name || host, host, port, username, password: pwd, remark })
-                    });
+                    await API.put(`/hosts/${savedHost.id}`, { name: name || host, host, port, username, password: pwd, remark });
                     status.style.color = '#67c23a';
                     status.textContent = '✅ 已更新主机信息';
                     return { id: savedHost.id, name: name || host, host, port, username };
                 } else {
-                    const res = await fetch('/api/hosts', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: name || host, host, port, username, password: pwd, remark })
-                    });
-                    const data = await res.json();
+                    const data = await API.post('/hosts', { name: name || host, host, port, username, password: pwd, remark });
                     if (data.success) {
                         status.style.color = '#67c23a';
                         status.textContent = '✅ 主机已保存';
