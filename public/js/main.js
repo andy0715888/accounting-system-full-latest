@@ -2596,7 +2596,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function exportClientInfo() {
         const format = document.querySelector('input[name="exportClientFormat"]:checked')?.value || 'excel';
-        const clientRecords = state.records.filter(r => r.record_type === 'client');
+        const clientRecords = state.records;
         if (clientRecords.length === 0) {
             exportClientStatus.textContent = '⚠️ 没有客户数据';
             return;
