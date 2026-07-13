@@ -4692,13 +4692,15 @@ document.addEventListener('DOMContentLoaded', function() {
             list.innerHTML = '<div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>';
             return;
         }
-        list.innerHTML = commandFolders.map(f => `
+        list.innerHTML = commandFolders.map((f, idx) => `
             <div class="folder-item" data-id="${f.id}">
                 <div class="folder-header">
                     <span class="folder-icon">📁</span>
                     <span class="folder-name">${escapeHtml(f.name)}</span>
                     <span class="folder-count">${f.commands?.length || 0}</span>
                     <div class="folder-actions">
+                        <button class="folder-move-up-btn" data-id="${f.id}" title="上移" style="opacity:${idx === 0 ? 0.3 : 1};cursor:${idx === 0 ? 'not-allowed' : 'pointer'};">⬆️</button>
+                        <button class="folder-move-down-btn" data-id="${f.id}" title="下移" style="opacity:${idx === commandFolders.length - 1 ? 0.3 : 1};cursor:${idx === commandFolders.length - 1 ? 'not-allowed' : 'pointer'};">⬇️</button>
                         <button class="folder-add-cmd-btn" data-id="${f.id}" title="添加命令">➕</button>
                         <button class="folder-edit-btn" data-id="${f.id}" title="重命名">✏️</button>
                         <button class="folder-delete-btn" data-id="${f.id}" title="删除">🗑️</button>
@@ -4921,6 +4923,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const input = document.getElementById('terminalInput');
         const sendBtn = document.getElementById('sendCmdBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
+        const fileManagerBtn = document.getElementById('fileManagerBtn');
 
         title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
         terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
@@ -4929,7 +4932,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const wsUrl = `${wsProto}//${location.host}/ssh`;
         sshWs = new WebSocket(wsUrl);
 
-        // 前端心跳：每25秒发一个pong消息，保持连接活跃
         const clientPing = setInterval(() => {
             if (sshWs && sshWs.readyState === WebSocket.OPEN) {
                 sshWs.send(JSON.stringify({ type: 'ping' }));
@@ -4956,6 +4958,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     input.disabled = false;
                     sendBtn.disabled = false;
                     disconnectBtn.style.display = 'inline-block';
+                    fileManagerBtn.style.display = 'inline-block';
                     appendTerminalOutput(msg.data + '\n');
                 } else if (msg.type === 'output') {
                     appendTerminalOutput(msg.data);
@@ -4966,9 +4969,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     input.disabled = true;
                     sendBtn.disabled = true;
                     disconnectBtn.style.display = 'none';
+                    fileManagerBtn.style.display = 'none';
                     appendTerminalOutput('\n' + msg.data + '\n', 'warning');
                     sshWs = null;
                     clearInterval(clientPing);
+                } else if (msg.type === 'sftp_list') {
+                    handleSftpList(msg.data);
+                } else if (msg.type === 'sftp_read') {
+                    handleSftpRead(msg.data);
+                } else if (msg.type === 'sftp_write') {
+                    handleSftpWrite(msg.data);
+                } else if (msg.type === 'sftp_upload') {
+                    handleSftpUpload(msg.data);
+                } else if (msg.type === 'sftp_error') {
+                    handleSftpError(msg.data);
                 }
             } catch (e) { console.error('消息解析失败:', e); }
         };
@@ -4987,10 +5001,267 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.disabled = true;
                 sendBtn.disabled = true;
                 disconnectBtn.style.display = 'none';
+                fileManagerBtn.style.display = 'none';
                 appendTerminalOutput('\n[连接已关闭]\n', 'warning');
             }
             sshWs = null;
         };
+    }
+
+    let fileManagerState = {
+        currentPath: '/root',
+        files: [],
+        editingFile: null,
+        editingContent: '',
+        overlay: null
+    };
+
+    function openFileManager() {
+        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) {
+            setStatus('⚠️ 请先连接主机');
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:720px;max-height:85vh;">
+                <div class="modal-header">
+                    <h2>📁 文件管理器</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;padding:16px;">
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="tool-btn sm" id="fmBackBtn">⬅️ 上级</button>
+                        <span id="fmPath" style="flex:1;font-family:monospace;font-size:13px;background:#f5f7fa;padding:6px 10px;border-radius:4px;">/root</span>
+                        <button class="tool-btn sm" id="fmRefreshBtn">🔄 刷新</button>
+                        <button class="tool-btn sm" id="fmUploadBtn" style="background:#67c23a;color:#fff;">📤 上传文件</button>
+                        <input type="file" id="fmFileInput" style="display:none;" />
+                    </div>
+                    <div id="fmFileList" style="flex:1;overflow-y:auto;border:1px solid #e4e7ed;border-radius:8px;min-height:300px;max-height:400px;">
+                        <div style="text-align:center;color:#999;padding:40px 0;">加载中...</div>
+                    </div>
+                    <div id="fmEditor" style="display:none;flex-direction:column;gap:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span id="fmEditorTitle" style="font-weight:500;font-size:13px;">编辑文件</span>
+                            <div style="display:flex;gap:8px;">
+                                <button class="tool-btn sm" id="fmSaveBtn" style="background:#67c23a;color:#fff;">💾 保存</button>
+                                <button class="tool-btn sm" id="fmCloseEditorBtn">关闭</button>
+                            </div>
+                        </div>
+                        <textarea id="fmEditorContent" style="width:100%;height:200px;padding:10px;border:1px solid #dcdfe6;border-radius:6px;font-family:monospace;font-size:13px;resize:vertical;outline:none;"></textarea>
+                        <span id="fmEditorStatus" style="font-size:12px;color:#67c23a;"></span>
+                    </div>
+                    <span id="fmStatus" style="font-size:12px;color:#909399;"></span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        fileManagerState.overlay = overlay;
+        fileManagerState.currentPath = '/root';
+        fileManagerState.files = [];
+        fileManagerState.editingFile = null;
+
+        overlay.querySelector('.modal-close').onclick = () => closeFileManager();
+        overlay.onclick = (e) => { if (e.target === overlay) closeFileManager(); };
+
+        overlay.querySelector('#fmBackBtn').onclick = () => {
+            const p = fileManagerState.currentPath;
+            if (p === '/' || p === '') return;
+            const parts = p.split('/').filter(Boolean);
+            parts.pop();
+            const parentPath = '/' + parts.join('/');
+            loadFileList(parentPath || '/');
+        };
+
+        overlay.querySelector('#fmRefreshBtn').onclick = () => {
+            loadFileList(fileManagerState.currentPath);
+        };
+
+        overlay.querySelector('#fmUploadBtn').onclick = () => {
+            overlay.querySelector('#fmFileInput').click();
+        };
+
+        overlay.querySelector('#fmFileInput').onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) uploadFile(file);
+            e.target.value = '';
+        };
+
+        overlay.querySelector('#fmSaveBtn').onclick = () => saveFile();
+        overlay.querySelector('#fmCloseEditorBtn').onclick = () => closeEditor();
+
+        loadFileList('/root');
+    }
+
+    function closeFileManager() {
+        if (fileManagerState.overlay) {
+            fileManagerState.overlay.remove();
+            fileManagerState.overlay = null;
+        }
+    }
+
+    function loadFileList(path) {
+        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        fileManagerState.currentPath = path;
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmPath').textContent = path;
+        overlay.querySelector('#fmFileList').innerHTML = '<div style="text-align:center;color:#999;padding:40px 0;">加载中...</div>';
+        overlay.querySelector('#fmStatus').textContent = '';
+        sshWs.send(JSON.stringify({ type: 'sftp_list', path }));
+    }
+
+    function handleSftpList(data) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        fileManagerState.files = data.files || [];
+        fileManagerState.currentPath = data.path;
+        overlay.querySelector('#fmPath').textContent = data.path;
+
+        const listEl = overlay.querySelector('#fmFileList');
+        const files = data.files || [];
+        if (files.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:#999;padding:40px 0;">空目录</div>';
+            return;
+        }
+
+        files.sort((a, b) => {
+            if (a.isDir && !b.isDir) return -1;
+            if (!a.isDir && b.isDir) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        listEl.innerHTML = files.map(f => {
+            const icon = f.isDir ? '📁' : '📄';
+            const sizeStr = f.isDir ? '' : formatFileSize(f.size);
+            return `
+                <div class="fm-file-item" data-name="${escapeHtml(f.name)}" data-dir="${f.isDir ? '1' : '0'}">
+                    <span class="fm-file-icon">${icon}</span>
+                    <span class="fm-file-name">${escapeHtml(f.name)}</span>
+                    <span class="fm-file-size">${sizeStr}</span>
+                    <span class="fm-file-actions">
+                        ${!f.isDir ? '<button class="fm-edit-btn" title="编辑">✏️</button>' : ''}
+                    </span>
+                </div>
+            `;
+        }).join('');
+
+        listEl.querySelectorAll('.fm-file-item').forEach(item => {
+            item.onclick = (e) => {
+                const name = item.dataset.name;
+                const isDir = item.dataset.dir === '1';
+                if (e.target.closest('.fm-edit-btn')) {
+                    readFile(name);
+                } else if (isDir) {
+                    const newPath = fileManagerState.currentPath.endsWith('/')
+                        ? fileManagerState.currentPath + name
+                        : fileManagerState.currentPath + '/' + name;
+                    loadFileList(newPath);
+                }
+            };
+        });
+    }
+
+    function readFile(name) {
+        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        const filePath = fileManagerState.currentPath.endsWith('/')
+            ? fileManagerState.currentPath + name
+            : fileManagerState.currentPath + '/' + name;
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmStatus').textContent = '读取中...';
+        overlay.querySelector('#fmStatus').style.color = '#909399';
+        sshWs.send(JSON.stringify({ type: 'sftp_read', path: filePath }));
+    }
+
+    function handleSftpRead(data) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        fileManagerState.editingFile = data.path;
+        fileManagerState.editingContent = data.content || '';
+
+        overlay.querySelector('#fmEditorTitle').textContent = '编辑: ' + data.path;
+        overlay.querySelector('#fmEditorContent').value = data.content || '';
+        overlay.querySelector('#fmEditorStatus').textContent = '';
+        overlay.querySelector('#fmEditor').style.display = 'flex';
+        overlay.querySelector('#fmStatus').textContent = '';
+    }
+
+    function saveFile() {
+        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        const overlay = fileManagerState.overlay;
+        if (!overlay || !fileManagerState.editingFile) return;
+        const content = overlay.querySelector('#fmEditorContent').value;
+        const statusEl = overlay.querySelector('#fmEditorStatus');
+        statusEl.style.color = '#909399';
+        statusEl.textContent = '保存中...';
+        sshWs.send(JSON.stringify({
+            type: 'sftp_write',
+            path: fileManagerState.editingFile,
+            content
+        }));
+    }
+
+    function handleSftpWrite(data) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        const statusEl = overlay.querySelector('#fmEditorStatus');
+        statusEl.style.color = '#67c23a';
+        statusEl.textContent = '✅ 保存成功';
+        setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    }
+
+    function closeEditor() {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmEditor').style.display = 'none';
+        fileManagerState.editingFile = null;
+    }
+
+    function uploadFile(file) {
+        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmStatus').style.color = '#909399';
+        overlay.querySelector('#fmStatus').textContent = `上传中: ${file.name}...`;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result.split(',')[1];
+            const filePath = fileManagerState.currentPath.endsWith('/')
+                ? fileManagerState.currentPath + file.name
+                : fileManagerState.currentPath + '/' + file.name;
+            sshWs.send(JSON.stringify({
+                type: 'sftp_upload',
+                path: filePath,
+                content: base64
+            }));
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function handleSftpUpload(data) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmStatus').style.color = '#67c23a';
+        overlay.querySelector('#fmStatus').textContent = '✅ 上传成功';
+        loadFileList(fileManagerState.currentPath);
+    }
+
+    function handleSftpError(msg) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmStatus').style.color = '#f56c6c';
+        overlay.querySelector('#fmStatus').textContent = '❌ ' + msg;
+    }
+
+    function formatFileSize(bytes) {
+        if (!bytes) return '0 B';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
     // ANSI 颜色代码解析器，将 SSH 终端颜色转义序列转为 HTML
@@ -5187,16 +5458,42 @@ document.addEventListener('DOMContentLoaded', function() {
             const addCmdBtn = e.target.closest('.folder-add-cmd-btn');
             const editFolderBtn = e.target.closest('.folder-edit-btn');
             const delFolderBtn = e.target.closest('.folder-delete-btn');
+            const moveUpBtn = e.target.closest('.folder-move-up-btn');
+            const moveDownBtn = e.target.closest('.folder-move-down-btn');
             const runCmdBtn = e.target.closest('.cmd-run-btn');
             const editCmdBtn = e.target.closest('.cmd-edit-btn');
             const delCmdBtn = e.target.closest('.cmd-delete-btn');
 
-            if (e.target.closest('.folder-header') && !addCmdBtn && !editFolderBtn && !delFolderBtn && folderItem) {
+            if (e.target.closest('.folder-header') && !addCmdBtn && !editFolderBtn && !delFolderBtn && !moveUpBtn && !moveDownBtn && folderItem) {
                 const cmds = folderItem.querySelector('.folder-commands');
                 if (cmds) cmds.classList.toggle('open');
             }
 
-            if (addCmdBtn) {
+            if (moveUpBtn) {
+                const id = parseInt(moveUpBtn.dataset.id);
+                try {
+                    const res = await fetch(`/api/commands/folders/${id}/move`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ direction: 'up' })
+                    });
+                    const data = await res.json();
+                    if (res.ok) { await loadCommandFolders(); }
+                    else setStatus('❌ ' + (data.error || '移动失败'));
+                } catch (err) { setStatus('❌ 移动失败: ' + err.message); }
+            } else if (moveDownBtn) {
+                const id = parseInt(moveDownBtn.dataset.id);
+                try {
+                    const res = await fetch(`/api/commands/folders/${id}/move`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ direction: 'down' })
+                    });
+                    const data = await res.json();
+                    if (res.ok) { await loadCommandFolders(); }
+                    else setStatus('❌ ' + (data.error || '移动失败'));
+                } catch (err) { setStatus('❌ 移动失败: ' + err.message); }
+            } else if (addCmdBtn) {
                 const id = parseInt(addCmdBtn.dataset.id);
                 showAddCmdModal(id);
             } else if (editFolderBtn) {
@@ -5247,6 +5544,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const terminalInput = document.getElementById('terminalInput');
         const sendCmdBtn = document.getElementById('sendCmdBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
+        const fileManagerBtn = document.getElementById('fileManagerBtn');
 
         terminalInput.addEventListener('keydown', (e) => {
             // Ctrl+C 发送中断信号到SSH
@@ -5304,6 +5602,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 sshWs.close();
                 sshWs = null;
             }
+        };
+        fileManagerBtn.onclick = () => {
+            openFileManager();
         };
     }
 

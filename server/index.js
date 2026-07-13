@@ -140,9 +140,10 @@ function startHttp() {
     wss.on('connection', (ws) => {
         let sshConn = null;
         let sshStream = null;
-        let idleTimer = null;       // 5分钟空闲断开计时器
-        let pingTimer = null;       // 心跳计时器
-        const IDLE_TIMEOUT = 5 * 60 * 1000; // 5分钟
+        let sftp = null;
+        let idleTimer = null;
+        let pingTimer = null;
+        const IDLE_TIMEOUT = 5 * 60 * 1000;
 
         function resetIdleTimer() {
             if (idleTimer) clearTimeout(idleTimer);
@@ -150,13 +151,12 @@ function startHttp() {
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'disconnected', data: '连接已超时（5分钟无操作自动断开）' }));
                 }
-                if (sshConn) { sshConn.end(); sshConn = null; sshStream = null; }
+                if (sshConn) { sshConn.end(); sshConn = null; sshStream = null; sftp = null; }
                 if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
                 try { ws.close(); } catch(e) {}
             }, IDLE_TIMEOUT);
         }
 
-        // 心跳保活：每30秒发一次ping，防止连接被代理/防火墙断开
         pingTimer = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.ping();
@@ -164,6 +164,31 @@ function startHttp() {
         }, 30000);
 
         resetIdleTimer();
+
+        function sendSftpError(msg) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'sftp_error', data: msg }));
+            }
+        }
+
+        function ensureSftp(callback) {
+            if (sftp) {
+                callback(null, sftp);
+                return;
+            }
+            if (!sshConn) {
+                callback(new Error('SSH未连接'));
+                return;
+            }
+            sshConn.sftp((err, sftpConn) => {
+                if (err) {
+                    callback(err);
+                    return;
+                }
+                sftp = sftpConn;
+                callback(null, sftp);
+            });
+        }
 
         ws.on('message', async (data) => {
             resetIdleTimer();
@@ -245,7 +270,62 @@ function startHttp() {
                         sshConn.end();
                         sshConn = null;
                         sshStream = null;
+                        sftp = null;
                     }
+                } else if (msg.type === 'sftp_list') {
+                    const path = msg.path || '.';
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        sftpConn.readdir(path, (err2, list) => {
+                            if (err2) { sendSftpError('读取目录失败: ' + err2.message); return; }
+                            const files = list.map(f => ({
+                                name: f.filename,
+                                isDir: f.longname.startsWith('d'),
+                                size: f.attrs?.size || 0,
+                                mtime: f.attrs?.mtime || 0
+                            }));
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'sftp_list', data: { path, files } }));
+                            }
+                        });
+                    });
+                } else if (msg.type === 'sftp_read') {
+                    const path = msg.path;
+                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        sftpConn.readFile(path, 'utf-8', (err2, data) => {
+                            if (err2) { sendSftpError('读取文件失败: ' + err2.message); return; }
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'sftp_read', data: { path, content: data.toString('utf-8') } }));
+                            }
+                        });
+                    });
+                } else if (msg.type === 'sftp_write') {
+                    const { path, content } = msg;
+                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        sftpConn.writeFile(path, content || '', 'utf-8', (err2) => {
+                            if (err2) { sendSftpError('写入文件失败: ' + err2.message); return; }
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'sftp_write', data: { path, success: true } }));
+                            }
+                        });
+                    });
+                } else if (msg.type === 'sftp_upload') {
+                    const { path, content } = msg;
+                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        const buf = Buffer.from(content, 'base64');
+                        sftpConn.writeFile(path, buf, (err2) => {
+                            if (err2) { sendSftpError('上传文件失败: ' + err2.message); return; }
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'sftp_upload', data: { path, success: true } }));
+                            }
+                        });
+                    });
                 }
             } catch (err) {
                 console.error('WebSocket 消息处理错误:', err);

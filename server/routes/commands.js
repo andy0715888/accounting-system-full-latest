@@ -93,6 +93,44 @@ router.delete('/folders/:id', requireAuth, async (req, res) => {
     }
 });
 
+router.post('/folders/:id/move', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const folderId = parseInt(req.params.id);
+        const { direction } = req.body;
+        if (!direction || !['up', 'down'].includes(direction)) {
+            return res.status(400).json({ error: '无效的移动方向' });
+        }
+
+        const folders = await query(
+            'SELECT id, sort_order FROM command_folders WHERE user_id = ? ORDER BY sort_order, id',
+            [userId]
+        );
+        const idx = folders.findIndex(f => f.id === folderId);
+        if (idx < 0) return res.status(404).json({ error: '文件夹不存在' });
+
+        let targetIdx;
+        if (direction === 'up') {
+            if (idx === 0) return res.json({ success: true, message: '已经在最顶部' });
+            targetIdx = idx - 1;
+        } else {
+            if (idx === folders.length - 1) return res.json({ success: true, message: '已经在最底部' });
+            targetIdx = idx + 1;
+        }
+
+        const current = folders[idx];
+        const target = folders[targetIdx];
+
+        await execute('UPDATE command_folders SET sort_order = ? WHERE id = ?', [target.sort_order, current.id]);
+        await execute('UPDATE command_folders SET sort_order = ? WHERE id = ?', [current.sort_order, target.id]);
+
+        res.json({ success: true, message: '排序已更新' });
+    } catch (err) {
+        console.error('移动文件夹错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 router.get('/commands', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
