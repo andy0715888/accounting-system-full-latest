@@ -604,6 +604,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Server-only columns (inherited by client rows, not editable)
     const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info', 'address']);
     const CLIENT_INHERITED_COLS = new Set(['ip_address', 'password', 'domain', 'remark']);
+    // 点击编辑后输入框按内容最大长度显示的列（非编辑时居中，编辑时展开）
+    const EXPAND_COLS = new Set(['ip_address', 'password', 'domain', 'remark', 'client_name', 'unit_price']);
     // Client-only columns (only meaningful for client rows, empty/readonly on server rows)
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
@@ -1197,9 +1199,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     const inputType = col.col_type === 'number' ? 'number' : 'text';
                     const step = col.col_type === 'number' ? 'step="0.01"' : '';
-                    inputHtml = `<input type="${inputType}" class="cell-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(val || '')}" ${step} />`;
+                    const expandClass = EXPAND_COLS.has(colKey) ? ' expand-on-focus' : '';
+                    inputHtml = `<input type="${inputType}" class="cell-input${expandClass}" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(val || '')}" ${step} />`;
                 }
-                tbodyHtml += `<td class="${colKey === 'expense' ? 'editable-td' : ''}">${inputHtml}</td>`;
+                const tdClass = (colKey === 'expense' || EXPAND_COLS.has(colKey)) ? 'editable-td' : '';
+                tbodyHtml += `<td class="${tdClass}">${inputHtml}</td>`;
             });
             tbodyHtml += '</tr>';
         });
