@@ -1078,9 +1078,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     let dateKey = colKey === 'host_remaining' ? 'host_expire' : (colKey === 'client_remaining' ? 'client_expire' : '');
                     const days = computeDaysRemaining(record.data[dateKey]);
                     const displayVal = days !== '' ? days + ' 天' : '';
-                    // ≤3天为深红色（含已过期），≤5天为深黄色，其余默认色
-                    const color = days <= 3 ? '#c0392b' : (days <= 5 ? '#b8860b' : '#333');
-                    inputHtml = `<span style="color:${color};">${escapeHtml(displayVal)}</span>`;
+                    // ≤3天（含负数）为鲜红色，>3天且≤5天为金黄色加粗，其余默认色
+                    let color, style;
+                    if (days <= 3) {
+                        color = '#dc143c';
+                        style = 'font-weight:bold;';
+                    } else if (days <= 5) {
+                        color = '#ffa500';
+                        style = 'font-weight:bold;';
+                    } else {
+                        color = '#333';
+                        style = '';
+                    }
+                    inputHtml = `<span style="color:${color};${style}">${escapeHtml(displayVal)}</span>`;
                 } else if (colKey === 'ip_info') {
                     inputHtml = `<span>${escapeHtml(record.data.ip_address || '')}</span>`;
                 } else if (col.col_type === 'address_select') {
