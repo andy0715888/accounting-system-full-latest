@@ -1497,6 +1497,18 @@ body {
 }
 .fee-summary-cell:hover .fee-add-icon { opacity: 1; }
 
+/* === IP信息单元格 === */
+.ip-info-cell {
+    cursor: pointer;
+    transition: background 0.2s;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+.ip-info-cell:hover {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
 /* === 标签类型选择器 === */
 .tab-type-selector {
     display: flex;
@@ -1921,6 +1933,24 @@ tr.client-row.cut-pending {
 .hosts-toolbar {
     display: flex;
     gap: 8px;
+}
+
+.hosts-search-box {
+    margin-bottom: 8px;
+}
+
+.hosts-search-box input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #dcdfe6;
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.hosts-search-box input:focus {
+    border-color: #4a6cf7;
 }
 
 .hosts-list {

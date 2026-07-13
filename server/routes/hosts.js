@@ -109,4 +109,20 @@ router.get('/:id/password', requireAuth, async (req, res) => {
     }
 });
 
+// 通过IP地址查找主机（用于网络信息模块的IP信息弹窗）
+router.get('/by-ip/:ip', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const ip = req.params.ip;
+        const host = await queryOne(
+            'SELECT id, name, host, port, username, remark FROM hosts WHERE user_id = ? AND host = ? ORDER BY id DESC LIMIT 1',
+            [userId, ip]
+        );
+        res.json(host || null);
+    } catch (err) {
+        console.error('按IP查找主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 module.exports = router;

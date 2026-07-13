@@ -1179,7 +1179,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const fmt = getConditionalFormat(colKey, ipVal);
                     const fmtStyle = applyFormatStyle(fmt);
                     const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
-                    inputHtml = `<span${styleAttr}>${escapeHtml(ipVal)}</span>`;
+                    inputHtml = `<span class="ip-info-cell"${styleAttr} data-id="${record.id}" style="cursor:pointer;${fmtStyle}">${escapeHtml(ipVal)}${ipVal ? ' 🔗' : ''}</span>`;
                 } else if (col.col_type === 'address_select') {
                     const optionsArr = col.col_options || [];
                     const options = optionsArr.map(opt => {
@@ -2182,6 +2182,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // open-link 用事件委托绑定（不依赖 bindTableEvents 重新绑定）
         // (已在 document 级别的 click 委托中处理，见下方)
+
+        // IP信息交互（点击打开主机信息弹窗）
+        $$('.ip-info-cell').forEach(cell => {
+            cell.addEventListener('click', function() {
+                const recordId = parseInt(this.dataset.id);
+                openIpInfoModal(recordId);
+            });
+        });
 
         // 支出交互（点击显示文字切换为编辑）
         $$('.expense-display').forEach(display => {
@@ -3349,6 +3357,132 @@ document.addEventListener('DOMContentLoaded', function() {
             expenseStatus.textContent = '添加成功';
             setTimeout(() => expenseStatus.textContent = '', 1500);
         } catch (err) { expenseStatus.textContent = '添加失败: ' + err.message; }
+    }
+
+    // --- IP信息弹窗（联动主机管理） ---
+    async function openIpInfoModal(recordId) {
+        const record = state.records.find(r => r.id === recordId);
+        if (!record) return;
+
+        const ipAddr = record.data.ip_address || '';
+        const clientName = record.data.client_name || '';
+        const password = record.data.password || '';
+
+        // 尝试查找已保存的主机信息
+        let savedHost = null;
+        if (ipAddr) {
+            try {
+                const res = await fetch(`/api/hosts/by-ip/${encodeURIComponent(ipAddr)}`);
+                if (res.ok) savedHost = await res.json();
+            } catch (e) { /* 忽略 */ }
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:480px;">
+                <div class="modal-header">
+                    <h2>🔗 IP信息管理</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>主机名称（取自客户名）</label><input type="text" id="ipInfoName" value="${escapeAttr(clientName)}" placeholder="主机名称" /></div>
+                    <div class="input-group"><label>主机地址（取自IP地址）</label><input type="text" id="ipInfoHost" value="${escapeAttr(ipAddr)}" placeholder="IP地址" /></div>
+                    <div class="input-group"><label>密码（取自表格密码列）</label><input type="password" id="ipInfoPwd" value="${escapeAttr(password)}" placeholder="密码" /></div>
+                    <div class="input-group"><label>端口</label><input type="number" id="ipInfoPort" value="${savedHost ? savedHost.port : 22}" placeholder="22" /></div>
+                    <div class="input-group"><label>用户名</label><input type="text" id="ipInfoUser" value="${savedHost ? escapeAttr(savedHost.username) : ''}" placeholder="root" /></div>
+                    <div class="input-group"><label>备注</label><input type="text" id="ipInfoRemark" value="${savedHost ? escapeAttr(savedHost.remark || '') : ''}" placeholder="可选" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="ipInfoSaveBtn">💾 保存</button>
+                        <button class="tool-btn" id="ipInfoSaveConnBtn" style="background:#67c23a;color:#fff;">🔌 保存并连接</button>
+                        <button class="tool-btn cancel-ip-info-btn">取消</button>
+                    </div>
+                    <span id="ipInfoStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const closeBtn = overlay.querySelector('.modal-close');
+        const cancelBtn = overlay.querySelector('.cancel-ip-info-btn');
+        const saveBtn = overlay.getElementById('ipInfoSaveBtn');
+        const saveConnBtn = overlay.getElementById('ipInfoSaveConnBtn');
+        const status = overlay.getElementById('ipInfoStatus');
+
+        function closeModal() { overlay.remove(); }
+
+        closeBtn.onclick = closeModal;
+        cancelBtn.onclick = closeModal;
+        overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+        async function saveHost() {
+            const name = overlay.getElementById('ipInfoName').value.trim();
+            const host = overlay.getElementById('ipInfoHost').value.trim();
+            const pwd = overlay.getElementById('ipInfoPwd').value.trim();
+            const port = parseInt(overlay.getElementById('ipInfoPort').value) || 22;
+            const username = overlay.getElementById('ipInfoUser').value.trim();
+            const remark = overlay.getElementById('ipInfoRemark').value.trim();
+
+            if (!host) { status.style.color = '#f56c6c'; status.textContent = '主机地址不能为空'; return null; }
+            if (!username) { status.style.color = '#f56c6c'; status.textContent = '用户名不能为空'; return null; }
+
+            try {
+                if (savedHost && savedHost.id) {
+                    await fetch(`/api/hosts/${savedHost.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: name || host, host, port, username, password: pwd, remark })
+                    });
+                    status.style.color = '#67c23a';
+                    status.textContent = '✅ 已更新主机信息';
+                    return { id: savedHost.id, name: name || host, host, port, username };
+                } else {
+                    const res = await fetch('/api/hosts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: name || host, host, port, username, password: pwd, remark })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        status.style.color = '#67c23a';
+                        status.textContent = '✅ 主机已保存';
+                        return { id: data.id, name: name || host, host, port, username };
+                    } else {
+                        status.style.color = '#f56c6c';
+                        status.textContent = data.error || '保存失败';
+                        return null;
+                    }
+                }
+            } catch (err) {
+                status.style.color = '#f56c6c';
+                status.textContent = '保存失败: ' + err.message;
+                return null;
+            }
+        }
+
+        saveBtn.onclick = async () => {
+            const result = await saveHost();
+            if (result) {
+                setTimeout(closeModal, 800);
+                await loadHosts();
+            }
+        };
+
+        saveConnBtn.onclick = async () => {
+            const result = await saveHost();
+            if (result) {
+                closeModal();
+                $$('.menu-item').forEach(i => i.classList.remove('active'));
+                const hostMenu = document.querySelector('.menu-item[data-view="hosts"]');
+                if (hostMenu) hostMenu.classList.add('active');
+                $$('.view-panel').forEach(p => p.classList.remove('active'));
+                const target = document.getElementById('view-hosts');
+                if (target) target.classList.add('active');
+                await loadHosts();
+                await loadCommandFolders();
+                setTimeout(() => connectSSH(result), 300);
+            }
+        };
     }
 
     // --- 全标签财务统计 ---
@@ -4524,11 +4658,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderHosts() {
         const list = document.getElementById('hostsList');
-        if (!hosts.length) {
-            list.innerHTML = '<div style="text-align:center;color:#999;padding:20px 0;">暂无主机</div>';
+        const searchInput = document.getElementById('hostSearchInput');
+        const keyword = (searchInput?.value || '').trim().toLowerCase();
+
+        let filtered = hosts;
+        if (keyword) {
+            filtered = hosts.filter(h =>
+                (h.host || '').toLowerCase().includes(keyword) ||
+                (h.name || '').toLowerCase().includes(keyword)
+            );
+        }
+
+        if (!filtered.length) {
+            list.innerHTML = '<div style="text-align:center;color:#999;padding:20px 0;">' + (keyword ? '未找到匹配的主机' : '暂无主机') + '</div>';
             return;
         }
-        list.innerHTML = hosts.map(h => `
+        list.innerHTML = filtered.map(h => `
             <div class="host-item" data-id="${h.id}">
                 <div class="host-item-main">
                     <div class="host-name">${escapeHtml(h.name)}</div>
@@ -4794,6 +4939,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const wsUrl = `${wsProto}//${location.host}/ssh`;
         sshWs = new WebSocket(wsUrl);
 
+        // 前端心跳：每25秒发一个pong消息，保持连接活跃
+        const clientPing = setInterval(() => {
+            if (sshWs && sshWs.readyState === WebSocket.OPEN) {
+                sshWs.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 25000);
+
         sshWs.onopen = async () => {
             try {
                 const pwdRes = await fetch(`/api/hosts/${host.id}/password`);
@@ -4824,8 +4976,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     input.disabled = true;
                     sendBtn.disabled = true;
                     disconnectBtn.style.display = 'none';
-                    appendTerminalOutput('\n[连接已断开]\n', 'warning');
+                    appendTerminalOutput('\n' + msg.data + '\n', 'warning');
                     sshWs = null;
+                    clearInterval(clientPing);
                 }
             } catch (e) { console.error('消息解析失败:', e); }
         };
@@ -4834,9 +4987,11 @@ document.addEventListener('DOMContentLoaded', function() {
             terminal.innerHTML = '<div style="padding:16px;color:#f56c6c;">WebSocket 连接失败</div>';
             title.textContent = '连接失败';
             sshWs = null;
+            clearInterval(clientPing);
         };
 
         sshWs.onclose = () => {
+            clearInterval(clientPing);
             if (currentHost && title.textContent.indexOf('已断开') === -1) {
                 title.textContent = `${host.name} - 连接已关闭`;
                 input.disabled = true;
@@ -5005,6 +5160,11 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('addHostBtn').onclick = () => showAddHostModal();
         document.getElementById('addCmdFolderBtn').onclick = () => showAddFolderModal();
 
+        const searchInput = document.getElementById('hostSearchInput');
+        if (searchInput) {
+            searchInput.addEventListener('input', () => renderHosts());
+        }
+
         const hostsList = document.getElementById('hostsList');
         hostsList.addEventListener('click', async (e) => {
             const connectBtn = e.target.closest('.host-connect-btn');
@@ -5099,6 +5259,40 @@ document.addEventListener('DOMContentLoaded', function() {
         const disconnectBtn = document.getElementById('disconnectBtn');
 
         terminalInput.addEventListener('keydown', (e) => {
+            // Ctrl+C 发送中断信号到SSH
+            if (e.ctrlKey && e.key === 'c') {
+                e.preventDefault();
+                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
+                    sshWs.send(JSON.stringify({ type: 'input', data: '\x03' }));
+                    appendTerminalOutput('^C\n', 'warning');
+                }
+                return;
+            }
+            // Ctrl+D 发送EOF
+            if (e.ctrlKey && e.key === 'd') {
+                e.preventDefault();
+                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
+                    sshWs.send(JSON.stringify({ type: 'input', data: '\x04' }));
+                }
+                return;
+            }
+            // Ctrl+Z 发送暂停信号
+            if (e.ctrlKey && e.key === 'z') {
+                e.preventDefault();
+                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
+                    sshWs.send(JSON.stringify({ type: 'input', data: '\x1a' }));
+                    appendTerminalOutput('^Z\n', 'warning');
+                }
+                return;
+            }
+            // Ctrl+L 清屏
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
+                    sshWs.send(JSON.stringify({ type: 'input', data: '\x0c' }));
+                }
+                return;
+            }
             if (e.key === 'Enter') {
                 const cmd = terminalInput.value.trim();
                 if (cmd) {

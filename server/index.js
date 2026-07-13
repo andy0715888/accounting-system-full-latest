@@ -140,8 +140,33 @@ function startHttp() {
     wss.on('connection', (ws) => {
         let sshConn = null;
         let sshStream = null;
+        let idleTimer = null;       // 5分钟空闲断开计时器
+        let pingTimer = null;       // 心跳计时器
+        const IDLE_TIMEOUT = 5 * 60 * 1000; // 5分钟
+
+        function resetIdleTimer() {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'disconnected', data: '连接已超时（5分钟无操作自动断开）' }));
+                }
+                if (sshConn) { sshConn.end(); sshConn = null; sshStream = null; }
+                if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+                try { ws.close(); } catch(e) {}
+            }, IDLE_TIMEOUT);
+        }
+
+        // 心跳保活：每30秒发一次ping，防止连接被代理/防火墙断开
+        pingTimer = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.ping();
+            }
+        }, 30000);
+
+        resetIdleTimer();
 
         ws.on('message', async (data) => {
+            resetIdleTimer();
             try {
                 const msg = JSON.parse(data.toString());
 
@@ -203,7 +228,9 @@ function startHttp() {
                         username,
                         password: password || '',
                         readyTimeout: 15000,
-                        strictVendor: false
+                        strictVendor: false,
+                        keepaliveInterval: 15000,
+                        keepaliveCountMax: 3
                     });
                 } else if (msg.type === 'input') {
                     if (sshStream && sshConn) {
@@ -229,6 +256,8 @@ function startHttp() {
         });
 
         ws.on('close', () => {
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+            if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
             if (sshConn) {
                 sshConn.end();
                 sshConn = null;
