@@ -5127,8 +5127,11 @@ document.addEventListener('DOMContentLoaded', function() {
             disconnectBtn.style.display = 'inline-block';
             fileManagerBtn.style.display = 'inline-block';
             if (conn.terminalContent) {
-                appendTerminalOutput(conn.terminalContent);
-                conn.terminalContent = '';
+                const output = document.getElementById('terminalOutput');
+                const div = document.createElement('div');
+                div.innerHTML = ansiToHtml(conn.terminalContent);
+                output.appendChild(div);
+                output.scrollTop = output.scrollHeight;
             }
         } else if (ws && ws.readyState === WebSocket.CONNECTING) {
             title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
@@ -5145,8 +5148,11 @@ document.addEventListener('DOMContentLoaded', function() {
             disconnectBtn.style.display = 'none';
             fileManagerBtn.style.display = 'none';
             if (conn.terminalContent) {
-                appendTerminalOutput(conn.terminalContent);
-                conn.terminalContent = '';
+                const output = document.getElementById('terminalOutput');
+                const div = document.createElement('div');
+                div.innerHTML = ansiToHtml(conn.terminalContent);
+                output.appendChild(div);
+                output.scrollTop = output.scrollHeight;
             }
         }
     }
