@@ -63,6 +63,7 @@
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="importBtn">📥 导入</button>
                         <button class="tool-btn" id="exportBtn">📤 导出</button>
+                        <button class="tool-btn" id="exportClientInfoBtn">📋 导出客户信息</button>
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="refreshBtn">🔄 刷新</button>
                         <span class="tool-divider"></span>
@@ -120,6 +121,15 @@
                         <label><input type="checkbox" id="allowRegisterCheckbox"> 允许新用户注册</label>
                         <button class="tool-btn primary" id="saveRegisterSwitchBtn">保存注册开关</button>
                         <span id="registerSwitchStatus"></span>
+                    </div>
+                    <div class="setting-group">
+                        <h3>👤 修改用户名</h3>
+                        <div class="password-form">
+                            <div class="input-group"><label>当前密码</label><input type="password" id="usernamePassword" placeholder="请输入当前密码验证身份" /></div>
+                            <div class="input-group"><label>新用户名</label><input type="text" id="newUsername" placeholder="请输入新用户名" /></div>
+                            <button class="tool-btn primary" id="changeUsernameBtn">修改用户名</button>
+                            <span id="changeUsernameStatus"></span>
+                        </div>
                     </div>
                     <div class="setting-group">
                         <h3>🔐 修改密码</h3>
@@ -211,6 +221,27 @@
                     <button class="tool-btn" id="cancelImport">取消</button>
                 </div>
                 <div id="importStatus"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="exportClientInfoModal">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h2>📋 导出客户信息</h2>
+                <button class="modal-close" id="closeExportClientInfoModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="import-desc">导出筛选后的客户信息（IP信息、客户购买时间、客户到期时间、客户剩余天数、客户名、单价备注）</p>
+                <div class="add-row-options">
+                    <label><input type="radio" name="exportClientFormat" value="excel" checked> 📊 导出为 Excel 文件</label>
+                    <label><input type="radio" name="exportClientFormat" value="image"> 🖼️ 复制为图片到剪贴板</label>
+                </div>
+                <div class="import-actions">
+                    <button class="tool-btn primary" id="exportClientConfirm">确定</button>
+                    <button class="tool-btn" id="exportClientCancel">取消</button>
+                </div>
+                <div id="exportClientStatus"></div>
             </div>
         </div>
     </div>

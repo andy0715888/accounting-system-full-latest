@@ -145,4 +145,28 @@ router.post('/change-password', async (req, res) => {
     }
 });
 
+router.post('/change-username', async (req, res) => {
+    try {
+        if (!req.session.userId) return res.status(401).json({ error: '未登录' });
+        const { password, newUsername } = req.body;
+        if (!password || !newUsername) return res.status(400).json({ error: '请填写完整' });
+
+        const user = await queryOne('SELECT * FROM users WHERE id = ?', [req.session.userId]);
+        if (!user) return res.status(404).json({ error: '用户不存在' });
+
+        const isValid = bcrypt.compareSync(password, user.password);
+        if (!isValid) return res.status(401).json({ error: '密码错误' });
+
+        const existing = await queryOne('SELECT id FROM users WHERE username = ? AND id != ?', [newUsername, req.session.userId]);
+        if (existing) return res.status(400).json({ error: '用户名已存在' });
+
+        await execute('UPDATE users SET username = ? WHERE id = ?', [newUsername, req.session.userId]);
+        req.session.username = newUsername;
+        res.json({ success: true, message: '用户名修改成功', username: newUsername });
+    } catch (err) {
+        console.error('修改用户名错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 module.exports = router;

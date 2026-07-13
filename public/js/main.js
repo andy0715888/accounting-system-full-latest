@@ -68,6 +68,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const manageRowsBtn = $('#manageRowsBtn');
     const importBtn = $('#importBtn');
     const exportBtn = $('#exportBtn');
+    const exportClientInfoBtn = $('#exportClientInfoBtn');
+    const exportClientInfoModal = $('#exportClientInfoModal');
+    const closeExportClientInfoModal = $('#closeExportClientInfoModal');
+    const exportClientConfirm = $('#exportClientConfirm');
+    const exportClientCancel = $('#exportClientCancel');
+    const exportClientStatus = $('#exportClientStatus');
     const refreshBtn = $('#refreshBtn');
     const manageColumnsBtn = $('#manageColumnsBtn');
     const addressSuffixBtn = $('#addressSuffixBtn');
@@ -98,6 +104,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const newPwdInput = $('#newPassword');
     const confirmPwdInput = $('#confirmPassword');
     const changePwdStatus = $('#changePwdStatus');
+    const changeUsernameBtn = $('#changeUsernameBtn');
+    const usernamePasswordInput = $('#usernamePassword');
+    const newUsernameInput = $('#newUsername');
+    const changeUsernameStatus = $('#changeUsernameStatus');
     const allowRegisterCheckbox = $('#allowRegisterCheckbox');
     const saveRegisterSwitchBtn = $('#saveRegisterSwitchBtn');
     const registerSwitchStatus = $('#registerSwitchStatus');
@@ -2579,6 +2589,135 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { setStatus('❌ 导出失败: ' + err.message); }
     }
 
+    function showExportClientInfoModal() {
+        exportClientStatus.textContent = '';
+        exportClientInfoModal.classList.add('show');
+    }
+
+    async function exportClientInfo() {
+        const format = document.querySelector('input[name="exportClientFormat"]:checked')?.value || 'excel';
+        const clientRecords = state.records.filter(r => r.record_type === 'client');
+        if (clientRecords.length === 0) {
+            exportClientStatus.textContent = '⚠️ 没有客户数据';
+            return;
+        }
+
+        const exportFields = [
+            { key: 'ip_info', name: 'IP信息' },
+            { key: 'client_purchase', name: '客户购买时间' },
+            { key: 'client_expire', name: '客户到期时间' },
+            { key: 'client_remaining', name: '客户剩余天数' },
+            { key: 'client_name', name: '客户名' },
+            { key: 'unit_price', name: '单价备注' }
+        ];
+
+        try {
+            if (format === 'excel') {
+                exportClientStatus.textContent = '🔄 导出中...';
+                if (typeof XLSX === 'undefined') await loadXLSX();
+                const headers = exportFields.map(f => f.name);
+                const rows = clientRecords.map(r => {
+                    return exportFields.map(f => {
+                        if (f.key === 'client_remaining') {
+                            const days = computeDaysRemaining(r.data.client_expire);
+                            return days !== '' ? days + ' 天' : '';
+                        }
+                        if (f.key === 'client_purchase' || f.key === 'client_expire') {
+                            return formatDisplayDate(r.data[f.key]);
+                        }
+                        return r.data[f.key] ?? '';
+                    });
+                });
+                const wsData = [headers, ...rows];
+                const ws = XLSX.utils.aoa_to_sheet(wsData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, '客户信息');
+                const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                downloadFile(buf, `客户信息_${new Date().toISOString().slice(0,10)}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                exportClientStatus.textContent = '✅ 导出成功';
+                setTimeout(() => exportClientInfoModal.classList.remove('show'), 1500);
+            } else {
+                exportClientStatus.textContent = '🔄 生成图片中...';
+                await exportClientInfoAsImage(clientRecords, exportFields);
+                exportClientStatus.textContent = '✅ 图片已复制到剪贴板';
+                setTimeout(() => exportClientInfoModal.classList.remove('show'), 2000);
+            }
+        } catch (err) {
+            exportClientStatus.textContent = '❌ 导出失败: ' + err.message;
+        }
+    }
+
+    async function exportClientInfoAsImage(clientRecords, exportFields) {
+        const headers = exportFields.map(f => f.name);
+        const rows = clientRecords.map(r => {
+            return exportFields.map(f => {
+                if (f.key === 'client_remaining') {
+                    const days = computeDaysRemaining(r.data.client_expire);
+                    return days !== '' ? days + ' 天' : '';
+                }
+                if (f.key === 'client_purchase' || f.key === 'client_expire') {
+                    return formatDisplayDate(r.data[f.key]);
+                }
+                return r.data[f.key] ?? '';
+            });
+        });
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const padding = 20;
+        const headerHeight = 40;
+        const rowHeight = 30;
+        const colPadding = 15;
+
+        const colWidths = exportFields.map((f, idx) => {
+            let maxWidth = ctx.measureText(f.name).width + colPadding * 2;
+            rows.forEach(row => {
+                const w = ctx.measureText(String(row[idx])).width + colPadding * 2;
+                maxWidth = Math.max(maxWidth, w);
+            });
+            return maxWidth + 20;
+        });
+
+        const totalWidth = colWidths.reduce((a, b) => a + b, 0) + padding * 2;
+        const totalHeight = headerHeight + rows.length * rowHeight + padding * 2;
+
+        canvas.width = totalWidth;
+        canvas.height = totalHeight;
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, totalWidth, totalHeight);
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+
+        let x = padding;
+        ctx.fillStyle = '#f5f7fa';
+        ctx.fillRect(x, padding, totalWidth - padding * 2, headerHeight);
+        ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillStyle = '#333';
+        colWidths.forEach((w, idx) => {
+            ctx.fillText(headers[idx], x + colPadding, padding + headerHeight / 2 + 5);
+            ctx.strokeRect(x, padding, w, headerHeight);
+            x += w;
+        });
+
+        ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillStyle = '#333';
+        rows.forEach((row, rowIdx) => {
+            let x = padding;
+            const y = padding + headerHeight + rowIdx * rowHeight;
+            row.forEach((cell, colIdx) => {
+                ctx.fillText(String(cell), x + colPadding, y + rowHeight / 2 + 4);
+                ctx.strokeRect(x, y, colWidths[colIdx], rowHeight);
+                x += colWidths[colIdx];
+            });
+        });
+
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+        ]);
+    }
+
     function showImportModal() { importModal.classList.add('show'); importFileInput.value = ''; importStatus.textContent = ''; }
     async function handleImport() {
         const file = importFileInput.files[0];
@@ -3346,6 +3485,19 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { changePwdStatus.textContent = '❌ 修改失败: ' + err.message; }
     }
 
+    async function changeUsername() {
+        const password = usernamePasswordInput.value.trim();
+        const newUsername = newUsernameInput.value.trim();
+        if (!password) { changeUsernameStatus.textContent = '⚠️ 请输入当前密码'; return; }
+        if (!newUsername) { changeUsernameStatus.textContent = '⚠️ 请输入新用户名'; return; }
+        try {
+            const res = await API.post('/auth/change-username', { password, newUsername });
+            changeUsernameStatus.textContent = '✅ 用户名修改成功';
+            usernamePasswordInput.value = ''; newUsernameInput.value = '';
+            usernameDisplay.textContent = res.username;
+        } catch (err) { changeUsernameStatus.textContent = '❌ 修改失败: ' + err.message; }
+    }
+
     // --- 注册开关 ---
     async function loadRegisterSwitch() {
         try {
@@ -3535,6 +3687,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     deleteRowsBtn.addEventListener('click', deleteSelected);
     exportBtn.addEventListener('click', exportData);
+    exportClientInfoBtn.addEventListener('click', showExportClientInfoModal);
+    closeExportClientInfoModal.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
+    exportClientConfirm.addEventListener('click', exportClientInfo);
+    exportClientCancel.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
     importBtn.addEventListener('click', showImportModal);
     refreshBtn.addEventListener('click', function() {
         if (state.currentTabId) {
@@ -3567,6 +3723,8 @@ document.addEventListener('DOMContentLoaded', function() {
     cancelImport.addEventListener('click', () => importModal.classList.remove('show'));
     changePwdBtn.addEventListener('click', changePassword);
     confirmPwdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') changePassword(); });
+    changeUsernameBtn.addEventListener('click', changeUsername);
+    newUsernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') changeUsername(); });
     addProviderBtn.addEventListener('click', addProvider);
     providerNameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addProvider();
