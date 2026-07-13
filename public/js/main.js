@@ -2990,27 +2990,52 @@ document.addEventListener('DOMContentLoaded', function() {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', this.dataset.id);
             });
-            item.addEventListener('dragend', function() { this.classList.remove('dragging'); });
+            item.addEventListener('dragend', function() {
+                this.classList.remove('dragging');
+                columnList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+            });
             item.addEventListener('dragover', function(e) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
+                columnList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
                 this.classList.add('drag-over');
             });
-            item.addEventListener('dragleave', function() { this.classList.remove('drag-over'); });
+            item.addEventListener('dragleave', function(e) {
+                const rect = this.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                if (y < 0 || y > rect.height) {
+                    this.classList.remove('drag-over');
+                }
+            });
             item.addEventListener('drop', async function(e) {
                 e.preventDefault();
                 this.classList.remove('drag-over');
                 const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
                 const targetId = parseInt(this.dataset.id);
                 if (draggedId === targetId) return;
+
                 const cols = state.columns;
                 const draggedIndex = cols.findIndex(c => c.id === draggedId);
                 const targetIndex = cols.findIndex(c => c.id === targetId);
                 if (draggedIndex === -1 || targetIndex === -1) return;
-                const temp = cols[draggedIndex].col_order;
-                cols[draggedIndex].col_order = cols[targetIndex].col_order;
-                cols[targetIndex].col_order = temp;
-                cols.sort((a, b) => a.col_order - b.col_order);
+
+                const rect = this.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                const insertBefore = y < rect.height / 2;
+
+                const draggedCol = cols[draggedIndex];
+                cols.splice(draggedIndex, 1);
+
+                let newIndex = targetIndex;
+                if (draggedIndex < targetIndex) {
+                    newIndex = insertBefore ? targetIndex - 1 : targetIndex;
+                } else {
+                    newIndex = insertBefore ? targetIndex : targetIndex + 1;
+                }
+                if (newIndex < 0) newIndex = 0;
+                if (newIndex > cols.length) newIndex = cols.length;
+                cols.splice(newIndex, 0, draggedCol);
+
                 const orderMap = {};
                 cols.forEach((c, i) => { orderMap[c.id] = i; });
                 try {
