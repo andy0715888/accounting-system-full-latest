@@ -143,13 +143,13 @@ function startHttp() {
         let sftp = null;
         let idleTimer = null;
         let pingTimer = null;
-        const IDLE_TIMEOUT = 5 * 60 * 1000;
+        const IDLE_TIMEOUT = 10 * 60 * 1000;
 
         function resetIdleTimer() {
             if (idleTimer) clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
                 if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'disconnected', data: '连接已超时（5分钟无操作自动断开）' }));
+                    ws.send(JSON.stringify({ type: 'disconnected', data: '连接已超时（10分钟无操作自动断开）' }));
                 }
                 if (sshConn) { sshConn.end(); sshConn = null; sshStream = null; sftp = null; }
                 if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }

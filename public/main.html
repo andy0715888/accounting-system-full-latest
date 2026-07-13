@@ -88,9 +88,11 @@
                         <span class="pagination-info" id="paginationInfo">共 0 条</span>
                     </div>
                     <div class="pagination-center">
+                        <button class="page-btn" id="firstPageBtn" disabled>首页</button>
                         <button class="page-btn" id="prevPageBtn" disabled>上一页</button>
                         <span class="page-indicator" id="pageIndicator">1 / 1</span>
                         <button class="page-btn" id="nextPageBtn" disabled>下一页</button>
+                        <button class="page-btn" id="lastPageBtn" disabled>尾页</button>
                         <span class="page-jump" id="pageJumpWrap">
                             <input type="number" id="pageJumpInput" min="1" value="1" style="width:50px;text-align:center;" />
                             <button class="page-btn" id="pageJumpBtn">跳转</button>
@@ -134,6 +136,7 @@
                         </div>
                     </div>
                     <div class="hosts-main">
+                        <div class="ssh-tabs" id="sshTabs"></div>
                         <div class="terminal-header" id="terminalHeader">
                             <span class="terminal-title">请选择主机连接</span>
                             <div class="terminal-actions">

@@ -154,6 +154,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const paginationInfo = $('#paginationInfo');
     const prevPageBtn = $('#prevPageBtn');
     const nextPageBtn = $('#nextPageBtn');
+    const firstPageBtn = $('#firstPageBtn');
+    const lastPageBtn = $('#lastPageBtn');
     const pageIndicator = $('#pageIndicator');
     const pageSizeSelect = $('#pageSizeSelect');
     // 同步 state.pageSize 与下拉框初始值
@@ -730,8 +732,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const end = Math.min(state.page * state.pageSize, state.total);
         paginationInfo.textContent = state.total > 0 ? `第 ${start}-${end} 条，共 ${state.total} 条` : '共 0 条';
         if (pageIndicator) pageIndicator.textContent = `${state.page} / ${state.totalPages}`;
+        if (firstPageBtn) firstPageBtn.disabled = state.page <= 1;
         if (prevPageBtn) prevPageBtn.disabled = state.page <= 1;
         if (nextPageBtn) nextPageBtn.disabled = state.page >= state.totalPages;
+        if (lastPageBtn) lastPageBtn.disabled = state.page >= state.totalPages;
         if (pageJumpInput) { pageJumpInput.max = state.totalPages; pageJumpInput.value = state.page; }
     }
 
@@ -4128,6 +4132,14 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // --- 分页事件 ---
+    firstPageBtn.addEventListener('click', async () => {
+        if (state.page <= 1) return;
+        state.page = 1;
+        await loadRecords(state.currentTabId);
+        renderTable(false);
+        const tw = $('#tableWrapper');
+        if (tw) tw.scrollTop = 0;
+    });
     prevPageBtn.addEventListener('click', async () => {
         if (state.page <= 1) return;
         state.page--;
@@ -4139,6 +4151,14 @@ document.addEventListener('DOMContentLoaded', function() {
     nextPageBtn.addEventListener('click', async () => {
         if (state.page >= state.totalPages) return;
         state.page++;
+        await loadRecords(state.currentTabId);
+        renderTable(false);
+        const tw = $('#tableWrapper');
+        if (tw) tw.scrollTop = 0;
+    });
+    lastPageBtn.addEventListener('click', async () => {
+        if (state.page >= state.totalPages) return;
+        state.page = state.totalPages;
         await loadRecords(state.currentTabId);
         renderTable(false);
         const tw = $('#tableWrapper');
@@ -4633,8 +4653,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- 主机管理模块 ---
-    let sshWs = null;
-    let currentHost = null;
+    let sshConnections = [];
+    let activeConnId = null;
+    let connIdCounter = 0;
     let hosts = [];
     let commandFolders = [];
 
@@ -4912,12 +4933,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function connectSSH(host) {
-        if (sshWs) {
-            sshWs.close();
-            sshWs = null;
-        }
-
-        currentHost = host;
+        const connId = ++connIdCounter;
         const terminal = document.getElementById('terminalContainer');
         const title = document.querySelector('.terminal-title');
         const input = document.getElementById('terminalInput');
@@ -4925,53 +4941,83 @@ document.addEventListener('DOMContentLoaded', function() {
         const disconnectBtn = document.getElementById('disconnectBtn');
         const fileManagerBtn = document.getElementById('fileManagerBtn');
 
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProto}//${location.host}/ssh`;
+        const ws = new WebSocket(wsUrl);
+
+        const conn = {
+            id: connId,
+            host: host,
+            ws: ws,
+            clientPing: null,
+            terminalContent: ''
+        };
+        sshConnections.push(conn);
+
+        switchToConnection(connId);
+        renderSshTabs();
+
         title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
         terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
 
-        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProto}//${location.host}/ssh`;
-        sshWs = new WebSocket(wsUrl);
-
         const clientPing = setInterval(() => {
-            if (sshWs && sshWs.readyState === WebSocket.OPEN) {
-                sshWs.send(JSON.stringify({ type: 'ping' }));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
             }
         }, 25000);
+        conn.clientPing = clientPing;
 
-        sshWs.onopen = async () => {
+        ws.onopen = async () => {
             try {
                 const pwdRes = await fetch(`/api/hosts/${host.id}/password`);
                 const pwdData = await pwdRes.json();
                 const password = pwdData.password || '';
-                sshWs.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password }));
+                ws.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password }));
             } catch (err) {
                 terminal.innerHTML = `<div style="padding:16px;color:#f56c6c;">获取密码失败: ${err.message}</div>`;
             }
         };
 
-        sshWs.onmessage = (event) => {
+        ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'connected') {
-                    title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
-                    terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
-                    input.disabled = false;
-                    sendBtn.disabled = false;
-                    disconnectBtn.style.display = 'inline-block';
-                    fileManagerBtn.style.display = 'inline-block';
-                    appendTerminalOutput(msg.data + '\n');
+                    if (activeConnId === connId) {
+                        title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
+                        terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
+                        input.disabled = false;
+                        sendBtn.disabled = false;
+                        disconnectBtn.style.display = 'inline-block';
+                        fileManagerBtn.style.display = 'inline-block';
+                        appendTerminalOutput(msg.data + '\n');
+                    } else {
+                        conn.terminalContent = msg.data + '\n';
+                    }
+                    updateTabStatus(connId, 'connected');
                 } else if (msg.type === 'output') {
-                    appendTerminalOutput(msg.data);
+                    if (activeConnId === connId) {
+                        appendTerminalOutput(msg.data);
+                    } else {
+                        conn.terminalContent += msg.data;
+                    }
                 } else if (msg.type === 'error') {
-                    appendTerminalOutput('\n[错误] ' + msg.data + '\n', 'error');
+                    if (activeConnId === connId) {
+                        appendTerminalOutput('\n[错误] ' + msg.data + '\n', 'error');
+                    } else {
+                        conn.terminalContent += '\n[错误] ' + msg.data + '\n';
+                    }
                 } else if (msg.type === 'disconnected') {
-                    title.textContent = `${host.name} - 已断开`;
-                    input.disabled = true;
-                    sendBtn.disabled = true;
-                    disconnectBtn.style.display = 'none';
-                    fileManagerBtn.style.display = 'none';
-                    appendTerminalOutput('\n' + msg.data + '\n', 'warning');
-                    sshWs = null;
+                    if (activeConnId === connId) {
+                        title.textContent = `${host.name} - 已断开`;
+                        input.disabled = true;
+                        sendBtn.disabled = true;
+                        disconnectBtn.style.display = 'none';
+                        fileManagerBtn.style.display = 'none';
+                        appendTerminalOutput('\n' + msg.data + '\n', 'warning');
+                    } else {
+                        conn.terminalContent += '\n' + msg.data + '\n';
+                    }
+                    updateTabStatus(connId, 'disconnected');
                     clearInterval(clientPing);
                 } else if (msg.type === 'sftp_list') {
                     handleSftpList(msg.data);
@@ -4987,16 +5033,22 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (e) { console.error('消息解析失败:', e); }
         };
 
-        sshWs.onerror = () => {
-            terminal.innerHTML = '<div style="padding:16px;color:#f56c6c;">WebSocket 连接失败</div>';
-            title.textContent = '连接失败';
-            sshWs = null;
+        ws.onerror = () => {
+            if (activeConnId === connId) {
+                terminal.innerHTML = '<div style="padding:16px;color:#f56c6c;">WebSocket 连接失败</div>';
+                title.textContent = '连接失败';
+                input.disabled = true;
+                sendBtn.disabled = true;
+                disconnectBtn.style.display = 'none';
+                fileManagerBtn.style.display = 'none';
+            }
+            updateTabStatus(connId, 'error');
             clearInterval(clientPing);
         };
 
-        sshWs.onclose = () => {
+        ws.onclose = () => {
             clearInterval(clientPing);
-            if (currentHost && title.textContent.indexOf('已断开') === -1) {
+            if (activeConnId === connId && title.textContent.indexOf('已断开') === -1 && title.textContent.indexOf('连接失败') === -1) {
                 title.textContent = `${host.name} - 连接已关闭`;
                 input.disabled = true;
                 sendBtn.disabled = true;
@@ -5004,8 +5056,147 @@ document.addEventListener('DOMContentLoaded', function() {
                 fileManagerBtn.style.display = 'none';
                 appendTerminalOutput('\n[连接已关闭]\n', 'warning');
             }
-            sshWs = null;
+            updateTabStatus(connId, 'closed');
         };
+    }
+
+    function getActiveConn() {
+        return sshConnections.find(c => c.id === activeConnId);
+    }
+
+    function getActiveWs() {
+        const conn = getActiveConn();
+        return conn ? conn.ws : null;
+    }
+
+    function renderSshTabs() {
+        const tabsEl = document.getElementById('sshTabs');
+        if (!tabsEl) return;
+        if (sshConnections.length === 0) {
+            tabsEl.style.display = 'none';
+            return;
+        }
+        tabsEl.style.display = 'flex';
+        tabsEl.innerHTML = sshConnections.map(c => `
+            <div class="ssh-tab ${c.id === activeConnId ? 'active' : ''}" data-id="${c.id}" data-status="${c.status || 'connecting'}">
+                <span class="ssh-tab-name">${escapeHtml(c.host.name)}</span>
+                <span class="ssh-tab-close" data-id="${c.id}">✕</span>
+            </div>
+        `).join('');
+
+        tabsEl.querySelectorAll('.ssh-tab').forEach(tab => {
+            tab.onclick = (e) => {
+                if (e.target.closest('.ssh-tab-close')) return;
+                const id = parseInt(tab.dataset.id);
+                switchToConnection(id);
+            };
+        });
+
+        tabsEl.querySelectorAll('.ssh-tab-close').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                const id = parseInt(btn.dataset.id);
+                closeConnection(id);
+            };
+        });
+    }
+
+    function switchToConnection(connId) {
+        const conn = sshConnections.find(c => c.id === connId);
+        if (!conn) return;
+
+        activeConnId = connId;
+        renderSshTabs();
+
+        const terminal = document.getElementById('terminalContainer');
+        const title = document.querySelector('.terminal-title');
+        const input = document.getElementById('terminalInput');
+        const sendBtn = document.getElementById('sendCmdBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const fileManagerBtn = document.getElementById('fileManagerBtn');
+
+        const ws = conn.ws;
+        const host = conn.host;
+        const isOpen = ws && ws.readyState === WebSocket.OPEN;
+
+        if (isOpen) {
+            title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
+            terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
+            input.disabled = false;
+            sendBtn.disabled = false;
+            disconnectBtn.style.display = 'inline-block';
+            fileManagerBtn.style.display = 'inline-block';
+            if (conn.terminalContent) {
+                appendTerminalOutput(conn.terminalContent);
+                conn.terminalContent = '';
+            }
+        } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+            title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
+            terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
+            input.disabled = true;
+            sendBtn.disabled = true;
+            disconnectBtn.style.display = 'none';
+            fileManagerBtn.style.display = 'none';
+        } else {
+            title.textContent = `${host.name} - 已断开`;
+            terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
+            input.disabled = true;
+            sendBtn.disabled = true;
+            disconnectBtn.style.display = 'none';
+            fileManagerBtn.style.display = 'none';
+            if (conn.terminalContent) {
+                appendTerminalOutput(conn.terminalContent);
+                conn.terminalContent = '';
+            }
+        }
+    }
+
+    function updateTabStatus(connId, status) {
+        const conn = sshConnections.find(c => c.id === connId);
+        if (conn) {
+            conn.status = status;
+        }
+        renderSshTabs();
+    }
+
+    function closeConnection(connId) {
+        const idx = sshConnections.findIndex(c => c.id === connId);
+        if (idx < 0) return;
+        const conn = sshConnections[idx];
+        if (conn.ws) {
+            try { conn.ws.close(); } catch(e) {}
+        }
+        if (conn.clientPing) clearInterval(conn.clientPing);
+        sshConnections.splice(idx, 1);
+
+        if (activeConnId === connId) {
+            if (sshConnections.length > 0) {
+                const newIdx = Math.min(idx, sshConnections.length - 1);
+                switchToConnection(sshConnections[newIdx].id);
+            } else {
+                activeConnId = null;
+                renderSshTabs();
+                const terminal = document.getElementById('terminalContainer');
+                const title = document.querySelector('.terminal-title');
+                const input = document.getElementById('terminalInput');
+                const sendBtn = document.getElementById('sendCmdBtn');
+                const disconnectBtn = document.getElementById('disconnectBtn');
+                const fileManagerBtn = document.getElementById('fileManagerBtn');
+                title.textContent = '请选择主机连接';
+                terminal.innerHTML = `
+                    <div class="terminal-placeholder">
+                        <div style="font-size:48px;margin-bottom:16px;">🖥️</div>
+                        <div style="color:#999;font-size:14px;">从左侧选择主机发起 SSH 连接</div>
+                    </div>
+                `;
+                input.disabled = true;
+                sendBtn.disabled = true;
+                disconnectBtn.style.display = 'none';
+                fileManagerBtn.style.display = 'none';
+            }
+        } else {
+            renderSshTabs();
+        }
     }
 
     let fileManagerState = {
@@ -5013,11 +5204,12 @@ document.addEventListener('DOMContentLoaded', function() {
         files: [],
         editingFile: null,
         editingContent: '',
-        overlay: null
+        overlay: null,
+        contextMenu: null
     };
 
     function openFileManager() {
-        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) {
             setStatus('⚠️ 请先连接主机');
             return;
         }
@@ -5095,6 +5287,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function closeFileManager() {
+        hideFmContextMenu();
         if (fileManagerState.overlay) {
             fileManagerState.overlay.remove();
             fileManagerState.overlay = null;
@@ -5102,14 +5295,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function loadFileList(path) {
-        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
         fileManagerState.currentPath = path;
         const overlay = fileManagerState.overlay;
         if (!overlay) return;
         overlay.querySelector('#fmPath').textContent = path;
         overlay.querySelector('#fmFileList').innerHTML = '<div style="text-align:center;color:#999;padding:40px 0;">加载中...</div>';
         overlay.querySelector('#fmStatus').textContent = '';
-        sshWs.send(JSON.stringify({ type: 'sftp_list', path }));
+        getActiveWs().send(JSON.stringify({ type: 'sftp_list', path }));
     }
 
     function handleSftpList(data) {
@@ -5149,6 +5342,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         listEl.querySelectorAll('.fm-file-item').forEach(item => {
             item.onclick = (e) => {
+                hideFmContextMenu();
                 const name = item.dataset.name;
                 const isDir = item.dataset.dir === '1';
                 if (e.target.closest('.fm-edit-btn')) {
@@ -5160,11 +5354,81 @@ document.addEventListener('DOMContentLoaded', function() {
                     loadFileList(newPath);
                 }
             };
+            item.oncontextmenu = (e) => {
+                e.preventDefault();
+                const name = item.dataset.name;
+                const fullPath = fileManagerState.currentPath.endsWith('/')
+                    ? fileManagerState.currentPath + name
+                    : fileManagerState.currentPath + '/' + name;
+                showFmContextMenu(e.clientX, e.clientY, fullPath);
+            };
         });
     }
 
+    function showFmContextMenu(x, y, filePath) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        hideFmContextMenu();
+        const menu = document.createElement('div');
+        menu.className = 'fm-context-menu';
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.innerHTML = `
+            <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+        `;
+        document.body.appendChild(menu);
+        fileManagerState.contextMenu = menu;
+
+        menu.querySelector('[data-action="copy-path"]').onclick = () => {
+            copyToClipboard(filePath);
+            hideFmContextMenu();
+            const overlay = fileManagerState.overlay;
+            if (overlay) {
+                const statusEl = overlay.querySelector('#fmStatus');
+                statusEl.style.color = '#67c23a';
+                statusEl.textContent = '✅ 路径已复制到剪贴板';
+                setTimeout(() => { statusEl.textContent = ''; }, 2000);
+            }
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', hideFmContextMenu, { once: true });
+        }, 0);
+    }
+
+    function hideFmContextMenu() {
+        if (fileManagerState.contextMenu) {
+            fileManagerState.contextMenu.remove();
+            fileManagerState.contextMenu = null;
+        }
+    }
+
+    function copyToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } catch(e) {}
+                document.body.removeChild(ta);
+            });
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch(e) {}
+            document.body.removeChild(ta);
+        }
+    }
+
     function readFile(name) {
-        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
         const filePath = fileManagerState.currentPath.endsWith('/')
             ? fileManagerState.currentPath + name
             : fileManagerState.currentPath + '/' + name;
@@ -5172,7 +5436,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!overlay) return;
         overlay.querySelector('#fmStatus').textContent = '读取中...';
         overlay.querySelector('#fmStatus').style.color = '#909399';
-        sshWs.send(JSON.stringify({ type: 'sftp_read', path: filePath }));
+        getActiveWs().send(JSON.stringify({ type: 'sftp_read', path: filePath }));
     }
 
     function handleSftpRead(data) {
@@ -5189,14 +5453,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function saveFile() {
-        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
         const overlay = fileManagerState.overlay;
         if (!overlay || !fileManagerState.editingFile) return;
         const content = overlay.querySelector('#fmEditorContent').value;
         const statusEl = overlay.querySelector('#fmEditorStatus');
         statusEl.style.color = '#909399';
         statusEl.textContent = '保存中...';
-        sshWs.send(JSON.stringify({
+        getActiveWs().send(JSON.stringify({
             type: 'sftp_write',
             path: fileManagerState.editingFile,
             content
@@ -5220,7 +5484,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function uploadFile(file) {
-        if (!sshWs || sshWs.readyState !== WebSocket.OPEN) return;
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
         const overlay = fileManagerState.overlay;
         if (!overlay) return;
         overlay.querySelector('#fmStatus').style.color = '#909399';
@@ -5232,7 +5496,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const filePath = fileManagerState.currentPath.endsWith('/')
                 ? fileManagerState.currentPath + file.name
                 : fileManagerState.currentPath + '/' + file.name;
-            sshWs.send(JSON.stringify({
+            getActiveWs().send(JSON.stringify({
                 type: 'sftp_upload',
                 path: filePath,
                 content: base64
@@ -5413,8 +5677,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function sendCommand(cmd) {
-        if (!sshWs || !cmd) return;
-        sshWs.send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
+        if (!getActiveWs() || !cmd) return;
+        getActiveWs().send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
     }
 
     function initHostsModule() {
@@ -5516,9 +5780,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     cmd = (f.commands || []).find(c => c.id === id);
                     if (cmd) break;
                 }
-                if (cmd && sshWs) {
+                if (cmd && getActiveWs()) {
                     sendCommand(cmd.command);
-                } else if (!sshWs) {
+                } else if (!getActiveWs()) {
                     setStatus('⚠️ 请先连接主机');
                 }
             } else if (editCmdBtn) {
@@ -5550,8 +5814,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Ctrl+C 发送中断信号到SSH
             if (e.ctrlKey && e.key === 'c') {
                 e.preventDefault();
-                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
-                    sshWs.send(JSON.stringify({ type: 'input', data: '\x03' }));
+                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
+                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x03' }));
                     appendTerminalOutput('^C\n', 'warning');
                 }
                 return;
@@ -5559,16 +5823,16 @@ document.addEventListener('DOMContentLoaded', function() {
             // Ctrl+D 发送EOF
             if (e.ctrlKey && e.key === 'd') {
                 e.preventDefault();
-                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
-                    sshWs.send(JSON.stringify({ type: 'input', data: '\x04' }));
+                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
+                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x04' }));
                 }
                 return;
             }
             // Ctrl+Z 发送暂停信号
             if (e.ctrlKey && e.key === 'z') {
                 e.preventDefault();
-                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
-                    sshWs.send(JSON.stringify({ type: 'input', data: '\x1a' }));
+                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
+                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x1a' }));
                     appendTerminalOutput('^Z\n', 'warning');
                 }
                 return;
@@ -5576,8 +5840,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Ctrl+L 清屏
             if (e.ctrlKey && e.key === 'l') {
                 e.preventDefault();
-                if (sshWs && sshWs.readyState === WebSocket.OPEN) {
-                    sshWs.send(JSON.stringify({ type: 'input', data: '\x0c' }));
+                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
+                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x0c' }));
                 }
                 return;
             }
@@ -5597,10 +5861,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
         disconnectBtn.onclick = () => {
-            if (sshWs) {
-                sshWs.send(JSON.stringify({ type: 'disconnect' }));
-                sshWs.close();
-                sshWs = null;
+            if (activeConnId) {
+                closeConnection(activeConnId);
             }
         };
         fileManagerBtn.onclick = () => {
