@@ -6,6 +6,8 @@ const multer = require('multer');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
+const { Client } = require('ssh2');
+const WebSocket = require('ws');
 
 const { initDatabase, queryOne } = require('./db');
 const authRoutes = require('./routes/auth');
@@ -16,6 +18,8 @@ const tabRoutes = require('./routes/tabs');
 const incomeRoutes = require('./routes/income');
 const expenseRoutes = require('./routes/expense');
 const conditionalFormatRoutes = require('./routes/conditionalFormats');
+const hostRoutes = require('./routes/hosts');
+const commandRoutes = require('./routes/commands');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -95,6 +99,8 @@ app.use('/api/tabs', tabRoutes);
 app.use('/api/income', incomeRoutes);
 app.use('/api/expense', expenseRoutes);
 app.use('/api/conditional-formats', conditionalFormatRoutes);
+app.use('/api/hosts', hostRoutes);
+app.use('/api/commands', commandRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
@@ -128,7 +134,114 @@ async function startServer() {
 }
 
 function startHttp() {
-    app.listen(PORT, () => {
+    const server = http.createServer(app);
+    const wss = new WebSocket.Server({ server, path: '/ssh' });
+
+    wss.on('connection', (ws) => {
+        let sshConn = null;
+        let sshStream = null;
+
+        ws.on('message', async (data) => {
+            try {
+                const msg = JSON.parse(data.toString());
+
+                if (msg.type === 'connect') {
+                    const { host, port, username, password } = msg;
+                    if (!host || !username) {
+                        ws.send(JSON.stringify({ type: 'error', data: '缺少连接参数' }));
+                        return;
+                    }
+
+                    sshConn = new Client();
+
+                    sshConn.on('ready', () => {
+                        ws.send(JSON.stringify({ type: 'connected', data: 'SSH 连接成功' }));
+
+                        sshConn.shell({ cols: 120, rows: 40 }, (err, stream) => {
+                            if (err) {
+                                ws.send(JSON.stringify({ type: 'error', data: '创建 Shell 失败: ' + err.message }));
+                                sshConn.end();
+                                return;
+                            }
+                            sshStream = stream;
+
+                            stream.on('data', (chunk) => {
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'output', data: chunk.toString('utf-8') }));
+                                }
+                            });
+
+                            stream.on('close', () => {
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'disconnected', data: 'SSH 连接已关闭' }));
+                                }
+                            });
+
+                            stream.stderr.on('data', (chunk) => {
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'output', data: chunk.toString('utf-8') }));
+                                }
+                            });
+                        });
+                    });
+
+                    sshConn.on('error', (err) => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'error', data: 'SSH 连接错误: ' + err.message }));
+                        }
+                    });
+
+                    sshConn.on('end', () => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'disconnected', data: 'SSH 连接已断开' }));
+                        }
+                    });
+
+                    sshConn.connect({
+                        host,
+                        port: port || 22,
+                        username,
+                        password: password || '',
+                        readyTimeout: 15000,
+                        strictVendor: false
+                    });
+                } else if (msg.type === 'input') {
+                    if (sshStream && sshConn) {
+                        sshStream.write(msg.data);
+                    }
+                } else if (msg.type === 'resize') {
+                    if (sshStream && sshConn) {
+                        sshStream.setWindow(msg.rows || 40, msg.cols || 120, 0, 0);
+                    }
+                } else if (msg.type === 'disconnect') {
+                    if (sshConn) {
+                        sshConn.end();
+                        sshConn = null;
+                        sshStream = null;
+                    }
+                }
+            } catch (err) {
+                console.error('WebSocket 消息处理错误:', err);
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'error', data: '处理错误: ' + err.message }));
+                }
+            }
+        });
+
+        ws.on('close', () => {
+            if (sshConn) {
+                sshConn.end();
+                sshConn = null;
+                sshStream = null;
+            }
+        });
+
+        ws.on('error', (err) => {
+            console.error('WebSocket 错误:', err.message);
+        });
+    });
+
+    server.listen(PORT, () => {
         console.log(`📊 网络管理系统已启动 (HTTP) 端口 ${PORT}`);
     });
 }

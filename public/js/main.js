@@ -194,6 +194,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 const target = document.getElementById('view-' + view);
                 if (target) target.classList.add('active');
                 if (view === 'stats') renderStats();
+                if (view === 'hosts') {
+                    loadHosts();
+                    loadCommandFolders();
+                }
             });
         });
     }
@@ -4499,8 +4503,492 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
 
+            initHostsModule();
             hideTableLoading();
         } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideTableLoading(); }
     }
+
+    // --- 主机管理模块 ---
+    let sshWs = null;
+    let currentHost = null;
+    let hosts = [];
+    let commandFolders = [];
+
+    async function loadHosts() {
+        try {
+            const res = await fetch('/api/hosts');
+            if (res.ok) hosts = await res.json();
+            renderHosts();
+        } catch (err) { console.error('加载主机列表失败:', err); }
+    }
+
+    function renderHosts() {
+        const list = document.getElementById('hostsList');
+        if (!hosts.length) {
+            list.innerHTML = '<div style="text-align:center;color:#999;padding:20px 0;">暂无主机</div>';
+            return;
+        }
+        list.innerHTML = hosts.map(h => `
+            <div class="host-item" data-id="${h.id}">
+                <div class="host-item-main">
+                    <div class="host-name">${escapeHtml(h.name)}</div>
+                    <div class="host-info">${escapeHtml(h.username)}@${escapeHtml(h.host)}:${h.port || 22}</div>
+                </div>
+                <div class="host-item-actions">
+                    <button class="host-connect-btn" data-id="${h.id}" title="连接">🔌</button>
+                    <button class="host-edit-btn" data-id="${h.id}" title="编辑">✏️</button>
+                    <button class="host-delete-btn" data-id="${h.id}" title="删除">🗑️</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function loadCommandFolders() {
+        try {
+            const res = await fetch('/api/commands/folders');
+            if (res.ok) commandFolders = await res.json();
+            renderFolders();
+        } catch (err) { console.error('加载命令文件夹失败:', err); }
+    }
+
+    function renderFolders() {
+        const list = document.getElementById('foldersList');
+        if (!commandFolders.length) {
+            list.innerHTML = '<div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>';
+            return;
+        }
+        list.innerHTML = commandFolders.map(f => `
+            <div class="folder-item" data-id="${f.id}">
+                <div class="folder-header">
+                    <span class="folder-icon">📁</span>
+                    <span class="folder-name">${escapeHtml(f.name)}</span>
+                    <span class="folder-count">${f.commands?.length || 0}</span>
+                    <div class="folder-actions">
+                        <button class="folder-add-cmd-btn" data-id="${f.id}" title="添加命令">➕</button>
+                        <button class="folder-edit-btn" data-id="${f.id}" title="重命名">✏️</button>
+                        <button class="folder-delete-btn" data-id="${f.id}" title="删除">🗑️</button>
+                    </div>
+                </div>
+                <div class="folder-commands" id="folder-cmds-${f.id}">
+                    ${(f.commands || []).map(c => `
+                        <div class="cmd-item" data-id="${c.id}">
+                            <span class="cmd-name">${escapeHtml(c.name)}</span>
+                            <div class="cmd-actions">
+                                <button class="cmd-run-btn" data-id="${c.id}" title="执行">▶️</button>
+                                <button class="cmd-edit-btn" data-id="${c.id}" title="编辑">✏️</button>
+                                <button class="cmd-delete-btn" data-id="${c.id}" title="删除">🗑️</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function showAddHostModal(host = null) {
+        const isEdit = !!host;
+        const title = isEdit ? '编辑主机' : '添加主机';
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:480px;">
+                <div class="modal-header">
+                    <h2>${isEdit ? '✏️' : '➕'} ${title}</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>主机名称</label><input type="text" id="hostNameInput" value="${isEdit ? escapeAttr(host.name) : ''}" placeholder="例如：生产服务器" /></div>
+                    <div class="input-group"><label>主机地址</label><input type="text" id="hostAddrInput" value="${isEdit ? escapeAttr(host.host) : ''}" placeholder="例如：192.168.1.1" /></div>
+                    <div class="input-group"><label>端口</label><input type="number" id="hostPortInput" value="${isEdit ? (host.port || 22) : 22}" /></div>
+                    <div class="input-group"><label>用户名</label><input type="text" id="hostUserInput" value="${isEdit ? escapeAttr(host.username) : ''}" placeholder="例如：root" /></div>
+                    <div class="input-group"><label>密码</label><input type="password" id="hostPwdInput" value="" placeholder="请输入密码" /></div>
+                    <div class="input-group"><label>备注</label><input type="text" id="hostRemarkInput" value="${isEdit ? escapeAttr(host.remark || '') : ''}" placeholder="可选" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveHostBtn">${isEdit ? '保存' : '添加'}</button>
+                        <button class="tool-btn cancel-host-btn">取消</button>
+                    </div>
+                    <span id="hostStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-host-btn').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        overlay.querySelector('#saveHostBtn').onclick = async () => {
+            const name = overlay.querySelector('#hostNameInput').value.trim();
+            const hostAddr = overlay.querySelector('#hostAddrInput').value.trim();
+            const port = parseInt(overlay.querySelector('#hostPortInput').value) || 22;
+            const username = overlay.querySelector('#hostUserInput').value.trim();
+            const password = overlay.querySelector('#hostPwdInput').value;
+            const remark = overlay.querySelector('#hostRemarkInput').value.trim();
+            const statusEl = overlay.querySelector('#hostStatus');
+
+            if (!name) { statusEl.style.color = '#f56c6c'; statusEl.textContent = '请输入主机名称'; return; }
+            if (!hostAddr) { statusEl.style.color = '#f56c6c'; statusEl.textContent = '请输入主机地址'; return; }
+            if (!username) { statusEl.style.color = '#f56c6c'; statusEl.textContent = '请输入用户名'; return; }
+
+            try {
+                let res;
+                if (isEdit) {
+                    const body = { name, host: hostAddr, port, username, remark };
+                    if (password) body.password = password;
+                    res = await fetch(`/api/hosts/${host.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                } else {
+                    res = await fetch('/api/hosts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, host: hostAddr, port, username, password, remark }) });
+                }
+                const data = await res.json();
+                if (res.ok) {
+                    statusEl.style.color = '#67c23a';
+                    statusEl.textContent = data.message;
+                    await loadHosts();
+                    setTimeout(() => overlay.remove(), 600);
+                } else {
+                    statusEl.style.color = '#f56c6c';
+                    statusEl.textContent = data.error || '操作失败';
+                }
+            } catch (err) {
+                statusEl.style.color = '#f56c6c';
+                statusEl.textContent = '请求失败: ' + err.message;
+            }
+        };
+    }
+
+    function showAddFolderModal(folder = null) {
+        const isEdit = !!folder;
+        const title = isEdit ? '重命名文件夹' : '新建文件夹';
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:360px;">
+                <div class="modal-header">
+                    <h2>${isEdit ? '✏️' : '📁'} ${title}</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>文件夹名称</label><input type="text" id="folderNameInput" value="${isEdit ? escapeAttr(folder.name) : ''}" placeholder="例如：常用命令" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveFolderBtn">${isEdit ? '保存' : '创建'}</button>
+                        <button class="tool-btn cancel-folder-btn">取消</button>
+                    </div>
+                    <span id="folderStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-folder-btn').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        overlay.querySelector('#saveFolderBtn').onclick = async () => {
+            const name = overlay.querySelector('#folderNameInput').value.trim();
+            const statusEl = overlay.querySelector('#folderStatus');
+            if (!name) { statusEl.style.color = '#f56c6c'; statusEl.textContent = '请输入文件夹名称'; return; }
+
+            try {
+                let res;
+                if (isEdit) {
+                    res = await fetch(`/api/commands/folders/${folder.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                } else {
+                    res = await fetch('/api/commands/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+                }
+                const data = await res.json();
+                if (res.ok) {
+                    statusEl.style.color = '#67c23a';
+                    statusEl.textContent = data.message;
+                    await loadCommandFolders();
+                    setTimeout(() => overlay.remove(), 600);
+                } else {
+                    statusEl.style.color = '#f56c6c';
+                    statusEl.textContent = data.error || '操作失败';
+                }
+            } catch (err) {
+                statusEl.style.color = '#f56c6c';
+                statusEl.textContent = '请求失败: ' + err.message;
+            }
+        };
+    }
+
+    function showAddCmdModal(folderId, cmd = null) {
+        const isEdit = !!cmd;
+        const title = isEdit ? '编辑命令' : '保存命令';
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:480px;">
+                <div class="modal-header">
+                    <h2>${isEdit ? '✏️' : '💾'} ${title}</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>命令名称</label><input type="text" id="cmdNameInput" value="${isEdit ? escapeAttr(cmd.name) : ''}" placeholder="例如：查看磁盘空间" /></div>
+                    <div class="input-group"><label>命令内容</label><textarea id="cmdContentInput" rows="4" placeholder="例如：df -h">${isEdit ? escapeHtml(cmd.command) : ''}</textarea></div>
+                    <div class="input-group"><label>备注</label><input type="text" id="cmdRemarkInput" value="${isEdit ? escapeAttr(cmd.remark || '') : ''}" placeholder="可选" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveCmdBtn">${isEdit ? '保存' : '添加'}</button>
+                        <button class="tool-btn cancel-cmd-btn">取消</button>
+                    </div>
+                    <span id="cmdStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-cmd-btn').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        overlay.querySelector('#saveCmdBtn').onclick = async () => {
+            const name = overlay.querySelector('#cmdNameInput').value.trim();
+            const command = overlay.querySelector('#cmdContentInput').value.trim();
+            const remark = overlay.querySelector('#cmdRemarkInput').value.trim();
+            const statusEl = overlay.querySelector('#cmdStatus');
+
+            if (!name) { statusEl.style.color = '#f56c6c'; statusEl.textContent = '请输入命令名称'; return; }
+            if (!command) { statusEl.style.color = '#f56c6c'; statusEl.textContent = '请输入命令内容'; return; }
+
+            try {
+                let res;
+                if (isEdit) {
+                    res = await fetch(`/api/commands/commands/${cmd.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, command, remark }) });
+                } else {
+                    res = await fetch('/api/commands/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder_id: folderId, name, command, remark }) });
+                }
+                const data = await res.json();
+                if (res.ok) {
+                    statusEl.style.color = '#67c23a';
+                    statusEl.textContent = data.message;
+                    await loadCommandFolders();
+                    setTimeout(() => overlay.remove(), 600);
+                } else {
+                    statusEl.style.color = '#f56c6c';
+                    statusEl.textContent = data.error || '操作失败';
+                }
+            } catch (err) {
+                statusEl.style.color = '#f56c6c';
+                statusEl.textContent = '请求失败: ' + err.message;
+            }
+        };
+    }
+
+    function connectSSH(host) {
+        if (sshWs) {
+            sshWs.close();
+            sshWs = null;
+        }
+
+        currentHost = host;
+        const terminal = document.getElementById('terminalContainer');
+        const title = document.querySelector('.terminal-title');
+        const input = document.getElementById('terminalInput');
+        const sendBtn = document.getElementById('sendCmdBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+
+        title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
+        terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
+
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProto}//${location.host}/ssh`;
+        sshWs = new WebSocket(wsUrl);
+
+        sshWs.onopen = async () => {
+            try {
+                const pwdRes = await fetch(`/api/hosts/${host.id}/password`);
+                const pwdData = await pwdRes.json();
+                const password = pwdData.password || '';
+                sshWs.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password }));
+            } catch (err) {
+                terminal.innerHTML = `<div style="padding:16px;color:#f56c6c;">获取密码失败: ${err.message}</div>`;
+            }
+        };
+
+        sshWs.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'connected') {
+                    title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
+                    terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
+                    input.disabled = false;
+                    sendBtn.disabled = false;
+                    disconnectBtn.style.display = 'inline-block';
+                    appendTerminalOutput(msg.data + '\n');
+                } else if (msg.type === 'output') {
+                    appendTerminalOutput(msg.data);
+                } else if (msg.type === 'error') {
+                    appendTerminalOutput('\n[错误] ' + msg.data + '\n', 'error');
+                } else if (msg.type === 'disconnected') {
+                    title.textContent = `${host.name} - 已断开`;
+                    input.disabled = true;
+                    sendBtn.disabled = true;
+                    disconnectBtn.style.display = 'none';
+                    appendTerminalOutput('\n[连接已断开]\n', 'warning');
+                    sshWs = null;
+                }
+            } catch (e) { console.error('消息解析失败:', e); }
+        };
+
+        sshWs.onerror = () => {
+            terminal.innerHTML = '<div style="padding:16px;color:#f56c6c;">WebSocket 连接失败</div>';
+            title.textContent = '连接失败';
+            sshWs = null;
+        };
+
+        sshWs.onclose = () => {
+            if (currentHost && title.textContent.indexOf('已断开') === -1) {
+                title.textContent = `${host.name} - 连接已关闭`;
+                input.disabled = true;
+                sendBtn.disabled = true;
+                disconnectBtn.style.display = 'none';
+                appendTerminalOutput('\n[连接已关闭]\n', 'warning');
+            }
+            sshWs = null;
+        };
+    }
+
+    function appendTerminalOutput(text, type = '') {
+        let output = document.getElementById('terminalOutput');
+        if (!output) {
+            const terminal = document.getElementById('terminalContainer');
+            terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
+            output = document.getElementById('terminalOutput');
+        }
+        const span = document.createElement('span');
+        if (type === 'error') span.style.color = '#f56c6c';
+        else if (type === 'warning') span.style.color = '#e6a23c';
+        span.textContent = text;
+        output.appendChild(span);
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function sendCommand(cmd) {
+        if (!sshWs || !cmd) return;
+        sshWs.send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
+    }
+
+    function initHostsModule() {
+        document.getElementById('addHostBtn').onclick = () => showAddHostModal();
+        document.getElementById('addCmdFolderBtn').onclick = () => showAddFolderModal();
+
+        const hostsList = document.getElementById('hostsList');
+        hostsList.addEventListener('click', async (e) => {
+            const connectBtn = e.target.closest('.host-connect-btn');
+            const editBtn = e.target.closest('.host-edit-btn');
+            const deleteBtn = e.target.closest('.host-delete-btn');
+
+            if (connectBtn) {
+                const id = parseInt(connectBtn.dataset.id);
+                const host = hosts.find(h => h.id === id);
+                if (host) connectSSH(host);
+            } else if (editBtn) {
+                const id = parseInt(editBtn.dataset.id);
+                const host = hosts.find(h => h.id === id);
+                if (host) showAddHostModal(host);
+            } else if (deleteBtn) {
+                const id = parseInt(deleteBtn.dataset.id);
+                if (!confirm('确定要删除这个主机吗？')) return;
+                try {
+                    const res = await fetch(`/api/hosts/${id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (res.ok) { setStatus(data.message); await loadHosts(); }
+                    else setStatus('❌ ' + (data.error || '删除失败'));
+                } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+            }
+        });
+
+        const foldersList = document.getElementById('foldersList');
+        foldersList.addEventListener('click', async (e) => {
+            const folderItem = e.target.closest('.folder-item');
+            const addCmdBtn = e.target.closest('.folder-add-cmd-btn');
+            const editFolderBtn = e.target.closest('.folder-edit-btn');
+            const delFolderBtn = e.target.closest('.folder-delete-btn');
+            const runCmdBtn = e.target.closest('.cmd-run-btn');
+            const editCmdBtn = e.target.closest('.cmd-edit-btn');
+            const delCmdBtn = e.target.closest('.cmd-delete-btn');
+
+            if (e.target.closest('.folder-header') && !addCmdBtn && !editFolderBtn && !delFolderBtn && folderItem) {
+                const cmds = folderItem.querySelector('.folder-commands');
+                if (cmds) cmds.classList.toggle('open');
+            }
+
+            if (addCmdBtn) {
+                const id = parseInt(addCmdBtn.dataset.id);
+                showAddCmdModal(id);
+            } else if (editFolderBtn) {
+                const id = parseInt(editFolderBtn.dataset.id);
+                const folder = commandFolders.find(f => f.id === id);
+                if (folder) showAddFolderModal(folder);
+            } else if (delFolderBtn) {
+                const id = parseInt(delFolderBtn.dataset.id);
+                if (!confirm('确定要删除这个文件夹吗？里面的命令也会被删除。')) return;
+                try {
+                    const res = await fetch(`/api/commands/folders/${id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (res.ok) { setStatus(data.message); await loadCommandFolders(); }
+                    else setStatus('❌ ' + (data.error || '删除失败'));
+                } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+            } else if (runCmdBtn) {
+                const id = parseInt(runCmdBtn.dataset.id);
+                let cmd = null;
+                for (const f of commandFolders) {
+                    cmd = (f.commands || []).find(c => c.id === id);
+                    if (cmd) break;
+                }
+                if (cmd && sshWs) {
+                    sendCommand(cmd.command);
+                } else if (!sshWs) {
+                    setStatus('⚠️ 请先连接主机');
+                }
+            } else if (editCmdBtn) {
+                const id = parseInt(editCmdBtn.dataset.id);
+                let cmd = null, folderId = null;
+                for (const f of commandFolders) {
+                    cmd = (f.commands || []).find(c => c.id === id);
+                    if (cmd) { folderId = f.id; break; }
+                }
+                if (cmd) showAddCmdModal(folderId, cmd);
+            } else if (delCmdBtn) {
+                const id = parseInt(delCmdBtn.dataset.id);
+                if (!confirm('确定要删除这条命令吗？')) return;
+                try {
+                    const res = await fetch(`/api/commands/commands/${id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (res.ok) { setStatus(data.message); await loadCommandFolders(); }
+                    else setStatus('❌ ' + (data.error || '删除失败'));
+                } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+            }
+        });
+
+        const terminalInput = document.getElementById('terminalInput');
+        const sendCmdBtn = document.getElementById('sendCmdBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+
+        terminalInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const cmd = terminalInput.value.trim();
+                if (cmd) {
+                    sendCommand(cmd);
+                    terminalInput.value = '';
+                }
+            }
+        });
+        sendCmdBtn.onclick = () => {
+            const cmd = terminalInput.value.trim();
+            if (cmd) {
+                sendCommand(cmd);
+                terminalInput.value = '';
+            }
+        };
+        disconnectBtn.onclick = () => {
+            if (sshWs) {
+                sshWs.send(JSON.stringify({ type: 'disconnect' }));
+                sshWs.close();
+                sshWs = null;
+            }
+        };
+    }
+
     init();
 });

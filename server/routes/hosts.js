@@ -1,0 +1,112 @@
+const express = require('express');
+const { query, queryOne, execute } = require('../db');
+
+const router = express.Router();
+
+function requireAuth(req, res, next) {
+    if (!req.session.userId) return res.status(401).json({ error: '请先登录' });
+    next();
+}
+
+router.get('/', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hosts = await query(
+            'SELECT id, name, host, port, username, remark, sort_order, created_at FROM hosts WHERE user_id = ? ORDER BY sort_order, id',
+            [userId]
+        );
+        res.json(hosts);
+    } catch (err) {
+        console.error('获取主机列表错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.post('/', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        let { name, host, port, username, password, remark } = req.body;
+        if (!name) return res.status(400).json({ error: '请输入主机名称' });
+        if (!host) return res.status(400).json({ error: '请输入主机地址' });
+        if (!username) return res.status(400).json({ error: '请输入用户名' });
+
+        const maxOrder = await queryOne(
+            'SELECT MAX(sort_order) as max_order FROM hosts WHERE user_id = ?',
+            [userId]
+        );
+        const order = (maxOrder?.max_order ?? -1) + 1;
+
+        const result = await execute(`
+            INSERT INTO hosts (user_id, name, host, port, username, password, remark, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            userId, name, host, port || 22, username,
+            password || null, remark || null, order
+        ]);
+
+        res.json({ success: true, id: result.lastID, message: '主机添加成功' });
+    } catch (err) {
+        console.error('添加主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.put('/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hostId = req.params.id;
+        const { name, host, port, username, password, remark, sort_order } = req.body;
+
+        const existing = await queryOne('SELECT id FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        if (!existing) return res.status(404).json({ error: '主机不存在' });
+
+        const updates = [];
+        const params = [];
+        if (name !== undefined) { updates.push('name = ?'); params.push(name); }
+        if (host !== undefined) { updates.push('host = ?'); params.push(host); }
+        if (port !== undefined) { updates.push('port = ?'); params.push(port || 22); }
+        if (username !== undefined) { updates.push('username = ?'); params.push(username); }
+        if (password !== undefined) { updates.push('password = ?'); params.push(password || null); }
+        if (remark !== undefined) { updates.push('remark = ?'); params.push(remark || null); }
+        if (sort_order !== undefined) { updates.push('sort_order = ?'); params.push(sort_order); }
+
+        if (updates.length === 0) return res.status(400).json({ error: '没有要更新的字段' });
+
+        params.push(hostId);
+        await execute(`UPDATE hosts SET ${updates.join(', ')} WHERE id = ?`, params);
+        res.json({ success: true, message: '更新成功' });
+    } catch (err) {
+        console.error('更新主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.delete('/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hostId = req.params.id;
+        const existing = await queryOne('SELECT id FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        if (!existing) return res.status(404).json({ error: '主机不存在' });
+
+        await execute('DELETE FROM hosts WHERE id = ?', [hostId]);
+        res.json({ success: true, message: '删除成功' });
+    } catch (err) {
+        console.error('删除主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.get('/:id/password', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hostId = req.params.id;
+        const host = await queryOne('SELECT password FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        if (!host) return res.status(404).json({ error: '主机不存在' });
+        res.json({ password: host.password || '' });
+    } catch (err) {
+        console.error('获取主机密码错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+module.exports = router;

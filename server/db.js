@@ -122,6 +122,42 @@ function createTables() {
             FOREIGN KEY (tab_id) REFERENCES tabs(id)
         )`);
 
+        db.run(`CREATE TABLE IF NOT EXISTS hosts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER DEFAULT 22,
+            username TEXT NOT NULL,
+            password TEXT,
+            remark TEXT,
+            sort_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )`);
+
+        db.run(`CREATE TABLE IF NOT EXISTS command_folders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )`);
+
+        db.run(`CREATE TABLE IF NOT EXISTS saved_commands (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            folder_id INTEGER,
+            name TEXT NOT NULL,
+            command TEXT NOT NULL,
+            remark TEXT,
+            sort_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (folder_id) REFERENCES command_folders(id) ON DELETE CASCADE
+        )`);
+
         // Migration: add tab_type and tab_order to existing tabs table
         db.run(`ALTER TABLE tabs ADD COLUMN tab_type TEXT DEFAULT 'dedicated'`, () => {});
         db.run(`ALTER TABLE tabs ADD COLUMN tab_order INTEGER DEFAULT 0`, () => {});
