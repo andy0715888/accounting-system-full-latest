@@ -5674,6 +5674,11 @@ document.addEventListener('DOMContentLoaded', function() {
             output.appendChild(div);
         }
         output.scrollTop = output.scrollHeight;
+
+        const conn = getActiveConn();
+        if (conn) {
+            conn.terminalContent += text;
+        }
     }
 
     function sendCommand(cmd) {
