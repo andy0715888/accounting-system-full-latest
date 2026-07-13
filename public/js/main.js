@@ -1202,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const expandClass = EXPAND_COLS.has(colKey) ? ' expand-on-focus' : '';
                     inputHtml = `<input type="${inputType}" class="cell-input${expandClass}" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(val || '')}" ${step} />`;
                 }
-                const tdClass = (colKey === 'expense' || EXPAND_COLS.has(colKey)) ? 'editable-td' : '';
+                const tdClass = (colKey === 'expense' || colKey === 'password' || EXPAND_COLS.has(colKey)) ? 'editable-td' : '';
                 tbodyHtml += `<td class="${tdClass}">${inputHtml}</td>`;
             });
             tbodyHtml += '</tr>';

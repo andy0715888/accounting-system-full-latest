@@ -1561,12 +1561,25 @@ tr.server-row.has-children td:first-child {
 }
 
 /* === 密码列样式 === */
-.password-cell { position: relative; min-width: 80px; width: 100%; text-align: center; }
-.password-mask { display: block; cursor: pointer; padding: 2px 4px; box-sizing: border-box; }
+.password-cell { position: static; min-width: 80px; width: 100%; }
+.password-mask {
+    display: block;
+    cursor: pointer;
+    padding: 2px 4px;
+    box-sizing: border-box;
+    text-align: center;
+    white-space: nowrap;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 100%;
+    overflow: hidden;
+    text-overflow: clip;
+}
 .password-mask.password-empty { color: #bbb; font-style: italic; }
 .password-cell .password-input { display: none; width: 100%; box-sizing: border-box; }
 .password-cell.editing .password-mask { display: none; }
-.password-cell.editing { position: static; }
 .password-cell.editing .password-input {
     display: block;
     position: absolute;
@@ -1581,6 +1594,7 @@ tr.server-row.has-children td:first-child {
     box-shadow: 0 0 4px rgba(0,0,0,0.15);
     white-space: nowrap;
     padding: 2px 4px;
+    text-align: left;
 }
 
 /* === 可展开列样式（IP地址/域名/备注/客户名/单价）=== */
