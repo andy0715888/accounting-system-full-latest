@@ -4848,6 +4848,133 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
+    // ANSI 颜色代码解析器，将 SSH 终端颜色转义序列转为 HTML
+    function ansiToHtml(text) {
+        // ANSI SGR 颜色映射
+        const colorMap = {
+            30: '#000000', 31: '#cd3131', 32: '#0dbc79', 33: '#e5e510',
+            34: '#2472c8', 35: '#bc3fbc', 36: '#11a8cd', 37: '#e5e5e5',
+            90: '#666666', 91: '#f14c4c', 92: '#23d18b', 93: '#f5f543',
+            94: '#3b8eea', 95: '#d670d6', 96: '#29b8db', 97: '#e5e5e5'
+        };
+        const bgColorMap = {
+            40: '#000000', 41: '#cd3131', 42: '#0dbc79', 43: '#e5e510',
+            44: '#2472c8', 45: '#bc3fbc', 46: '#11a8cd', 47: '#e5e5e5',
+            100:'#666666', 101:'#f14c4c', 102:'#23d18b', 103:'#f5f543',
+            104:'#3b8eea', 105:'#d670d6', 106:'#29b8db', 107:'#e5e5e5'
+        };
+
+        let result = '';
+        let i = 0;
+        let currentFg = '';
+        let currentBg = '';
+        let currentBold = false;
+        let spanOpen = false;
+
+        function closeSpan() {
+            if (spanOpen) { result += '</span>'; spanOpen = false; }
+        }
+        function openSpan() {
+            closeSpan();
+            let style = '';
+            if (currentFg) style += 'color:' + currentFg + ';';
+            if (currentBg) style += 'background-color:' + currentBg + ';';
+            if (currentBold) style += 'font-weight:bold;';
+            if (style) { result += '<span style="' + style + '">'; spanOpen = true; }
+        }
+
+        while (i < text.length) {
+            if (text.charCodeAt(i) === 27 && text.charAt(i + 1) === '[') {
+                // 找到 CSI 序列
+                let j = i + 2;
+                let params = '';
+                while (j < text.length) {
+                    const c = text.charCodeAt(j);
+                    if ((c >= 0x30 && c <= 0x3F) || c === 59) {
+                        params += text.charAt(j);
+                        j++;
+                    } else if (c >= 0x40 && c <= 0x7E) {
+                        // 终止符
+                        const cmd = text.charAt(j);
+                        if (cmd === 'm') {
+                            const codes = params.split(';').map(Number);
+                            if (codes.length === 0 || (codes.length === 1 && isNaN(codes[0]))) {
+                                // 重置
+                                currentFg = ''; currentBg = ''; currentBold = false;
+                                closeSpan();
+                            } else {
+                                for (let k = 0; k < codes.length; k++) {
+                                    const code = codes[k];
+                                    if (code === 0) { currentFg = ''; currentBg = ''; currentBold = false; closeSpan(); }
+                                    else if (code === 1) { currentBold = true; }
+                                    else if (code === 22) { currentBold = false; }
+                                    else if (code >= 30 && code <= 37) { currentFg = colorMap[code]; }
+                                    else if (code >= 40 && code <= 47) { currentBg = bgColorMap[code]; }
+                                    else if (code >= 90 && code <= 97) { currentFg = colorMap[code]; }
+                                    else if (code >= 100 && code <= 107) { currentBg = bgColorMap[code]; }
+                                    else if (code === 38 && codes[k + 1] === 5 && k + 2 < codes.length) {
+                                        // 256色前景色
+                                        const idx = codes[k + 2];
+                                        if (idx >= 0 && idx <= 15) {
+                                            const map256 = {0:'#000000',1:'#800000',2:'#008000',3:'#808000',4:'#000080',5:'#800080',6:'#008080',7:'#c0c0c0',8:'#808080',9:'#ff0000',10:'#00ff00',11:'#ffff00',12:'#0000ff',13:'#ff00ff',14:'#00ffff',15:'#ffffff'};
+                                            currentFg = map256[idx] || '#e5e5e5';
+                                        } else if (idx >= 16 && idx <= 231) {
+                                            const r = Math.floor((idx - 16) / 36); const g = Math.floor(((idx - 16) % 36) / 6); const b = (idx - 16) % 6;
+                                            const rv = r === 0 ? 0 : 55 + r * 40; const gv = g === 0 ? 0 : 55 + g * 40; const bv = b === 0 ? 0 : 55 + b * 40;
+                                            currentFg = 'rgb(' + rv + ',' + gv + ',' + bv + ')';
+                                        } else if (idx >= 232 && idx <= 255) {
+                                            const gray = 8 + (idx - 232) * 10;
+                                            currentFg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
+                                        }
+                                        k += 2;
+                                    } else if (code === 38 && codes[k + 1] === 2 && k + 4 < codes.length) {
+                                        // RGB前景色
+                                        currentFg = 'rgb(' + codes[k + 2] + ',' + codes[k + 3] + ',' + codes[k + 4] + ')';
+                                        k += 4;
+                                    } else if (code === 48 && codes[k + 1] === 5 && k + 2 < codes.length) {
+                                        const idx = codes[k + 2];
+                                        if (idx >= 0 && idx <= 15) {
+                                            const map256 = {0:'#000000',1:'#800000',2:'#008000',3:'#808000',4:'#000080',5:'#800080',6:'#008080',7:'#c0c0c0',8:'#808080',9:'#ff0000',10:'#00ff00',11:'#ffff00',12:'#0000ff',13:'#ff00ff',14:'#00ffff',15:'#ffffff'};
+                                            currentBg = map256[idx] || '#000000';
+                                        } else if (idx >= 16 && idx <= 231) {
+                                            const r = Math.floor((idx - 16) / 36); const g = Math.floor(((idx - 16) % 36) / 6); const b = (idx - 16) % 6;
+                                            const rv = r === 0 ? 0 : 55 + r * 40; const gv = g === 0 ? 0 : 55 + g * 40; const bv = b === 0 ? 0 : 55 + b * 40;
+                                            currentBg = 'rgb(' + rv + ',' + gv + ',' + bv + ')';
+                                        } else if (idx >= 232 && idx <= 255) {
+                                            const gray = 8 + (idx - 232) * 10;
+                                            currentBg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
+                                        }
+                                        k += 2;
+                                    } else if (code === 48 && codes[k + 1] === 2 && k + 4 < codes.length) {
+                                        currentBg = 'rgb(' + codes[k + 2] + ',' + codes[k + 3] + ',' + codes[k + 4] + ')';
+                                        k += 4;
+                                    }
+                                }
+                                openSpan();
+                            }
+                        } else if (cmd === 'J' || cmd === 'K' || cmd === 'H') {
+                            // 清屏/清除行/光标定位 - 忽略
+                        }
+                        j++;
+                        break;
+                    } else {
+                        j++;
+                    }
+                }
+                i = j;
+            } else {
+                const ch = text.charAt(i);
+                if (ch === '<') result += '&lt;';
+                else if (ch === '>') result += '&gt;';
+                else if (ch === '&') result += '&amp;';
+                else result += ch;
+                i++;
+            }
+        }
+        closeSpan();
+        return result;
+    }
+
     function appendTerminalOutput(text, type = '') {
         let output = document.getElementById('terminalOutput');
         if (!output) {
@@ -4855,11 +4982,17 @@ document.addEventListener('DOMContentLoaded', function() {
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
             output = document.getElementById('terminalOutput');
         }
-        const span = document.createElement('span');
-        if (type === 'error') span.style.color = '#f56c6c';
-        else if (type === 'warning') span.style.color = '#e6a23c';
-        span.textContent = text;
-        output.appendChild(span);
+        if (type) {
+            const span = document.createElement('span');
+            if (type === 'error') span.style.color = '#f56c6c';
+            else if (type === 'warning') span.style.color = '#e6a23c';
+            span.textContent = text;
+            output.appendChild(span);
+        } else {
+            const div = document.createElement('div');
+            div.innerHTML = ansiToHtml(text);
+            output.appendChild(div);
+        }
         output.scrollTop = output.scrollHeight;
     }
 
