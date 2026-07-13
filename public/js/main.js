@@ -2630,9 +2630,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 const wsData = [headers, ...rows];
                 const ws = XLSX.utils.aoa_to_sheet(wsData);
+                const range = XLSX.utils.decode_range(ws['!ref']);
+                for (let R = range.s.r; R <= range.e.r; ++R) {
+                    for (let C = range.s.c; C <= range.e.c; ++C) {
+                        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                        if (!ws[cellAddress]) continue;
+                        const cell = ws[cellAddress];
+                        if (!cell.s) cell.s = {};
+                        cell.s.alignment = { horizontal: 'center', vertical: 'center' };
+                        if (R > 0 && exportFields[C].key === 'client_remaining') {
+                            const days = computeDaysRemaining(clientRecords[R - 1].data.client_expire);
+                            if (days <= 3) {
+                                cell.s.font = { color: { rgb: 'DC143C' }, bold: true };
+                            } else if (days <= 5) {
+                                cell.s.font = { color: { rgb: 'FFA500' }, bold: true };
+                            }
+                        }
+                    }
+                }
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, '客户信息');
-                const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
                 downloadFile(buf, `客户信息_${new Date().toISOString().slice(0,10)}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
                 exportClientStatus.textContent = '✅ 导出成功';
                 setTimeout(() => exportClientInfoModal.classList.remove('show'), 1500);
@@ -2695,18 +2713,40 @@ document.addEventListener('DOMContentLoaded', function() {
         ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, sans-serif';
         ctx.fillStyle = '#333';
         colWidths.forEach((w, idx) => {
-            ctx.fillText(headers[idx], x + colPadding, padding + headerHeight / 2 + 5);
+            const headerText = headers[idx];
+            const textWidth = ctx.measureText(headerText).width;
+            const textX = x + w / 2 - textWidth / 2;
+            ctx.fillText(headerText, textX, padding + headerHeight / 2 + 5);
             ctx.strokeRect(x, padding, w, headerHeight);
             x += w;
         });
 
-        ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillStyle = '#333';
         rows.forEach((row, rowIdx) => {
             let x = padding;
             const y = padding + headerHeight + rowIdx * rowHeight;
             row.forEach((cell, colIdx) => {
-                ctx.fillText(String(cell), x + colPadding, y + rowHeight / 2 + 4);
+                const colKey = exportFields[colIdx].key;
+                const cellText = String(cell);
+                const textWidth = ctx.measureText(cellText).width;
+                const cellX = x + colWidths[colIdx] / 2 - textWidth / 2;
+                const cellY = y + rowHeight / 2 + 4;
+                if (colKey === 'client_remaining') {
+                    const days = computeDaysRemaining(clientRecords[rowIdx].data.client_expire);
+                    if (days <= 3) {
+                        ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
+                        ctx.fillStyle = '#dc143c';
+                    } else if (days <= 5) {
+                        ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
+                        ctx.fillStyle = '#ffa500';
+                    } else {
+                        ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+                        ctx.fillStyle = '#333';
+                    }
+                } else {
+                    ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+                    ctx.fillStyle = '#333';
+                }
+                ctx.fillText(cellText, cellX, cellY);
                 ctx.strokeRect(x, y, colWidths[colIdx], rowHeight);
                 x += colWidths[colIdx];
             });

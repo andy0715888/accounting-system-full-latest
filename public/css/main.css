@@ -1426,9 +1426,9 @@ body {
     border-radius: 4px;
     font-size: 13px;
 }
-.income-add-form input[type="number"] { max-width: 100px; }
-.income-add-form input[type="date"] { max-width: 150px; }
-.income-add-form input[type="text"] { flex: 2; }
+.income-add-form input[type="number"] { max-width: 85px; }
+.income-add-form input[type="date"] { max-width: 175px; }
+.income-add-form input[type="text"] { flex: 1; }
 .income-list { max-height: 300px; overflow-y: auto; }
 .income-item {
     display: flex;
