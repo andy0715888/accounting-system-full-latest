@@ -107,6 +107,21 @@ function createTables() {
             FOREIGN KEY (tab_id) REFERENCES tabs(id)
         )`);
 
+        db.run(`CREATE TABLE IF NOT EXISTS conditional_formats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tab_id INTEGER NOT NULL,
+            col_key TEXT NOT NULL,
+            condition_type TEXT NOT NULL,
+            condition_value TEXT NOT NULL,
+            text_color TEXT,
+            is_bold INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (tab_id) REFERENCES tabs(id)
+        )`);
+
         // Migration: add tab_type and tab_order to existing tabs table
         db.run(`ALTER TABLE tabs ADD COLUMN tab_type TEXT DEFAULT 'dedicated'`, () => {});
         db.run(`ALTER TABLE tabs ADD COLUMN tab_order INTEGER DEFAULT 0`, () => {});

@@ -1764,3 +1764,142 @@ tr.client-row.cut-pending {
     gap: 12px;
     justify-content: flex-end;
 }
+
+.cf-add-form {
+    margin-bottom: 16px;
+    padding: 16px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e4e7ed;
+}
+
+.cf-form-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cf-form-row select,
+.cf-form-row input[type="text"] {
+    padding: 6px 10px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.cf-form-row select:focus,
+.cf-form-row input[type="text"]:focus {
+    border-color: #4a6cf7;
+}
+
+.cf-form-row select {
+    cursor: pointer;
+    background: #fff;
+}
+
+.cf-form-row input[type="color"] {
+    width: 36px;
+    height: 32px;
+    padding: 2px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #fff;
+}
+
+.cf-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.cf-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f2f5;
+    transition: background-color 0.2s;
+}
+
+.cf-item:last-child {
+    border-bottom: none;
+}
+
+.cf-item:hover {
+    background: #f8f9fa;
+}
+
+.cf-item-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+
+.cf-item-col {
+    font-weight: 500;
+    color: #303133;
+    background: #ecf5ff;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.cf-item-cond {
+    color: #606266;
+}
+
+.cf-item-val {
+    color: #909399;
+    font-family: monospace;
+}
+
+.cf-item-preview {
+    padding: 2px 8px;
+    background: #f5f7fa;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.cf-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cf-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: #f0f2f5;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.cf-btn:hover {
+    background: #e4e7ed;
+}
+
+.cf-btn.cf-up:hover {
+    color: #4a6cf7;
+}
+
+.cf-btn.cf-down:hover {
+    color: #4a6cf7;
+}
+
+.cf-btn.cf-delete:hover {
+    color: #f56c6c;
+    background: #fef0f0;
+}

@@ -68,6 +68,7 @@
                         <button class="tool-btn" id="refreshBtn">🔄 刷新</button>
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="manageColumnsBtn">📋 列管理</button>
+                        <button class="tool-btn" id="conditionalFormatBtn">🎨 条件管理</button>
                     </div>
                     <div class="toolbar-right">
                         <span class="record-count" id="recordCount">共 0 条记录</span>
@@ -203,6 +204,39 @@
                 </div>
                 <div class="column-list" id="columnList"></div>
                 <p style="font-size:12px;color:#999;margin-top:8px;">💡 拖拽列调整顺序，点击图标标记收支。</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="conditionalFormatModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>🎨 条件管理 - <span id="cfModalTabName"></span></h2>
+                <button class="modal-close" id="closeConditionalFormatModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="cf-add-form">
+                    <div class="cf-form-row">
+                        <select id="cfColSelect"></select>
+                        <select id="cfConditionSelect">
+                            <option value="contains">包含</option>
+                            <option value="equals">等于</option>
+                            <option value="not_equals">不等于</option>
+                            <option value="greater_than">大于</option>
+                            <option value="less_than">小于</option>
+                            <option value="starts_with">开头是</option>
+                            <option value="ends_with">结尾是</option>
+                        </select>
+                        <input type="text" id="cfValueInput" placeholder="条件值" />
+                        <input type="color" id="cfColorInput" value="#dc143c" style="width:40px;height:30px;padding:2px;cursor:pointer;" />
+                        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+                            <input type="checkbox" id="cfBoldCheck" /> 加粗
+                        </label>
+                        <button class="tool-btn primary" id="cfAddBtn">添加</button>
+                    </div>
+                </div>
+                <div class="cf-list" id="cfList"></div>
+                <p style="font-size:12px;color:#999;margin-top:8px;">💡 条件从上到下依次匹配，先匹配到的先生效。</p>
             </div>
         </div>
     </div>

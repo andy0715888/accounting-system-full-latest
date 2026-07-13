@@ -76,6 +76,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const exportClientStatus = $('#exportClientStatus');
     const refreshBtn = $('#refreshBtn');
     const manageColumnsBtn = $('#manageColumnsBtn');
+    const conditionalFormatBtn = $('#conditionalFormatBtn');
+    const conditionalFormatModal = $('#conditionalFormatModal');
+    const closeConditionalFormatModal = $('#closeConditionalFormatModal');
+    const cfModalTabName = $('#cfModalTabName');
+    const cfColSelect = $('#cfColSelect');
+    const cfConditionSelect = $('#cfConditionSelect');
+    const cfValueInput = $('#cfValueInput');
+    const cfColorInput = $('#cfColorInput');
+    const cfBoldCheck = $('#cfBoldCheck');
+    const cfAddBtn = $('#cfAddBtn');
+    const cfList = $('#cfList');
     const addressSuffixBtn = $('#addressSuffixBtn');
     const providerManageBtn = $('#providerManageBtn');
     const logoutBtn = $('#logoutBtn');
@@ -448,6 +459,51 @@ document.addEventListener('DOMContentLoaded', function() {
         return Math.ceil((target - now) / (1000*60*60*24));
     }
 
+    function checkConditionMatch(cellValue, conditionType, conditionValue) {
+        if (cellValue === null || cellValue === undefined) cellValue = '';
+        const cellStr = String(cellValue).trim();
+        const condStr = String(conditionValue ?? '').trim();
+        switch (conditionType) {
+            case 'contains': return cellStr.indexOf(condStr) !== -1;
+            case 'equals': return cellStr === condStr;
+            case 'not_equals': return cellStr !== condStr;
+            case 'starts_with': return cellStr.startsWith(condStr);
+            case 'ends_with': return cellStr.endsWith(condStr);
+            case 'greater_than': {
+                const cellNum = parseFloat(cellStr);
+                const condNum = parseFloat(condStr);
+                if (isNaN(cellNum) || isNaN(condNum)) return false;
+                return cellNum > condNum;
+            }
+            case 'less_than': {
+                const cellNum = parseFloat(cellStr);
+                const condNum = parseFloat(condStr);
+                if (isNaN(cellNum) || isNaN(condNum)) return false;
+                return cellNum < condNum;
+            }
+            default: return false;
+        }
+    }
+
+    function getConditionalFormat(colKey, cellValue) {
+        if (!state.conditionalFormats || state.conditionalFormats.length === 0) return null;
+        const formats = state.conditionalFormats.filter(f => f.col_key === colKey);
+        for (const fmt of formats) {
+            if (checkConditionMatch(cellValue, fmt.condition_type, fmt.condition_value)) {
+                return fmt;
+            }
+        }
+        return null;
+    }
+
+    function applyFormatStyle(fmt) {
+        if (!fmt) return '';
+        let style = '';
+        if (fmt.text_color) style += `color:${fmt.text_color};`;
+        if (fmt.is_bold) style += 'font-weight:bold;';
+        return style;
+    }
+
     function checkExpired(expireDateStr) {
         if (!expireDateStr) return '未知';
         const days = computeDaysRemaining(expireDateStr);
@@ -601,6 +657,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadTabs() { state.tabs = await API.get('/tabs'); return state.tabs; }
     async function loadColumns(tabId) { state.columns = await API.get('/columns?tabId=' + tabId); return state.columns; }
+    async function loadConditionalFormats(tabId) {
+        state.conditionalFormats = await API.get('/conditional-formats?tabId=' + tabId);
+        return state.conditionalFormats;
+    }
 
     function isSharedTab() {
         const tab = state.tabs.find(t => t.id === state.currentTabId);
@@ -707,7 +767,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 force || !state.columnsCache[tabId]
                     ? API.get('/columns?tabId=' + tabId)
                     : Promise.resolve(state.columnsCache[tabId]),
-                loadRecords(tabId)
+                loadRecords(tabId),
+                loadConditionalFormats(tabId)
             ]);
             state.columns = columns;
             state.columnsCache[tabId] = columns;
@@ -1090,21 +1151,31 @@ document.addEventListener('DOMContentLoaded', function() {
                     let dateKey = colKey === 'host_remaining' ? 'host_expire' : (colKey === 'client_remaining' ? 'client_expire' : '');
                     const days = computeDaysRemaining(record.data[dateKey]);
                     const displayVal = days !== '' ? days + ' 天' : '';
-                    // ≤3天（含负数）为鲜红色，>3天且≤5天为金黄色加粗，其余默认色
+                    const fmt = getConditionalFormat(colKey, days);
                     let color, style;
-                    if (days <= 3) {
-                        color = '#dc143c';
-                        style = 'font-weight:bold;';
-                    } else if (days <= 5) {
-                        color = '#ffa500';
-                        style = 'font-weight:bold;';
+                    if (fmt) {
+                        color = fmt.text_color || '';
+                        style = applyFormatStyle(fmt);
                     } else {
-                        color = '#333';
-                        style = '';
+                        if (days <= 3) {
+                            color = '#dc143c';
+                            style = 'color:#dc143c;font-weight:bold;';
+                        } else if (days <= 5) {
+                            color = '#ffa500';
+                            style = 'color:#ffa500;font-weight:bold;';
+                        } else {
+                            color = '#333';
+                            style = '';
+                        }
                     }
-                    inputHtml = `<span style="color:${color};${style}">${escapeHtml(displayVal)}</span>`;
+                    const styleAttr = style ? ` style="${style}"` : '';
+                    inputHtml = `<span${styleAttr}>${escapeHtml(displayVal)}</span>`;
                 } else if (colKey === 'ip_info') {
-                    inputHtml = `<span>${escapeHtml(record.data.ip_address || '')}</span>`;
+                    const ipVal = record.data.ip_address || '';
+                    const fmt = getConditionalFormat(colKey, ipVal);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
+                    inputHtml = `<span${styleAttr}>${escapeHtml(ipVal)}</span>`;
                 } else if (col.col_type === 'address_select') {
                     const optionsArr = col.col_options || [];
                     const options = optionsArr.map(opt => {
@@ -1114,32 +1185,39 @@ document.addEventListener('DOMContentLoaded', function() {
                         return `<option value="${escapeAttr(opt)}" ${val === opt ? 'selected' : ''}>${escapeHtml(display)}</option>`;
                     }).join('');
                     const addressValue = val || '';
+                    const fmt = getConditionalFormat(colKey, val);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                     inputHtml = `
                         <div class="address-control">
-                            <select class="cell-input address-select" data-col="${escapeAttr(colKey)}" data-id="${record.id}">${options}</select>
+                            <select class="cell-input address-select" data-col="${escapeAttr(colKey)}" data-id="${record.id}"${styleAttr}>${options}</select>
                             <button class="open-link" data-address="${escapeAttr(addressValue)}" data-ip="${escapeAttr(record.data.ip_address || '')}" data-domain="${escapeAttr(record.data.domain || '')}">打开</button>
                         </div>
                     `;
                 } else if (col.col_type === 'number' && colKey === 'months') {
                     const num = parseInt(val) || 0;
+                    const fmt = getConditionalFormat(colKey, num);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                     inputHtml = `
                         <div class="months-control">
                             <button class="months-dec" data-col="${escapeAttr(colKey)}" data-id="${record.id}">-</button>
-                            <input type="number" class="cell-input months-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${num}" min="0" step="1" />
+                            <input type="number" class="cell-input months-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${num}" min="0" step="1"${styleAttr} />
                             <button class="months-inc" data-col="${escapeAttr(colKey)}" data-id="${record.id}">+</button>
                         </div>
                     `;
                 } else if (col.col_type === 'date') {
                     const dateVal = val || '';
                     const emptyClass = !dateVal ? ' date-empty' : '';
+                    const fmt = getConditionalFormat(colKey, dateVal);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                     if (colKey === 'host_expire') {
-                        // 主机到期时间：只读，由购买时间+月数自动计算
                         const display = formatDisplayDate(dateVal);
-                        inputHtml = `<div class="date-cell date-readonly${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span style="cursor:default;">${escapeHtml(display || '-')}</span></div>`;
+                        inputHtml = `<div class="date-cell date-readonly${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><span style="cursor:default;${fmtStyle}">${escapeHtml(display || '-')}</span></div>`;
                     } else {
-                        // 可编辑日期：非编辑时显示 XXXX年XX月XX日，编辑时切换为 YYYY-MM-DD
                         const displayVal = formatDisplayDate(dateVal);
-                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><input type="text" class="cell-input date-text-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(displayVal)}" placeholder="点击设置" autocomplete="off" /><input type="date" class="date-picker-hidden" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" tabindex="-1" /><button class="date-picker-btn" data-col="${escapeAttr(colKey)}" data-id="${record.id}" title="选择日期" tabindex="-1">📅</button></div>`;
+                        inputHtml = `<div class="date-cell${emptyClass}" data-id="${record.id}" data-col="${escapeAttr(colKey)}"><input type="text" class="cell-input date-text-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(displayVal)}" placeholder="点击设置" autocomplete="off"${styleAttr} /><input type="date" class="date-picker-hidden" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(dateVal)}" tabindex="-1" /><button class="date-picker-btn" data-col="${escapeAttr(colKey)}" data-id="${record.id}" title="选择日期" tabindex="-1">📅</button></div>`;
                     }
                 } else if (colKey === 'provider') {
                     const currentProvider = val || '';
@@ -1151,15 +1229,21 @@ document.addEventListener('DOMContentLoaded', function() {
                             <small>${escapeHtml(getChineseInitials(opt))}</small>
                         </div>
                     `).join('');
+                    const fmt = getConditionalFormat(colKey, currentProvider);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                     inputHtml = `
                         <div class="provider-search-box" data-id="${record.id}" data-col="${escapeAttr(colKey)}">
-                            <input type="text" class="cell-input provider-search-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(currentProvider)}" placeholder="搜索服务商" autocomplete="off" />
+                            <input type="text" class="cell-input provider-search-input" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(currentProvider)}" placeholder="搜索服务商" autocomplete="off"${styleAttr} />
                             <div class="provider-search-dropdown">${options}<div class="provider-search-empty">暂无匹配服务商</div></div>
                         </div>
                     `;
                 } else if (col.col_type === 'select') {
                     const options = (col.col_options || []).map(opt => `<option value="${escapeAttr(opt)}" ${val === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('');
-                    inputHtml = `<select class="cell-input select-cell" data-col="${escapeAttr(colKey)}" data-id="${record.id}"><option value="">-</option>${options}</select>`;
+                    const fmt = getConditionalFormat(colKey, val);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
+                    inputHtml = `<select class="cell-input select-cell" data-col="${escapeAttr(colKey)}" data-id="${record.id}"${styleAttr}><option value="">-</option>${options}</select>`;
                 } else if (colKey === 'is_expired') {
                     let status;
                     if (record.record_type === 'client') {
@@ -1169,15 +1253,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (hostRemaining === '') { status = '未知'; }
                         else { status = hostRemaining >= 0 ? '有效' : '过期'; }
                     }
-                    const color = status === '有效' ? '#67c23a' : (status === '过期' ? '#f56c6c' : '#999');
-                    inputHtml = `<span style="color:${color};">${escapeHtml(status)}</span>`;
+                    const fmt = getConditionalFormat(colKey, status);
+                    let color = status === '有效' ? '#67c23a' : (status === '过期' ? '#f56c6c' : '#999');
+                    let style = `color:${color};`;
+                    if (fmt) {
+                        style = applyFormatStyle(fmt) || style;
+                    }
+                    inputHtml = `<span style="${style}">${escapeHtml(status)}</span>`;
                 } else if (colKey === 'expense') {
                     if (isSimpleTab()) {
                         const expenseTotal = record._expenseTotal || 0;
                         const displayText = expenseTotal > 0 ? Math.round(expenseTotal) : '0';
+                        const fmt = getConditionalFormat(colKey, expenseTotal);
+                        const fmtStyle = applyFormatStyle(fmt);
+                        const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                         inputHtml = `
                             <div class="fee-summary-cell expense-summary-cell" data-id="${record.id}">
-                                <span>${escapeHtml(displayText)}</span>
+                                <span${styleAttr}>${escapeHtml(displayText)}</span>
                                 <span class="fee-add-icon">+</span>
                             </div>
                         `;
@@ -1185,9 +1277,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         const rawValue = val || '';
                         const months = parseInt(record.data.months) || 0;
                         const displayValue = Math.round(computeExpenseValue(rawValue, months));
+                        const fmt = getConditionalFormat(colKey, displayValue);
+                        const fmtStyle = applyFormatStyle(fmt);
+                        const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                         inputHtml = `
                             <div class="expense-inline">
-                                <span class="expense-display">${displayValue}</span>
+                                <span class="expense-display"${styleAttr}>${displayValue}</span>
                                 <input type="text" class="cell-input expense-input" value="${escapeAttr(rawValue)}" style="display:none;" />
                             </div>
                         `;
@@ -1195,9 +1290,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (colKey === 'fee') {
                     const incomeTotal = record._incomeTotal || 0;
                     const displayText = incomeTotal > 0 ? Math.round(incomeTotal) : '0';
+                    const fmt = getConditionalFormat(colKey, incomeTotal);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
                     inputHtml = `
                         <div class="fee-summary-cell" data-id="${record.id}">
-                            <span>${escapeHtml(displayText)}</span>
+                            <span${styleAttr}>${escapeHtml(displayText)}</span>
                             <span class="fee-add-icon">+</span>
                         </div>
                     `;
@@ -1205,12 +1303,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     const isEmpty = !val;
                     const displayMask = val ? '***' : '✎ 点击设置';
                     const emptyClass = isEmpty ? ' password-empty' : '';
-                    inputHtml = `<div class="password-cell" data-id="${record.id}" data-col="password"><span class="password-mask${emptyClass}">${escapeHtml(displayMask)}</span><input type="text" class="cell-input password-input" data-col="password" data-id="${record.id}" value="${escapeAttr(val || '')}" /></div>`;
+                    const fmt = getConditionalFormat(colKey, val);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
+                    inputHtml = `<div class="password-cell" data-id="${record.id}" data-col="password"><span class="password-mask${emptyClass}"${styleAttr}>${escapeHtml(displayMask)}</span><input type="text" class="cell-input password-input" data-col="password" data-id="${record.id}" value="${escapeAttr(val || '')}" /></div>`;
                 } else {
                     const inputType = col.col_type === 'number' ? 'number' : 'text';
                     const step = col.col_type === 'number' ? 'step="0.01"' : '';
                     const expandClass = EXPAND_COLS.has(colKey) ? ' expand-on-focus' : '';
-                    inputHtml = `<input type="${inputType}" class="cell-input${expandClass}" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(val || '')}" ${step} />`;
+                    const fmt = getConditionalFormat(colKey, val);
+                    const fmtStyle = applyFormatStyle(fmt);
+                    const styleAttr = fmtStyle ? ` style="${fmtStyle}"` : '';
+                    inputHtml = `<input type="${inputType}" class="cell-input${expandClass}" data-col="${escapeAttr(colKey)}" data-id="${record.id}" value="${escapeAttr(val || '')}" ${step}${styleAttr} />`;
                 }
                 const tdClass = (colKey === 'expense' || colKey === 'password' || EXPAND_COLS.has(colKey)) ? 'editable-td' : '';
                 tbodyHtml += `<td class="${tdClass}">${inputHtml}</td>`;
@@ -2980,6 +3084,116 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { setStatus('❌ 添加失败: ' + err.message); }
     }
 
+    // --- 条件格式管理 ---
+    function openConditionalFormatModal() {
+        if (!state.currentTabId) { setStatus('⚠️ 请先选择标签'); return; }
+        const tab = state.tabs.find(t => t.id === state.currentTabId);
+        cfModalTabName.textContent = tab ? tab.name : '';
+        renderCfColSelect();
+        renderCfList();
+        conditionalFormatModal.classList.add('show');
+    }
+
+    function renderCfColSelect() {
+        const visibleCols = state.columns.filter(c => c.col_visible !== 0);
+        cfColSelect.innerHTML = visibleCols.map(c =>
+            `<option value="${escapeAttr(c.col_key)}">${escapeHtml(c.col_name)}</option>`
+        ).join('');
+    }
+
+    function renderCfList() {
+        const formats = state.conditionalFormats || [];
+        if (formats.length === 0) {
+            cfList.innerHTML = '<div style="text-align:center;color:#999;padding:20px 0;">暂无条件格式</div>';
+            return;
+        }
+        const colMap = {};
+        state.columns.forEach(c => { colMap[c.col_key] = c.col_name; });
+        const conditionLabels = {
+            contains: '包含', equals: '等于', not_equals: '不等于',
+            greater_than: '大于', less_than: '小于',
+            starts_with: '开头是', ends_with: '结尾是'
+        };
+        let html = '';
+        formats.forEach(fmt => {
+            const colName = colMap[fmt.col_key] || fmt.col_key;
+            const condLabel = conditionLabels[fmt.condition_type] || fmt.condition_type;
+            const style = [];
+            if (fmt.text_color) style.push(`color:${fmt.text_color};`);
+            if (fmt.is_bold) style.push('font-weight:bold;');
+            html += `
+                <div class="cf-item" data-id="${fmt.id}">
+                    <div class="cf-item-info">
+                        <span class="cf-item-col">${escapeHtml(colName)}</span>
+                        <span class="cf-item-cond">${escapeHtml(condLabel)}</span>
+                        <span class="cf-item-val">"${escapeHtml(fmt.condition_value)}"</span>
+                        <span class="cf-item-preview" style="${style.join('')}">预览文字</span>
+                    </div>
+                    <div class="cf-item-actions">
+                        <button class="cf-btn cf-up" data-id="${fmt.id}" title="上移">↑</button>
+                        <button class="cf-btn cf-down" data-id="${fmt.id}" title="下移">↓</button>
+                        <button class="cf-btn cf-delete" data-id="${fmt.id}" title="删除">🗑️</button>
+                    </div>
+                </div>
+            `;
+        });
+        cfList.innerHTML = html;
+        $$('.cf-btn.cf-up').forEach(btn => btn.addEventListener('click', () => moveCfItem(parseInt(btn.dataset.id), -1)));
+        $$('.cf-btn.cf-down').forEach(btn => btn.addEventListener('click', () => moveCfItem(parseInt(btn.dataset.id), 1)));
+        $$('.cf-btn.cf-delete').forEach(btn => btn.addEventListener('click', () => deleteCfItem(parseInt(btn.dataset.id))));
+    }
+
+    async function addConditionalFormat() {
+        const col_key = cfColSelect.value;
+        const condition_type = cfConditionSelect.value;
+        const condition_value = cfValueInput.value.trim();
+        const text_color = cfColorInput.value;
+        const is_bold = cfBoldCheck.checked;
+        if (!condition_value) { setStatus('⚠️ 请输入条件值'); return; }
+
+        try {
+            await API.post('/conditional-formats', {
+                tab_id: state.currentTabId,
+                col_key, condition_type, condition_value, text_color, is_bold
+            });
+            cfValueInput.value = '';
+            await loadConditionalFormats(state.currentTabId);
+            renderCfList();
+            renderTable(false);
+            setStatus('✅ 条件格式添加成功');
+        } catch (err) { setStatus('❌ 添加失败: ' + err.message); }
+    }
+
+    async function moveCfItem(id, direction) {
+        const formats = state.conditionalFormats || [];
+        const idx = formats.findIndex(f => f.id === id);
+        if (idx === -1) return;
+        const newIdx = idx + direction;
+        if (newIdx < 0 || newIdx >= formats.length) return;
+        const newFormats = [...formats];
+        [newFormats[idx], newFormats[newIdx]] = [newFormats[newIdx], newFormats[idx]];
+        try {
+            for (let i = 0; i < newFormats.length; i++) {
+                if (newFormats[i].sort_order !== i) {
+                    await API.put('/conditional-formats/' + newFormats[i].id, { sort_order: i });
+                }
+            }
+            await loadConditionalFormats(state.currentTabId);
+            renderCfList();
+            renderTable(false);
+        } catch (err) { setStatus('❌ 移动失败: ' + err.message); }
+    }
+
+    async function deleteCfItem(id) {
+        try {
+            await API.delete('/conditional-formats/' + id);
+            await loadConditionalFormats(state.currentTabId);
+            renderCfList();
+            renderTable(false);
+            setStatus('✅ 已删除');
+        } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+    }
+
     // --- 统计 ---
     // --- 收入管理弹窗 ---
     async function openIncomeModal(recordId) {
@@ -3741,6 +3955,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     manageColumnsBtn.addEventListener('click', showColumnManager);
+    conditionalFormatBtn.addEventListener('click', openConditionalFormatModal);
+    closeConditionalFormatModal.addEventListener('click', () => conditionalFormatModal.classList.remove('show'));
+    cfAddBtn.addEventListener('click', addConditionalFormat);
+    cfValueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addConditionalFormat(); });
     logoutBtn.addEventListener('click', async function() {
         if (!await showConfirm('确定退出吗？')) return;
         // 退出前保存当前筛选状态
