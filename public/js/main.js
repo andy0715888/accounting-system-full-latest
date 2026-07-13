@@ -5153,9 +5153,9 @@ document.addEventListener('DOMContentLoaded', function() {
             fileManagerBtn.style.display = 'inline-block';
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
-                const div = document.createElement('div');
-                div.innerHTML = ansiToHtml(conn.terminalContent);
-                output.appendChild(div);
+                const span = document.createElement('span');
+                span.innerHTML = ansiToHtml(conn.terminalContent);
+                output.appendChild(span);
                 output.scrollTop = output.scrollHeight;
             }
         } else if (ws && ws.readyState === WebSocket.CONNECTING) {
@@ -5174,9 +5174,9 @@ document.addEventListener('DOMContentLoaded', function() {
             fileManagerBtn.style.display = 'none';
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
-                const div = document.createElement('div');
-                div.innerHTML = ansiToHtml(conn.terminalContent);
-                output.appendChild(div);
+                const span = document.createElement('span');
+                span.innerHTML = ansiToHtml(conn.terminalContent);
+                output.appendChild(span);
                 output.scrollTop = output.scrollHeight;
             }
         }
@@ -5700,9 +5700,9 @@ document.addEventListener('DOMContentLoaded', function() {
             span.textContent = text;
             output.appendChild(span);
         } else {
-            const div = document.createElement('div');
-            div.innerHTML = ansiToHtml(text);
-            output.appendChild(div);
+            const span = document.createElement('span');
+            span.innerHTML = ansiToHtml(text);
+            output.appendChild(span);
         }
         output.scrollTop = output.scrollHeight;
 
