@@ -3508,9 +3508,9 @@ document.addEventListener('DOMContentLoaded', function() {
     async function getAllTabRecordsForStats() {
         await flushPendingSaves();
         const all = [];
-        // 并行加载所有标签的记录（后端已返回 _incomeTotal 和 _expenseTotal）
+        // 并行加载所有标签的全部记录（pageSize=0 获取全部）
         const recordPromises = state.tabs.map(tab =>
-            API.get('/records?tabId=' + tab.id + '&pageSize=1000')
+            API.get('/records?tabId=' + tab.id + '&pageSize=0')
                 .then(result => {
                     const records = result.records || result || [];
                     records.forEach(record => all.push({ ...record, tabId: tab.id, tabName: tab.name }));
