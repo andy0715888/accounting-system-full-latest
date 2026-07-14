@@ -1930,6 +1930,32 @@ tr.client-row.cut-pending {
     overflow: hidden;
 }
 
+.hosts-commands-sidebar {
+    width: 260px;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.hosts-commands-sidebar .saved-commands-section {
+    border: none;
+    border-radius: 0;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.hosts-commands-sidebar .folders-list {
+    max-height: none;
+    flex: 1;
+    overflow-y: auto;
+}
+
 .hosts-toolbar {
     display: flex;
     gap: 8px;
@@ -2506,33 +2532,6 @@ tr.client-row.cut-pending {
     padding: 10px 16px;
     background: #2d2d2d;
     border-top: 1px solid #404040;
-}
-
-.terminal-bottom-area {
-    display: flex;
-    gap: 0;
-    border-top: 1px solid #e4e7ed;
-}
-
-.terminal-bottom-area .terminal-input-area {
-    flex: 1;
-    border-top: none;
-}
-
-.terminal-bottom-area .saved-commands-section {
-    width: 260px;
-    border-left: 1px solid #e4e7ed;
-    border-radius: 0;
-    margin-bottom: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.terminal-bottom-area .saved-commands-section .folders-list {
-    max-height: none;
-    flex: 1;
-    overflow-y: auto;
 }
 
 .terminal-input-area input {
