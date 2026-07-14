@@ -73,7 +73,8 @@ router.get('/', requireAuth, async (req, res) => {
         if (!tabId) return res.status(400).json({ error: '缺少 tabId' });
 
         const page = Math.max(1, parseInt(req.query.page) || 1);
-        const rawPageSize = parseInt(req.query.pageSize) || 50;
+        const pageSizeParam = parseInt(req.query.pageSize);
+        const rawPageSize = isNaN(pageSizeParam) ? 50 : pageSizeParam;
         const allMode = rawPageSize === 0;
 
         // 解析筛选条件
