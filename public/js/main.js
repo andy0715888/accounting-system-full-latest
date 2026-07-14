@@ -880,17 +880,26 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!await showConfirm(`确定删除 ${tabIds.length} 个标签及其所有数据吗？`)) return;
         try {
             setStatus('🔄 删除标签中...');
+            const oldCurrentTabId = state.currentTabId;
             await Promise.all(tabIds.map(tabId => API.delete('/tabs/' + tabId)));
             tabIds.forEach(tabId => {
                 invalidateTabCache(tabId);
                 state.selectedTabs.delete(tabId);
             });
             state.tabs = state.tabs.filter(t => !tabIds.includes(t.id));
+            const wasCurrentTabDeleted = tabIds.includes(oldCurrentTabId);
             if (!state.tabs.some(t => t.id === state.currentTabId)) {
                 state.currentTabId = state.tabs.length > 0 ? state.tabs[0].id : null;
             }
             renderTabs();
-            if (state.currentTabId) await switchTab(state.currentTabId, true);
+            if (state.currentTabId) {
+                if (!wasCurrentTabDeleted && oldCurrentTabId === state.currentTabId) {
+                    await loadDataForTab(state.currentTabId, true);
+                    renderTable(false);
+                } else {
+                    await switchTab(state.currentTabId, true);
+                }
+            }
             else await createDefaultTab();
             setStatus(`✅ 已删除 ${tabIds.length} 个标签`);
         } catch (err) { setStatus('❌ 删除标签失败: ' + err.message); }
