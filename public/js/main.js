@@ -5909,33 +5909,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const terminalBgColor = document.getElementById('terminalBgColor');
         const terminalBgColorText = document.getElementById('terminalBgColorText');
-        const saveTerminalBgBtn = document.getElementById('saveTerminalBgBtn');
-
-        terminalBgColor.addEventListener('input', (e) => {
-            terminalBgColorText.value = e.target.value;
-        });
-        terminalBgColorText.addEventListener('input', (e) => {
-            const val = e.target.value;
-            if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-                terminalBgColor.value = val;
-            }
-        });
-        saveTerminalBgBtn.onclick = () => {
-            const color = terminalBgColor.value;
-            document.getElementById('terminalContainer').style.background = color;
-            document.getElementById('terminalInput').style.background = color;
-            localStorage.setItem('sshTerminalBg', color);
-            setStatus('✅ 终端背景色已更新');
-        };
-
-        const savedBg = localStorage.getItem('sshTerminalBg');
-        if (savedBg) {
-            terminalBgColor.value = savedBg;
-            terminalBgColorText.value = savedBg;
-            document.getElementById('terminalContainer').style.background = savedBg;
-            document.getElementById('terminalInput').style.background = savedBg;
-        }
-
         const proxyType = document.getElementById('proxyType');
         const proxyHost = document.getElementById('proxyHost');
         const proxyPort = document.getElementById('proxyPort');
@@ -5943,24 +5916,81 @@ document.addEventListener('DOMContentLoaded', function() {
         const proxyPass = document.getElementById('proxyPass');
         const proxyVlessUuid = document.getElementById('proxyVlessUuid');
         const proxyVlessSni = document.getElementById('proxyVlessSni');
-        const saveProxyBtn = document.getElementById('saveProxyBtn');
-        const proxyStatus = document.getElementById('proxyStatus');
+        const vlessSettings = document.getElementById('vlessSettings');
 
-        const savedProxy = localStorage.getItem('sshProxySettings');
-        if (savedProxy) {
-            try {
-                const proxy = JSON.parse(savedProxy);
-                proxyType.value = proxy.type || 'none';
-                proxyHost.value = proxy.host || '';
-                proxyPort.value = proxy.port || '';
-                proxyUser.value = proxy.user || '';
-                proxyPass.value = proxy.password || '';
-                proxyVlessUuid.value = proxy.vlessUuid || '';
-                proxyVlessSni.value = proxy.vlessSni || '';
-            } catch(e) {}
+        // 加载保存的设置
+        function loadSshSettings() {
+            const savedBg = localStorage.getItem('sshTerminalBg');
+            if (savedBg) {
+                terminalBgColor.value = savedBg;
+                terminalBgColorText.value = savedBg;
+                document.getElementById('terminalContainer').style.background = savedBg;
+                document.getElementById('terminalInput').style.background = savedBg;
+            }
+
+            const savedProxy = localStorage.getItem('sshProxySettings');
+            if (savedProxy) {
+                try {
+                    const proxy = JSON.parse(savedProxy);
+                    proxyType.value = proxy.type || 'none';
+                    proxyHost.value = proxy.host || '';
+                    proxyPort.value = proxy.port || '';
+                    proxyUser.value = proxy.user || '';
+                    proxyPass.value = proxy.password || '';
+                    proxyVlessUuid.value = proxy.vlessUuid || '';
+                    proxyVlessSni.value = proxy.vlessSni || '';
+                    toggleVlessSettings();
+                } catch(e) {}
+            }
         }
 
-        saveProxyBtn.onclick = () => {
+        function toggleVlessSettings() {
+            vlessSettings.style.display = proxyType.value === 'vless' ? 'flex' : 'none';
+        }
+
+        // SSH设置弹窗
+        const sshSettingsModal = document.getElementById('sshSettingsModal');
+        const sshSettingsBtn = document.getElementById('sshSettingsBtn');
+        const closeSshSettings = document.getElementById('closeSshSettings');
+        const saveSshSettingsBtn = document.getElementById('saveSshSettingsBtn');
+        const sshSettingsStatus = document.getElementById('sshSettingsStatus');
+
+        sshSettingsBtn.onclick = () => {
+            loadSshSettings();
+            sshSettingsModal.classList.add('show');
+        };
+
+        closeSshSettings.onclick = () => {
+            sshSettingsModal.classList.remove('show');
+        };
+
+        sshSettingsModal.onclick = (e) => {
+            if (e.target === sshSettingsModal) {
+                sshSettingsModal.classList.remove('show');
+            }
+        };
+
+        terminalBgColor.addEventListener('input', (e) => {
+            terminalBgColorText.value = e.target.value;
+        });
+
+        terminalBgColorText.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                terminalBgColor.value = val;
+            }
+        });
+
+        proxyType.addEventListener('change', toggleVlessSettings);
+
+        saveSshSettingsBtn.onclick = () => {
+            // 保存终端背景色
+            const color = terminalBgColor.value;
+            document.getElementById('terminalContainer').style.background = color;
+            document.getElementById('terminalInput').style.background = color;
+            localStorage.setItem('sshTerminalBg', color);
+
+            // 保存代理设置
             const proxy = {
                 type: proxyType.value,
                 host: proxyHost.value,
@@ -5971,9 +6001,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 vlessSni: proxyVlessSni.value
             };
             localStorage.setItem('sshProxySettings', JSON.stringify(proxy));
-            proxyStatus.textContent = '✅ 代理设置已保存';
-            setTimeout(() => { proxyStatus.textContent = ''; }, 2000);
+
+            sshSettingsStatus.textContent = '✅ 设置已保存';
+            setTimeout(() => {
+                sshSettingsStatus.textContent = '';
+                sshSettingsModal.classList.remove('show');
+            }, 1500);
         };
+
+        // 页面加载时应用保存的设置
+        loadSshSettings();
     }
 
     init();
