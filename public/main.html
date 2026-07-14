@@ -291,7 +291,7 @@
     </div>
 
     <div class="modal-overlay" id="sshSettingsModal">
-        <div class="modal">
+        <div class="modal" style="width:700px;">
             <div class="modal-header">
                 <h2>⚙️ SSH设置</h2>
                 <button class="modal-close" id="closeSshSettings">✕</button>
@@ -309,48 +309,66 @@
                         </div>
                     </div>
                     <div class="ssh-setting-group">
-                        <h4>代理设置</h4>
-                        <div class="ssh-setting-row">
-                            <div class="ssh-setting-item" style="flex:1;">
-                                <label>代理类型</label>
-                                <select id="proxyType" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;">
-                                    <option value="none">无代理</option>
-                                    <option value="socks">SOCKS5</option>
-                                    <option value="http">HTTP</option>
-                                    <option value="vless">VLESS+TLS</option>
-                                </select>
-                            </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                            <h4>代理列表</h4>
+                            <button class="tool-btn sm" id="addProxyBtn">➕ 添加代理</button>
                         </div>
-                        <div class="ssh-setting-row">
-                            <div class="ssh-setting-item" style="flex:2;">
-                                <label>代理地址</label>
-                                <input type="text" id="proxyHost" placeholder="代理服务器地址" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
-                            </div>
-                            <div class="ssh-setting-item" style="flex:1;">
-                                <label>端口</label>
-                                <input type="number" id="proxyPort" placeholder="端口" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
-                            </div>
+                        <div class="proxy-list" id="proxyList">
+                            <div style="text-align:center;color:#999;padding:10px;font-size:12px;">暂无代理配置</div>
                         </div>
-                        <div class="ssh-setting-row">
-                            <div class="ssh-setting-item" style="flex:1;">
-                                <label>用户名（可选）</label>
-                                <input type="text" id="proxyUser" placeholder="用户名" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
-                            </div>
-                            <div class="ssh-setting-item" style="flex:1;">
-                                <label>密码（可选）</label>
-                                <input type="password" id="proxyPass" placeholder="密码" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
-                            </div>
+                    </div>
+                </div>
+                <div class="proxy-editor" id="proxyEditor" style="display:none;">
+                    <h4>编辑代理</h4>
+                    <input type="hidden" id="proxyEditId" />
+                    <div class="ssh-setting-row">
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>代理名称</label>
+                            <input type="text" id="proxyName" placeholder="给代理起个名字" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
                         </div>
-                        <div class="ssh-setting-row" id="vlessSettings" style="display:none;">
-                            <div class="ssh-setting-item" style="flex:1;">
-                                <label>VLESS UUID</label>
-                                <input type="text" id="proxyVlessUuid" placeholder="UUID" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
-                            </div>
-                            <div class="ssh-setting-item" style="flex:1;">
-                                <label>VLESS SNI</label>
-                                <input type="text" id="proxyVlessSni" placeholder="服务器域名" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
-                            </div>
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>代理类型</label>
+                            <select id="proxyType" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;">
+                                <option value="none">无代理</option>
+                                <option value="socks">SOCKS5</option>
+                                <option value="http">HTTP</option>
+                                <option value="vless">VLESS+TLS</option>
+                            </select>
                         </div>
+                    </div>
+                    <div class="ssh-setting-row">
+                        <div class="ssh-setting-item" style="flex:2;">
+                            <label>代理地址</label>
+                            <input type="text" id="proxyHost" placeholder="代理服务器地址" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
+                        </div>
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>端口</label>
+                            <input type="number" id="proxyPort" placeholder="端口" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
+                        </div>
+                    </div>
+                    <div class="ssh-setting-row">
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>用户名（可选）</label>
+                            <input type="text" id="proxyUser" placeholder="用户名" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
+                        </div>
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>密码（可选）</label>
+                            <input type="password" id="proxyPass" placeholder="密码" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
+                        </div>
+                    </div>
+                    <div class="ssh-setting-row" id="vlessSettings" style="display:none;">
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>VLESS UUID</label>
+                            <input type="text" id="proxyVlessUuid" placeholder="UUID" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
+                        </div>
+                        <div class="ssh-setting-item" style="flex:1;">
+                            <label>VLESS SNI</label>
+                            <input type="text" id="proxyVlessSni" placeholder="服务器域名" style="width:100%;font-size:13px;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;" />
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:12px;">
+                        <button class="tool-btn primary" id="saveProxyBtn">💾 保存代理</button>
+                        <button class="tool-btn" id="cancelProxyBtn">取消</button>
                     </div>
                 </div>
                 <div class="ssh-settings-actions">

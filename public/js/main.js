@@ -4997,8 +4997,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 const pwdRes = await fetch(`/api/hosts/${host.id}/password`);
                 const pwdData = await pwdRes.json();
                 const password = pwdData.password || '';
-                const proxySettingsStr = localStorage.getItem('sshProxySettings');
-                const proxy = proxySettingsStr ? JSON.parse(proxySettingsStr) : { type: 'none' };
+
+                const savedProxies = localStorage.getItem('sshProxyConfigs');
+                const savedActiveProxy = localStorage.getItem('sshActiveProxy');
+                let proxy = { type: 'none' };
+
+                if (savedProxies && savedActiveProxy) {
+                    const proxies = JSON.parse(savedProxies);
+                    const active = proxies.find(p => p.id === savedActiveProxy);
+                    if (active) {
+                        proxy = active;
+                    }
+                }
+
                 ws.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password, proxy }));
             } catch (err) {
                 terminal.innerHTML = `<div style="padding:16px;color:#f56c6c;">获取密码失败: ${err.message}</div>`;
@@ -5955,6 +5966,136 @@ document.addEventListener('DOMContentLoaded', function() {
         const saveSshSettingsBtn = document.getElementById('saveSshSettingsBtn');
         const sshSettingsStatus = document.getElementById('sshSettingsStatus');
 
+        // 代理列表相关
+        const proxyList = document.getElementById('proxyList');
+        const addProxyBtn = document.getElementById('addProxyBtn');
+        const proxyEditor = document.getElementById('proxyEditor');
+        const proxyEditId = document.getElementById('proxyEditId');
+        const proxyNameInput = document.getElementById('proxyName');
+        const saveProxyBtn = document.getElementById('saveProxyBtn');
+        const cancelProxyBtn = document.getElementById('cancelProxyBtn');
+
+        let proxyConfigs = [];
+        let activeProxyId = null;
+
+        function loadSshSettings() {
+            const savedBg = localStorage.getItem('sshTerminalBg');
+            if (savedBg) {
+                terminalBgColor.value = savedBg;
+                terminalBgColorText.value = savedBg;
+                document.getElementById('terminalContainer').style.background = savedBg;
+                document.getElementById('terminalInput').style.background = savedBg;
+            }
+
+            const savedProxies = localStorage.getItem('sshProxyConfigs');
+            if (savedProxies) {
+                proxyConfigs = JSON.parse(savedProxies);
+            } else {
+                proxyConfigs = [];
+            }
+
+            const savedActiveProxy = localStorage.getItem('sshActiveProxy');
+            activeProxyId = savedActiveProxy || null;
+
+            renderProxyList();
+            proxyEditor.style.display = 'none';
+        }
+
+        function renderProxyList() {
+            if (proxyConfigs.length === 0) {
+                proxyList.innerHTML = '<div style="text-align:center;color:#999;padding:10px;font-size:12px;">暂无代理配置，点击上方"添加代理"按钮添加</div>';
+                return;
+            }
+
+            proxyList.innerHTML = proxyConfigs.map(p => `
+                <div class="proxy-item ${p.id === activeProxyId ? 'active' : ''}" data-id="${p.id}">
+                    <span class="proxy-name">${escapeHtml(p.name)}</span>
+                    <span class="proxy-type">${p.type === 'socks' ? 'SOCKS5' : p.type === 'http' ? 'HTTP' : p.type === 'vless' ? 'VLESS' : '无代理'}</span>
+                    <span class="proxy-delete" data-id="${p.id}" style="opacity:${p.id === activeProxyId ? '1' : '0'};">✕</span>
+                </div>
+            `).join('');
+
+            proxyList.querySelectorAll('.proxy-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('proxy-delete')) {
+                        e.stopPropagation();
+                        deleteProxy(e.target.dataset.id);
+                    } else {
+                        activeProxyId = item.dataset.id;
+                        renderProxyList();
+                    }
+                });
+            });
+        }
+
+        function deleteProxy(id) {
+            proxyConfigs = proxyConfigs.filter(p => p.id !== id);
+            if (activeProxyId === id) {
+                activeProxyId = proxyConfigs.length > 0 ? proxyConfigs[0].id : null;
+            }
+            localStorage.setItem('sshProxyConfigs', JSON.stringify(proxyConfigs));
+            localStorage.setItem('sshActiveProxy', activeProxyId || '');
+            renderProxyList();
+        }
+
+        addProxyBtn.onclick = () => {
+            proxyEditId.value = '';
+            proxyNameInput.value = '';
+            proxyType.value = 'none';
+            proxyHost.value = '';
+            proxyPort.value = '';
+            proxyUser.value = '';
+            proxyPass.value = '';
+            proxyVlessUuid.value = '';
+            proxyVlessSni.value = '';
+            toggleVlessSettings();
+            proxyEditor.style.display = 'block';
+            proxyNameInput.focus();
+        };
+
+        cancelProxyBtn.onclick = () => {
+            proxyEditor.style.display = 'none';
+        };
+
+        saveProxyBtn.onclick = () => {
+            const name = proxyNameInput.value.trim();
+            if (!name) {
+                sshSettingsStatus.textContent = '❌ 请输入代理名称';
+                return;
+            }
+
+            const proxy = {
+                id: proxyEditId.value || Date.now().toString(),
+                name,
+                type: proxyType.value,
+                host: proxyHost.value.trim(),
+                port: proxyPort.value.trim(),
+                user: proxyUser.value.trim(),
+                password: proxyPass.value.trim(),
+                vlessUuid: proxyVlessUuid.value.trim(),
+                vlessSni: proxyVlessSni.value.trim()
+            };
+
+            const idx = proxyConfigs.findIndex(p => p.id === proxy.id);
+            if (idx >= 0) {
+                proxyConfigs[idx] = proxy;
+            } else {
+                proxyConfigs.push(proxy);
+            }
+
+            localStorage.setItem('sshProxyConfigs', JSON.stringify(proxyConfigs));
+
+            if (!activeProxyId) {
+                activeProxyId = proxy.id;
+                localStorage.setItem('sshActiveProxy', activeProxyId);
+            }
+
+            proxyEditor.style.display = 'none';
+            renderProxyList();
+            sshSettingsStatus.textContent = '✅ 代理已保存';
+            setTimeout(() => { sshSettingsStatus.textContent = ''; }, 1500);
+        };
+
         sshSettingsBtn.onclick = () => {
             loadSshSettings();
             sshSettingsModal.classList.add('show');
@@ -5984,23 +6125,12 @@ document.addEventListener('DOMContentLoaded', function() {
         proxyType.addEventListener('change', toggleVlessSettings);
 
         saveSshSettingsBtn.onclick = () => {
-            // 保存终端背景色
             const color = terminalBgColor.value;
             document.getElementById('terminalContainer').style.background = color;
             document.getElementById('terminalInput').style.background = color;
             localStorage.setItem('sshTerminalBg', color);
 
-            // 保存代理设置
-            const proxy = {
-                type: proxyType.value,
-                host: proxyHost.value,
-                port: proxyPort.value,
-                user: proxyUser.value,
-                password: proxyPass.value,
-                vlessUuid: proxyVlessUuid.value,
-                vlessSni: proxyVlessSni.value
-            };
-            localStorage.setItem('sshProxySettings', JSON.stringify(proxy));
+            localStorage.setItem('sshActiveProxy', activeProxyId || '');
 
             sshSettingsStatus.textContent = '✅ 设置已保存';
             setTimeout(() => {
@@ -6009,7 +6139,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 1500);
         };
 
-        // 页面加载时应用保存的设置
         loadSshSettings();
     }
 

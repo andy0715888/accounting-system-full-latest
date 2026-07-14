@@ -8,21 +8,8 @@ const https = require('https');
 const http = require('http');
 const { Client } = require('ssh2');
 const WebSocket = require('ws');
-
-// 代理模块动态导入（兼容 Node.js 18+）
-let SocksProxyAgent = null;
-let HttpProxyAgent = null;
-async function loadProxyModules() {
-    try {
-        const socks = await import('socks-proxy-agent');
-        SocksProxyAgent = socks.SocksProxyAgent;
-    } catch (e) { SocksProxyAgent = null; }
-    try {
-        const httpProxy = await import('http-proxy-agent');
-        HttpProxyAgent = httpProxy.HttpProxyAgent;
-    } catch (e) { HttpProxyAgent = null; }
-}
-loadProxyModules();
+const { SocksProxyAgent } = require('socks-proxy-agent');
+const { HttpProxyAgent } = require('http-proxy-agent');
 
 const { initDatabase, queryOne } = require('./db');
 const authRoutes = require('./routes/auth');
@@ -223,19 +210,11 @@ function startHttp() {
                             const proxyHost = proxy.host;
                             const proxyPort = parseInt(proxy.port);
                             if (proxy.type === 'socks') {
-                                if (!SocksProxyAgent) {
-                                    ws.send(JSON.stringify({ type: 'error', data: 'SOCKS代理模块未加载，请检查依赖安装' }));
-                                    return;
-                                }
                                 const proxyUrl = proxy.user && proxy.password
                                     ? `socks://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
                                     : `socks://${proxyHost}:${proxyPort}`;
                                 agent = new SocksProxyAgent(proxyUrl);
                             } else if (proxy.type === 'http') {
-                                if (!HttpProxyAgent) {
-                                    ws.send(JSON.stringify({ type: 'error', data: 'HTTP代理模块未加载，请检查依赖安装' }));
-                                    return;
-                                }
                                 const proxyUrl = proxy.user && proxy.password
                                     ? `http://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
                                     : `http://${proxyHost}:${proxyPort}`;
