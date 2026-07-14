@@ -209,6 +209,7 @@ function startHttp() {
                         try {
                             const proxyHost = proxy.host;
                             const proxyPort = parseInt(proxy.port);
+                            console.log(`[SSH连接] 使用代理: ${proxy.type.toUpperCase()} ${proxyHost}:${proxyPort}`);
                             if (proxy.type === 'socks') {
                                 const proxyUrl = proxy.user && proxy.password
                                     ? `socks://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
@@ -224,9 +225,12 @@ function startHttp() {
                                 return;
                             }
                         } catch (e) {
+                            console.error('[SSH连接] 代理配置错误:', e.message);
                             ws.send(JSON.stringify({ type: 'error', data: '代理配置错误: ' + e.message }));
                             return;
                         }
+                    } else {
+                        console.log(`[SSH连接] 直接连接: ${host}:${port || 22}`);
                     }
 
                     sshConn = new Client();
@@ -354,6 +358,18 @@ function startHttp() {
                             if (err2) { sendSftpError('上传文件失败: ' + err2.message); return; }
                             if (ws.readyState === WebSocket.OPEN) {
                                 ws.send(JSON.stringify({ type: 'sftp_upload', data: { path, success: true } }));
+                            }
+                        });
+                    });
+                } else if (msg.type === 'sftp_delete') {
+                    const path = msg.path;
+                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        sftpConn.unlink(path, (err2) => {
+                            if (err2) { sendSftpError('删除文件失败: ' + err2.message); return; }
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'sftp_delete', data: { path, success: true } }));
                             }
                         });
                     });

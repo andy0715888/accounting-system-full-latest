@@ -5065,6 +5065,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     handleSftpWrite(msg.data);
                 } else if (msg.type === 'sftp_upload') {
                     handleSftpUpload(msg.data);
+                } else if (msg.type === 'sftp_delete') {
+                    handleSftpDelete(msg.data);
                 } else if (msg.type === 'sftp_error') {
                     handleSftpError(msg.data);
                 }
@@ -5419,6 +5421,7 @@ document.addEventListener('DOMContentLoaded', function() {
         menu.style.top = y + 'px';
         menu.innerHTML = `
             <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
         `;
         document.body.appendChild(menu);
         fileManagerState.contextMenu = menu;
@@ -5433,6 +5436,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 statusEl.textContent = '✅ 路径已复制到剪贴板';
                 setTimeout(() => { statusEl.textContent = ''; }, 2000);
             }
+        };
+
+        menu.querySelector('[data-action="delete-file"]').onclick = () => {
+            hideFmContextMenu();
+            deleteFile(filePath);
         };
 
         setTimeout(() => {
@@ -5562,6 +5570,26 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!overlay) return;
         overlay.querySelector('#fmStatus').style.color = '#f56c6c';
         overlay.querySelector('#fmStatus').textContent = '❌ ' + msg;
+    }
+
+    function deleteFile(filePath) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        showConfirm(`确定要删除文件 "${filePath}" 吗？此操作不可撤销。`, '删除文件').then(async (confirmed) => {
+            if (!confirmed) return;
+            overlay.querySelector('#fmStatus').style.color = '#909399';
+            overlay.querySelector('#fmStatus').textContent = '删除中...';
+            getActiveWs().send(JSON.stringify({ type: 'sftp_delete', path: filePath }));
+        });
+    }
+
+    function handleSftpDelete(data) {
+        const overlay = fileManagerState.overlay;
+        if (!overlay) return;
+        overlay.querySelector('#fmStatus').style.color = '#67c23a';
+        overlay.querySelector('#fmStatus').textContent = '✅ 删除成功';
+        loadFileList(fileManagerState.currentPath);
     }
 
     function formatFileSize(bytes) {
@@ -6105,11 +6133,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sshSettingsModal.classList.remove('show');
         };
 
-        sshSettingsModal.onclick = (e) => {
-            if (e.target === sshSettingsModal) {
-                sshSettingsModal.classList.remove('show');
-            }
-        };
+        
 
         terminalBgColor.addEventListener('input', (e) => {
             terminalBgColorText.value = e.target.value;
