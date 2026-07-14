@@ -113,7 +113,6 @@
                 </div>
             </div>
             <div id="view-hosts" class="view-panel">
-                <h2>🖥️ 主机管理</h2>
                 <div class="hosts-container">
                     <div class="hosts-sidebar">
                         <div class="hosts-toolbar">
@@ -125,15 +124,6 @@
                         </div>
                         <div class="hosts-list" id="hostsList">
                             <div style="text-align:center;color:#999;padding:20px 0;">暂无主机</div>
-                        </div>
-                        <div class="saved-commands-section">
-                            <div class="saved-commands-header">
-                                <span>📁 保存的命令</span>
-                                <button class="tool-btn sm" id="addCmdFolderBtn">➕ 文件夹</button>
-                            </div>
-                            <div class="folders-list" id="foldersList">
-                                <div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>
-                            </div>
                         </div>
                     </div>
                     <div class="hosts-main">
@@ -151,9 +141,20 @@
                                 <div style="color:#999;font-size:14px;">从左侧选择主机发起 SSH 连接</div>
                             </div>
                         </div>
-                        <div class="terminal-input-area">
-                            <input type="text" id="terminalInput" placeholder="输入命令后按回车执行..." disabled />
-                            <button class="tool-btn primary" id="sendCmdBtn" disabled>发送</button>
+                        <div class="terminal-bottom-area">
+                            <div class="terminal-input-area">
+                                <input type="text" id="terminalInput" placeholder="输入命令后按回车执行..." disabled />
+                                <button class="tool-btn primary" id="sendCmdBtn" disabled>发送</button>
+                            </div>
+                            <div class="saved-commands-section">
+                                <div class="saved-commands-header">
+                                    <span>📁 保存的命令</span>
+                                    <button class="tool-btn sm" id="addCmdFolderBtn">➕ 文件夹</button>
+                                </div>
+                                <div class="folders-list" id="foldersList">
+                                    <div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -309,13 +310,11 @@
                         </div>
                     </div>
                     <div class="ssh-setting-group">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                            <h4>代理列表</h4>
-                            <button class="tool-btn sm" id="addProxyBtn">➕ 添加代理</button>
-                        </div>
+                        <h4>代理列表</h4>
                         <div class="proxy-list" id="proxyList">
                             <div style="text-align:center;color:#999;padding:10px;font-size:12px;">暂无代理配置</div>
                         </div>
+                        <button class="tool-btn sm" id="addProxyBtn" style="margin-top:8px;width:100%;">➕ 添加代理</button>
                     </div>
                 </div>
                 <div class="proxy-editor" id="proxyEditor" style="display:none;">

@@ -2132,9 +2132,9 @@ tr.client-row.cut-pending {
 .proxy-item {
     display: flex;
     align-items: center;
+    gap: 8px;
     padding: 8px 12px;
     border-bottom: 1px solid #e4e7ed;
-    cursor: pointer;
     transition: background 0.2s;
 }
 
@@ -2143,22 +2143,26 @@ tr.client-row.cut-pending {
 }
 
 .proxy-item:hover {
+    background: #f5f7fa;
+}
+
+.proxy-item.checked {
     background: #ecf5ff;
 }
 
-.proxy-item.active {
-    background: #409eff;
-    color: #fff;
-}
-
-.proxy-item.active .proxy-delete {
-    color: rgba(255,255,255,0.8);
+.proxy-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #409eff;
+    flex-shrink: 0;
 }
 
 .proxy-name {
     flex: 1;
     font-size: 13px;
     font-weight: 500;
+    color: #303133;
 }
 
 .proxy-type {
@@ -2166,19 +2170,29 @@ tr.client-row.cut-pending {
     padding: 2px 6px;
     border-radius: 4px;
     background: #e4e7ed;
-    margin-right: 8px;
+    color: #606266;
 }
 
-.proxy-item.active .proxy-type {
-    background: rgba(255,255,255,0.2);
+.proxy-edit {
+    font-size: 13px;
+    cursor: pointer;
+    color: #303133;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+}
+
+.proxy-item:hover .proxy-edit {
+    opacity: 1;
 }
 
 .proxy-delete {
     font-size: 14px;
     cursor: pointer;
-    color: #f56c6c;
-    opacity: 0;
+    color: #303133;
+    opacity: 0.5;
     transition: opacity 0.2s;
+    flex-shrink: 0;
 }
 
 .proxy-item:hover .proxy-delete {
@@ -2492,6 +2506,33 @@ tr.client-row.cut-pending {
     padding: 10px 16px;
     background: #2d2d2d;
     border-top: 1px solid #404040;
+}
+
+.terminal-bottom-area {
+    display: flex;
+    gap: 0;
+    border-top: 1px solid #e4e7ed;
+}
+
+.terminal-bottom-area .terminal-input-area {
+    flex: 1;
+    border-top: none;
+}
+
+.terminal-bottom-area .saved-commands-section {
+    width: 260px;
+    border-left: 1px solid #e4e7ed;
+    border-radius: 0;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.terminal-bottom-area .saved-commands-section .folders-list {
+    max-height: none;
+    flex: 1;
+    overflow-y: auto;
 }
 
 .terminal-input-area input {

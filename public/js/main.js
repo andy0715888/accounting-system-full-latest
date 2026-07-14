@@ -6031,15 +6031,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function renderProxyList() {
             if (proxyConfigs.length === 0) {
-                proxyList.innerHTML = '<div style="text-align:center;color:#999;padding:10px;font-size:12px;">暂无代理配置，点击上方"添加代理"按钮添加</div>';
+                proxyList.innerHTML = '<div style="text-align:center;color:#999;padding:10px;font-size:12px;">暂无代理配置，点击下方"添加代理"按钮添加</div>';
                 return;
             }
 
             proxyList.innerHTML = proxyConfigs.map(p => `
-                <div class="proxy-item ${p.id === activeProxyId ? 'active' : ''}" data-id="${p.id}">
+                <div class="proxy-item ${p.id === activeProxyId ? 'checked' : ''}" data-id="${p.id}">
+                    <input type="checkbox" class="proxy-checkbox" data-id="${p.id}" ${p.id === activeProxyId ? 'checked' : ''} />
                     <span class="proxy-name">${escapeHtml(p.name)}</span>
                     <span class="proxy-type">${p.type === 'socks' ? 'SOCKS5' : p.type === 'http' ? 'HTTP' : p.type === 'vless' ? 'VLESS' : '无代理'}</span>
-                    <span class="proxy-delete" data-id="${p.id}" style="opacity:${p.id === activeProxyId ? '1' : '0'};">✕</span>
+                    <span class="proxy-edit" data-id="${p.id}" title="编辑">✏️</span>
+                    <span class="proxy-delete" data-id="${p.id}" title="删除">✕</span>
                 </div>
             `).join('');
 
@@ -6047,19 +6049,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 item.addEventListener('click', (e) => {
                     if (e.target.classList.contains('proxy-delete')) {
                         e.stopPropagation();
-                        deleteProxy(e.target.dataset.id);
-                    } else {
-                        activeProxyId = item.dataset.id;
+                        const id = e.target.dataset.id;
+                        const proxy = proxyConfigs.find(p => p.id === id);
+                        showConfirm(`确定要删除代理 "${proxy ? proxy.name : ''}" 吗？`, '删除代理').then((confirmed) => {
+                            if (confirmed) deleteProxy(id);
+                        });
+                    } else if (e.target.classList.contains('proxy-edit')) {
+                        e.stopPropagation();
+                        editProxy(e.target.dataset.id);
+                    } else if (e.target.classList.contains('proxy-checkbox')) {
+                        e.stopPropagation();
+                        const id = e.target.dataset.id;
+                        if (e.target.checked) {
+                            activeProxyId = id;
+                        } else {
+                            activeProxyId = null;
+                        }
+                        localStorage.setItem('sshActiveProxy', activeProxyId || '');
                         renderProxyList();
                     }
                 });
             });
         }
 
+        function editProxy(id) {
+            const proxy = proxyConfigs.find(p => p.id === id);
+            if (!proxy) return;
+            proxyEditId.value = proxy.id;
+            proxyNameInput.value = proxy.name;
+            proxyType.value = proxy.type || 'none';
+            proxyHost.value = proxy.host || '';
+            proxyPort.value = proxy.port || '';
+            proxyUser.value = proxy.user || '';
+            proxyPass.value = proxy.password || '';
+            proxyVlessUuid.value = proxy.vlessUuid || '';
+            proxyVlessSni.value = proxy.vlessSni || '';
+            toggleVlessSettings();
+            proxyEditor.style.display = 'block';
+            proxyNameInput.focus();
+        }
+
         function deleteProxy(id) {
             proxyConfigs = proxyConfigs.filter(p => p.id !== id);
             if (activeProxyId === id) {
-                activeProxyId = proxyConfigs.length > 0 ? proxyConfigs[0].id : null;
+                activeProxyId = null;
             }
             localStorage.setItem('sshProxyConfigs', JSON.stringify(proxyConfigs));
             localStorage.setItem('sshActiveProxy', activeProxyId || '');
@@ -6112,11 +6145,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             localStorage.setItem('sshProxyConfigs', JSON.stringify(proxyConfigs));
-
-            if (!activeProxyId) {
-                activeProxyId = proxy.id;
-                localStorage.setItem('sshActiveProxy', activeProxyId);
-            }
 
             proxyEditor.style.display = 'none';
             renderProxyList();
