@@ -2050,6 +2050,7 @@ tr.client-row.cut-pending {
     border-radius: 8px;
     background: #fff;
     overflow: hidden;
+    margin-bottom: 12px;
 }
 
 .saved-commands-header {
@@ -2061,6 +2062,39 @@ tr.client-row.cut-pending {
     border-bottom: 1px solid #e4e7ed;
     font-size: 13px;
     font-weight: 500;
+}
+
+.ssh-settings-section {
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.ssh-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e4e7ed;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.ssh-settings-body {
+    padding: 10px 12px;
+}
+
+.ssh-setting-item {
+    margin-bottom: 8px;
+}
+
+.ssh-setting-item label {
+    display: block;
+    font-size: 11px;
+    color: #606266;
+    margin-bottom: 3px;
 }
 
 .folders-list {

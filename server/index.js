@@ -8,6 +8,8 @@ const https = require('https');
 const http = require('http');
 const { Client } = require('ssh2');
 const WebSocket = require('ws');
+const { SocksProxyAgent } = require('socks-proxy-agent');
+const { HttpProxyAgent } = require('http-proxy-agent');
 
 const { initDatabase, queryOne } = require('./db');
 const authRoutes = require('./routes/auth');
@@ -196,10 +198,35 @@ function startHttp() {
                 const msg = JSON.parse(data.toString());
 
                 if (msg.type === 'connect') {
-                    const { host, port, username, password } = msg;
+                    const { host, port, username, password, proxy } = msg;
                     if (!host || !username) {
                         ws.send(JSON.stringify({ type: 'error', data: '缺少连接参数' }));
                         return;
+                    }
+
+                    let agent = null;
+                    if (proxy && proxy.type !== 'none' && proxy.host && proxy.port) {
+                        try {
+                            const proxyHost = proxy.host;
+                            const proxyPort = parseInt(proxy.port);
+                            if (proxy.type === 'socks') {
+                                const proxyUrl = proxy.user && proxy.password
+                                    ? `socks://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
+                                    : `socks://${proxyHost}:${proxyPort}`;
+                                agent = new SocksProxyAgent(proxyUrl);
+                            } else if (proxy.type === 'http') {
+                                const proxyUrl = proxy.user && proxy.password
+                                    ? `http://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
+                                    : `http://${proxyHost}:${proxyPort}`;
+                                agent = new HttpProxyAgent(proxyUrl);
+                            } else if (proxy.type === 'vless') {
+                                ws.send(JSON.stringify({ type: 'error', data: 'VLESS代理暂不支持，请使用SOCKS5或HTTP代理' }));
+                                return;
+                            }
+                        } catch (e) {
+                            ws.send(JSON.stringify({ type: 'error', data: '代理配置错误: ' + e.message }));
+                            return;
+                        }
                     }
 
                     sshConn = new Client();
@@ -247,7 +274,7 @@ function startHttp() {
                         }
                     });
 
-                    sshConn.connect({
+                    const connectOpts = {
                         host,
                         port: port || 22,
                         username,
@@ -256,7 +283,11 @@ function startHttp() {
                         strictVendor: false,
                         keepaliveInterval: 15000,
                         keepaliveCountMax: 3
-                    });
+                    };
+                    if (agent) {
+                        connectOpts.agent = agent;
+                    }
+                    sshConn.connect(connectOpts);
                 } else if (msg.type === 'input') {
                     if (sshStream && sshConn) {
                         sshStream.write(msg.data);

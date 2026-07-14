@@ -3762,8 +3762,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const filteredYears = years.filter(y => parseInt(y.label) <= currentYear);
 
             // 从 state 获取或默认时间范围
-            const monthRange = state.statsMonthRange || 6;
-            const yearRange = state.statsYearRange || 6;
+            const monthRange = isNaN(state.statsMonthRange) ? 6 : state.statsMonthRange;
+            const yearRange = isNaN(state.statsYearRange) ? 6 : state.statsYearRange;
             const recentMonths = monthRange === 0 ? filteredMonths : filteredMonths.slice(-monthRange);
             const recentYears = yearRange === 0 ? filteredYears : filteredYears.slice(-yearRange);
             const maxMonthAmount = Math.max(1, ...recentMonths.map(m => Math.max(Math.abs(m.income), Math.abs(m.expense), Math.abs(m.net))));
@@ -4997,7 +4997,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const pwdRes = await fetch(`/api/hosts/${host.id}/password`);
                 const pwdData = await pwdRes.json();
                 const password = pwdData.password || '';
-                ws.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password }));
+                const proxySettingsStr = localStorage.getItem('sshProxySettings');
+                const proxy = proxySettingsStr ? JSON.parse(proxySettingsStr) : { type: 'none' };
+                ws.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password, proxy }));
             } catch (err) {
                 terminal.innerHTML = `<div style="padding:16px;color:#f56c6c;">获取密码失败: ${err.message}</div>`;
             }
@@ -5903,6 +5905,74 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         fileManagerBtn.onclick = () => {
             openFileManager();
+        };
+
+        const terminalBgColor = document.getElementById('terminalBgColor');
+        const terminalBgColorText = document.getElementById('terminalBgColorText');
+        const saveTerminalBgBtn = document.getElementById('saveTerminalBgBtn');
+
+        terminalBgColor.addEventListener('input', (e) => {
+            terminalBgColorText.value = e.target.value;
+        });
+        terminalBgColorText.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                terminalBgColor.value = val;
+            }
+        });
+        saveTerminalBgBtn.onclick = () => {
+            const color = terminalBgColor.value;
+            document.getElementById('terminalContainer').style.background = color;
+            document.getElementById('terminalInput').style.background = color;
+            localStorage.setItem('sshTerminalBg', color);
+            setStatus('✅ 终端背景色已更新');
+        };
+
+        const savedBg = localStorage.getItem('sshTerminalBg');
+        if (savedBg) {
+            terminalBgColor.value = savedBg;
+            terminalBgColorText.value = savedBg;
+            document.getElementById('terminalContainer').style.background = savedBg;
+            document.getElementById('terminalInput').style.background = savedBg;
+        }
+
+        const proxyType = document.getElementById('proxyType');
+        const proxyHost = document.getElementById('proxyHost');
+        const proxyPort = document.getElementById('proxyPort');
+        const proxyUser = document.getElementById('proxyUser');
+        const proxyPass = document.getElementById('proxyPass');
+        const proxyVlessUuid = document.getElementById('proxyVlessUuid');
+        const proxyVlessSni = document.getElementById('proxyVlessSni');
+        const saveProxyBtn = document.getElementById('saveProxyBtn');
+        const proxyStatus = document.getElementById('proxyStatus');
+
+        const savedProxy = localStorage.getItem('sshProxySettings');
+        if (savedProxy) {
+            try {
+                const proxy = JSON.parse(savedProxy);
+                proxyType.value = proxy.type || 'none';
+                proxyHost.value = proxy.host || '';
+                proxyPort.value = proxy.port || '';
+                proxyUser.value = proxy.user || '';
+                proxyPass.value = proxy.password || '';
+                proxyVlessUuid.value = proxy.vlessUuid || '';
+                proxyVlessSni.value = proxy.vlessSni || '';
+            } catch(e) {}
+        }
+
+        saveProxyBtn.onclick = () => {
+            const proxy = {
+                type: proxyType.value,
+                host: proxyHost.value,
+                port: proxyPort.value,
+                user: proxyUser.value,
+                password: proxyPass.value,
+                vlessUuid: proxyVlessUuid.value,
+                vlessSni: proxyVlessSni.value
+            };
+            localStorage.setItem('sshProxySettings', JSON.stringify(proxy));
+            proxyStatus.textContent = '✅ 代理设置已保存';
+            setTimeout(() => { proxyStatus.textContent = ''; }, 2000);
         };
     }
 

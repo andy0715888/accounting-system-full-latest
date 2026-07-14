@@ -134,6 +134,56 @@
                                 <div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>
                             </div>
                         </div>
+                        <div class="ssh-settings-section">
+                            <div class="ssh-settings-header">
+                                <span>⚙️ SSH设置</span>
+                            </div>
+                            <div class="ssh-settings-body">
+                                <div class="ssh-setting-item">
+                                    <label>终端背景色</label>
+                                    <div style="display:flex;align-items:center;gap:8px;">
+                                        <input type="color" id="terminalBgColor" value="#1e1e1e" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;border-radius:4px;" />
+                                        <input type="text" id="terminalBgColorText" value="#1e1e1e" style="flex:1;font-size:12px;padding:4px;" />
+                                    </div>
+                                    <button class="tool-btn sm" id="saveTerminalBgBtn" style="margin-top:4px;">保存</button>
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>代理类型</label>
+                                    <select id="proxyType" style="width:100%;font-size:12px;padding:4px;">
+                                        <option value="none">无代理</option>
+                                        <option value="socks">SOCKS5</option>
+                                        <option value="http">HTTP</option>
+                                        <option value="vless">VLESS+TLS</option>
+                                    </select>
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>代理地址</label>
+                                    <input type="text" id="proxyHost" placeholder="代理服务器地址" style="width:100%;font-size:12px;padding:4px;" />
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>代理端口</label>
+                                    <input type="number" id="proxyPort" placeholder="端口号" style="width:100%;font-size:12px;padding:4px;" />
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>代理用户名</label>
+                                    <input type="text" id="proxyUser" placeholder="可选" style="width:100%;font-size:12px;padding:4px;" />
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>代理密码</label>
+                                    <input type="password" id="proxyPass" placeholder="可选" style="width:100%;font-size:12px;padding:4px;" />
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>VLESS UUID</label>
+                                    <input type="text" id="proxyVlessUuid" placeholder="VLESS协议UUID" style="width:100%;font-size:12px;padding:4px;" />
+                                </div>
+                                <div class="ssh-setting-item">
+                                    <label>VLESS SNI</label>
+                                    <input type="text" id="proxyVlessSni" placeholder="服务器域名" style="width:100%;font-size:12px;padding:4px;" />
+                                </div>
+                                <button class="tool-btn sm primary" id="saveProxyBtn" style="margin-top:8px;width:100%;">保存代理设置</button>
+                                <span id="proxyStatus" style="font-size:12px;color:#67c23a;"></span>
+                            </div>
+                        </div>
                     </div>
                     <div class="hosts-main">
                         <div class="ssh-tabs" id="sshTabs"></div>
