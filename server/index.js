@@ -6,10 +6,10 @@ const multer = require('multer');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
+const net = require('net');
 const { Client } = require('ssh2');
 const WebSocket = require('ws');
-const { SocksProxyAgent } = require('socks-proxy-agent');
-const { HttpProxyAgent } = require('http-proxy-agent');
+const { SocksClient } = require('socks');
 
 const { initDatabase, queryOne } = require('./db');
 const authRoutes = require('./routes/auth');
@@ -135,6 +135,64 @@ async function startServer() {
     }
 }
 
+// 通过 SOCKS5 代理创建到目标服务器的 TCP socket
+async function createSocksConnection(proxy, targetHost, targetPort) {
+    const proxyOpts = {
+        proxy: {
+            host: proxy.host,
+            port: parseInt(proxy.port),
+            type: 5,
+        },
+        destination: {
+            host: targetHost,
+            port: targetPort,
+        },
+        command: 'connect'
+    };
+    if (proxy.user && proxy.password) {
+        proxyOpts.proxy.userId = proxy.user;
+        proxyOpts.proxy.password = proxy.password;
+    }
+    const { socket } = await SocksClient.createConnection(proxyOpts);
+    return socket;
+}
+
+// 通过 HTTP 代理 CONNECT 隧道创建到目标服务器的 TCP socket
+function createHttpProxyConnection(proxy, targetHost, targetPort) {
+    return new Promise((resolve, reject) => {
+        const proxySocket = net.connect(parseInt(proxy.port), proxy.host, () => {
+            let auth = '';
+            if (proxy.user && proxy.password) {
+                const authStr = Buffer.from(`${proxy.user}:${proxy.password}`).toString('base64');
+                auth = `Proxy-Authorization: Basic ${authStr}\r\n`;
+            }
+            proxySocket.write(
+                `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\n` +
+                `Host: ${targetHost}:${targetPort}\r\n` +
+                auth +
+                `\r\n`
+            );
+        });
+
+        const onData = (data) => {
+            proxySocket.removeListener('data', onData);
+            const response = data.toString();
+            const statusLine = response.split('\r\n')[0];
+            if (statusLine.includes('200')) {
+                resolve(proxySocket);
+            } else {
+                proxySocket.destroy();
+                reject(new Error('HTTP代理CONNECT失败: ' + statusLine));
+            }
+        };
+
+        proxySocket.once('data', onData);
+        proxySocket.on('error', (err) => {
+            reject(new Error('HTTP代理连接错误: ' + err.message));
+        });
+    });
+}
+
 function startHttp() {
     const server = http.createServer(app);
     const wss = new WebSocket.Server({ server, path: '/ssh' });
@@ -204,29 +262,23 @@ function startHttp() {
                         return;
                     }
 
-                    let agent = null;
+                    let sock = null;
                     if (proxy && proxy.type !== 'none' && proxy.host && proxy.port) {
                         try {
                             const proxyHost = proxy.host;
                             const proxyPort = parseInt(proxy.port);
-                            console.log(`[SSH连接] 使用代理: ${proxy.type.toUpperCase()} ${proxyHost}:${proxyPort}`);
+                            console.log(`[SSH连接] 使用代理: ${proxy.type.toUpperCase()} ${proxyHost}:${proxyPort} -> ${host}:${port || 22}`);
                             if (proxy.type === 'socks') {
-                                const proxyUrl = proxy.user && proxy.password
-                                    ? `socks://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
-                                    : `socks://${proxyHost}:${proxyPort}`;
-                                agent = new SocksProxyAgent(proxyUrl);
+                                sock = await createSocksConnection(proxy, host, port || 22);
                             } else if (proxy.type === 'http') {
-                                const proxyUrl = proxy.user && proxy.password
-                                    ? `http://${proxy.user}:${encodeURIComponent(proxy.password)}@${proxyHost}:${proxyPort}`
-                                    : `http://${proxyHost}:${proxyPort}`;
-                                agent = new HttpProxyAgent(proxyUrl);
+                                sock = await createHttpProxyConnection(proxy, host, port || 22);
                             } else if (proxy.type === 'vless') {
                                 ws.send(JSON.stringify({ type: 'error', data: 'VLESS代理暂不支持，请使用SOCKS5或HTTP代理' }));
                                 return;
                             }
                         } catch (e) {
-                            console.error('[SSH连接] 代理配置错误:', e.message);
-                            ws.send(JSON.stringify({ type: 'error', data: '代理配置错误: ' + e.message }));
+                            console.error('[SSH连接] 代理连接失败:', e.message);
+                            ws.send(JSON.stringify({ type: 'error', data: '代理连接失败: ' + e.message }));
                             return;
                         }
                     } else {
@@ -279,8 +331,6 @@ function startHttp() {
                     });
 
                     const connectOpts = {
-                        host,
-                        port: port || 22,
                         username,
                         password: password || '',
                         readyTimeout: 15000,
@@ -288,8 +338,11 @@ function startHttp() {
                         keepaliveInterval: 15000,
                         keepaliveCountMax: 3
                     };
-                    if (agent) {
-                        connectOpts.agent = agent;
+                    if (sock) {
+                        connectOpts.sock = sock;
+                    } else {
+                        connectOpts.host = host;
+                        connectOpts.port = port || 22;
                     }
                     sshConn.connect(connectOpts);
                 } else if (msg.type === 'input') {
