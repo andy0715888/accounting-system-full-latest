@@ -24,7 +24,7 @@ echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
 
 REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
 TAR_URL="https://github.com/andy0715888/accounting-system-full-latest/archive/main.tar.gz"
-BASE_DIR="$HOME/acct"
+BASE_DIR="/acct"
 INSTALL_DIR="$BASE_DIR/accounting-system"
 DB_FILE="data/accounting.db"
 UPLOADS_DIR="uploads"

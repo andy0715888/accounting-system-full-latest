@@ -47,7 +47,7 @@ else
 fi
 
 REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
-BASE_DIR="$HOME/acct"
+BASE_DIR="/acct"
 INSTALL_DIR="$BASE_DIR/accounting-system"
 
 mkdir -p "$BASE_DIR"
