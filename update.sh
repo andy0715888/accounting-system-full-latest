@@ -24,7 +24,8 @@ echo "✅ Node.js 环境: $(node -v), npm: $(npm -v)"
 
 REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
 TAR_URL="https://github.com/andy0715888/accounting-system-full-latest/archive/main.tar.gz"
-INSTALL_DIR="accounting-system"
+BASE_DIR="$HOME/acct"
+INSTALL_DIR="$BASE_DIR/accounting-system"
 DB_FILE="data/accounting.db"
 UPLOADS_DIR="uploads"
 IMAGES_DIR="public/images"
@@ -37,12 +38,12 @@ echo "=========================================="
 echo ""
 
 if [ ! -f "package.json" ] || [ ! -d "server" ]; then
-    if [ -d "$HOME/$INSTALL_DIR" ]; then
-        cd "$HOME/$INSTALL_DIR"
+    if [ -d "$BASE_DIR/accounting-system" ]; then
+        cd "$BASE_DIR/accounting-system"
     elif [ -d "$INSTALL_DIR" ]; then
         cd "$INSTALL_DIR"
     else
-        echo "❌ 未找到项目目录，请先进入 accounting-system 目录"
+        echo "❌ 未找到项目目录，请先进入 acct/accounting-system 目录"
         exit 1
     fi
 fi

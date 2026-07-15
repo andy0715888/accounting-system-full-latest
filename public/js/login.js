@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             loginForm.style.display = 'block';
             registerForm.style.display = 'none';
-            subtitle.textContent = '个人财务管理助手';
+            subtitle.textContent = '个人网络管理助手';
             errorMsg.classList.remove('show');
             setTimeout(() => usernameInput.focus(), 0);
         }

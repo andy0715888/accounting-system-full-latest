@@ -47,7 +47,10 @@ else
 fi
 
 REPO_URL="https://github.com/andy0715888/accounting-system-full-latest.git"
-INSTALL_DIR="accounting-system"
+BASE_DIR="$HOME/acct"
+INSTALL_DIR="$BASE_DIR/accounting-system"
+
+mkdir -p "$BASE_DIR"
 
 if [ -d "$INSTALL_DIR" ]; then
     echo -e "${YELLOW}⚠️  目录 '$INSTALL_DIR' 已存在${NC}"
@@ -67,10 +70,10 @@ if [ "$USE_GIT" = true ]; then
     cd "$INSTALL_DIR"
 else
     TAR_URL="https://github.com/andy0715888/accounting-system-full-latest/archive/main.tar.gz"
-    curl -L -o temp.tar.gz "$TAR_URL"
-    tar -xzf temp.tar.gz
-    mv accounting-system-full-latest-main "$INSTALL_DIR"
-    rm temp.tar.gz
+    curl -L -o "$BASE_DIR/temp.tar.gz" "$TAR_URL"
+    tar -xzf "$BASE_DIR/temp.tar.gz" -C "$BASE_DIR"
+    mv "$BASE_DIR/accounting-system-full-latest-main" "$INSTALL_DIR"
+    rm "$BASE_DIR/temp.tar.gz"
     cd "$INSTALL_DIR"
 fi
 echo -e "${GREEN}✅ 源码下载完成${NC}"
