@@ -5883,8 +5883,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 i = j;
             } else {
                 const ch = text.charAt(i);
-                if (ch === '\r') {
-                    // 回车符：将 result 截断到当前行最后一个 \n 之后
+                if (ch === '\r' && text.charAt(i + 1) !== '\n') {
+                    // 单独的回车符（后面不是换行）：将 result 截断到当前行最后一个 \n 之后
                     const lastNl = result.lastIndexOf('\n');
                     if (lastNl >= 0) {
                         result = result.substring(0, lastNl + 1);
@@ -5892,6 +5892,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         result = '';
                         closeSpan();
                     }
+                    i++;
+                } else if (ch === '\r') {
+                    // \r\n 的 \r，跳过，后面的 \n 会正常处理换行
                     i++;
                 } else if (ch === '<') { result += '&lt;'; i++; }
                 else if (ch === '>') { result += '&gt;'; i++; }
