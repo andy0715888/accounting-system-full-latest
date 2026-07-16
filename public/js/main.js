@@ -5174,7 +5174,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const host = conn.host;
         const isOpen = ws && ws.readyState === WebSocket.OPEN;
 
-        const monitorSection = document.getElementById('serverMonitorSection');
         if (isOpen) {
             title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
@@ -5189,13 +5188,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 output.appendChild(span);
                 output.scrollTop = output.scrollHeight;
             }
-            if (monitorSection) {
-                if (conn.monitorData) {
-                    monitorSection.style.display = 'flex';
-                    updateMonitorUI(conn.monitorData);
-                } else {
-                    monitorSection.style.display = 'none';
-                }
+            if (conn.monitorData) {
+                updateMonitorUI(conn.monitorData);
             }
         } else if (ws && ws.readyState === WebSocket.CONNECTING) {
             title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
@@ -5204,7 +5198,6 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
             fileManagerBtn.style.display = 'none';
-            if (monitorSection) monitorSection.style.display = 'none';
         } else {
             title.textContent = `${host.name} - 已断开`;
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
@@ -5212,7 +5205,6 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
             fileManagerBtn.style.display = 'none';
-            if (monitorSection) monitorSection.style.display = 'none';
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
                 const span = document.createElement('span');
@@ -5615,12 +5607,8 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         doMonitor();
-        monitorTimers[connId] = setInterval(doMonitor, 5000);
+        monitorTimers[connId] = setInterval(doMonitor, 1000);
 
-        const section = document.getElementById('serverMonitorSection');
-        if (section && activeConnId === connId) {
-            section.style.display = 'flex';
-        }
         const status = document.getElementById('monitorStatus');
         if (status) status.classList.remove('offline');
     }
@@ -5631,10 +5619,8 @@ document.addEventListener('DOMContentLoaded', function() {
             delete monitorTimers[connId];
         }
         delete monitorPingStart[connId];
-        const section = document.getElementById('serverMonitorSection');
-        if (section && activeConnId === connId) {
-            section.style.display = 'none';
-        }
+        const status = document.getElementById('monitorStatus');
+        if (status) status.classList.add('offline');
     }
 
     function handleMonitorData(data, connId) {

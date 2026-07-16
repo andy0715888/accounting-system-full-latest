@@ -350,8 +350,7 @@ function startHttp() {
                         ws.send(JSON.stringify({ type: 'monitor_data', error: 'SSH 未连接' }));
                         return;
                     }
-                    const monitorCmd = `echo "{\"uptime\":$(awk '{print int($1)}' /proc/uptime),\"load\":\"$(uptime | awk -F'load average:' '{print $2}' | xargs)\",\"mem_used\":$(free -m | awk 'NR==2{print $3}'),\"mem_total\":$(free -m | awk 'NR==2{print $2}'),\"swap_used\":$(free -m | awk 'NR==3{print $3}'),\"swap_total\":$(free -m | awk 'NR==3{print $2}'),\"cpu\":$(awk '/cpu /{printf "%.0f", ($2+$4)*100/($2+$4+$5)}' /proc/stat)}"`;
-                    sshConn.exec(monitorCmd, (err, stream) => {
+                    sshConn.exec('cat /proc/uptime /proc/stat /proc/meminfo', (err, stream) => {
                         if (err) {
                             ws.send(JSON.stringify({ type: 'monitor_data', error: err.message }));
                             return;
@@ -360,11 +359,53 @@ function startHttp() {
                         stream.on('data', (chunk) => { output += chunk.toString('utf-8'); });
                         stream.on('close', () => {
                             try {
-                                const cleanOutput = output.replace(/[\r\n]/g, '').trim();
-                                const data = JSON.parse(cleanOutput);
-                                if (ws.readyState === WebSocket.OPEN) {
-                                    ws.send(JSON.stringify({ type: 'monitor_data', data }));
+                                const lines = output.split('\n');
+                                let uptime = 0, load = '', memUsed = 0, memTotal = 0, swapUsed = 0, swapTotal = 0, cpu = 0;
+                                let cpuUser = 0, cpuSys = 0, cpuIdle = 0;
+                                lines.forEach(line => {
+                                    const parts = line.trim().split(/\s+/);
+                                    if (parts.length < 2) return;
+                                    if (line.startsWith('cpu ') && parts.length >= 5) {
+                                        cpuUser = parseInt(parts[1]) || 0;
+                                        cpuSys = parseInt(parts[3]) || 0;
+                                        cpuIdle = parseInt(parts[4]) || 0;
+                                    } else if (parts[0] === 'MemTotal:') {
+                                        memTotal = Math.round(parseInt(parts[1]) / 1024);
+                                    } else if (parts[0] === 'MemUsed:' || parts[0] === 'MemAvailable:') {
+                                        if (parts[0] === 'MemUsed:') memUsed = Math.round(parseInt(parts[1]) / 1024);
+                                        else if (memTotal > 0) memUsed = memTotal - Math.round(parseInt(parts[1]) / 1024);
+                                    } else if (parts[0] === 'SwapTotal:') {
+                                        swapTotal = Math.round(parseInt(parts[1]) / 1024);
+                                    } else if (parts[0] === 'SwapUsed:' || parts[0] === 'SwapFree:') {
+                                        if (parts[0] === 'SwapUsed:') swapUsed = Math.round(parseInt(parts[1]) / 1024);
+                                        else if (swapTotal > 0) swapUsed = swapTotal - Math.round(parseInt(parts[1]) / 1024);
+                                    } else if (line.startsWith('0.') && uptime === 0) {
+                                        uptime = Math.round(parseFloat(parts[0]));
+                                    }
+                                });
+                                const memAvailableLine = lines.find(l => l.startsWith('MemAvailable:'));
+                                if (memAvailableLine && memTotal > 0) {
+                                    const avail = parseInt(memAvailableLine.trim().split(/\s+/)[1]);
+                                    if (avail) memUsed = memTotal - Math.round(avail / 1024);
                                 }
+                                if (cpuUser + cpuSys + cpuIdle > 0) {
+                                    cpu = Math.round((cpuUser + cpuSys) * 100 / (cpuUser + cpuSys + cpuIdle));
+                                }
+                                sshConn.exec('uptime', (err2, stream2) => {
+                                    if (err2) {
+                                        ws.send(JSON.stringify({ type: 'monitor_data', data: { uptime, load, mem_used: memUsed, mem_total: memTotal, swap_used: swapUsed, swap_total: swapTotal, cpu } }));
+                                        return;
+                                    }
+                                    let uptimeOutput = '';
+                                    stream2.on('data', (chunk) => { uptimeOutput += chunk.toString('utf-8'); });
+                                    stream2.on('close', () => {
+                                        const match = uptimeOutput.match(/load average:\s*([0-9.,\s]+)$/);
+                                        load = match ? match[1].trim() : '';
+                                        if (ws.readyState === WebSocket.OPEN) {
+                                            ws.send(JSON.stringify({ type: 'monitor_data', data: { uptime, load, mem_used: memUsed, mem_total: memTotal, swap_used: swapUsed, swap_total: swapTotal, cpu } }));
+                                        }
+                                    });
+                                });
                             } catch (e) {
                                 if (ws.readyState === WebSocket.OPEN) {
                                     ws.send(JSON.stringify({ type: 'monitor_data', error: '解析失败: ' + e.message, raw: output }));
