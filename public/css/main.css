@@ -1956,6 +1956,113 @@ tr.client-row.cut-pending {
     overflow-y: auto;
 }
 
+.server-monitor-section {
+    border-bottom: 1px solid #e4e7ed;
+    background: #fff;
+    flex-shrink: 0;
+    max-height: 50%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: #f5f7fa;
+    border-bottom: 1px solid #e4e7ed;
+    font-size: 13px;
+    font-weight: 600;
+    color: #303133;
+    flex-shrink: 0;
+}
+
+.monitor-status {
+    font-size: 10px;
+    color: #67c23a;
+}
+
+.monitor-status.offline {
+    color: #909399;
+}
+
+.monitor-body {
+    padding: 8px 12px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.monitor-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid #f0f2f5;
+    gap: 8px;
+}
+
+.monitor-item:last-child {
+    border-bottom: none;
+}
+
+.monitor-label {
+    color: #606266;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.monitor-value {
+    color: #303133;
+    font-weight: 500;
+    text-align: right;
+}
+
+.monitor-bar-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.monitor-bar {
+    flex: 1;
+    height: 6px;
+    background: #e4e7ed;
+    border-radius: 3px;
+    overflow: hidden;
+    min-width: 40px;
+}
+
+.monitor-bar::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: var(--bar-width, 0%);
+    background: #67c23a;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.monitor-bar.warning::after {
+    background: #e6a23c;
+}
+
+.monitor-bar.danger::after {
+    background: #f56c6c;
+}
+
+.monitor-bar-text {
+    color: #303133;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 50px;
+    text-align: right;
+}
+
 .hosts-toolbar {
     display: flex;
     gap: 8px;

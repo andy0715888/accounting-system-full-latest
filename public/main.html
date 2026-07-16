@@ -147,6 +147,47 @@
                         </div>
                     </div>
                     <div class="hosts-commands-sidebar">
+                        <div class="server-monitor-section" id="serverMonitorSection" style="display:none;">
+                            <div class="monitor-header">
+                                <span>📊 服务器监控</span>
+                                <span class="monitor-status" id="monitorStatus">●</span>
+                            </div>
+                            <div class="monitor-body">
+                                <div class="monitor-item">
+                                    <span class="monitor-label">运行天数</span>
+                                    <span class="monitor-value" id="monitorUptime">-</span>
+                                </div>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">负载</span>
+                                    <span class="monitor-value" id="monitorLoad">-</span>
+                                </div>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">CPU</span>
+                                    <div class="monitor-bar-wrap">
+                                        <div class="monitor-bar" id="monitorCpuBar"></div>
+                                        <span class="monitor-bar-text" id="monitorCpuText">-</span>
+                                    </div>
+                                </div>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">内存</span>
+                                    <div class="monitor-bar-wrap">
+                                        <div class="monitor-bar" id="monitorMemBar"></div>
+                                        <span class="monitor-bar-text" id="monitorMemText">-</span>
+                                    </div>
+                                </div>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">交换</span>
+                                    <div class="monitor-bar-wrap">
+                                        <div class="monitor-bar" id="monitorSwapBar"></div>
+                                        <span class="monitor-bar-text" id="monitorSwapText">-</span>
+                                    </div>
+                                </div>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">延迟</span>
+                                    <span class="monitor-value" id="monitorPing">-</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="saved-commands-section">
                             <div class="saved-commands-header">
                                 <span>📁 保存的命令</span>

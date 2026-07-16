@@ -5041,6 +5041,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         conn.terminalContent = msg.data + '\n';
                     }
                     updateTabStatus(connId, 'connected');
+                    startMonitor(connId);
                 } else if (msg.type === 'output') {
                     if (activeConnId === connId) {
                         appendTerminalOutput(msg.data);
@@ -5066,6 +5067,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     updateTabStatus(connId, 'disconnected');
                     clearInterval(clientPing);
+                    stopMonitor(connId);
                 } else if (msg.type === 'sftp_list') {
                     handleSftpList(msg.data);
                 } else if (msg.type === 'sftp_read') {
@@ -5078,6 +5080,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     handleSftpDelete(msg.data);
                 } else if (msg.type === 'sftp_error') {
                     handleSftpError(msg.data);
+                } else if (msg.type === 'monitor_data') {
+                    handleMonitorData(msg.data, connId);
                 }
             } catch (e) { console.error('消息解析失败:', e); }
         };
@@ -5093,10 +5097,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             updateTabStatus(connId, 'error');
             clearInterval(clientPing);
+            stopMonitor(connId);
         };
 
         ws.onclose = () => {
             clearInterval(clientPing);
+            stopMonitor(connId);
             if (activeConnId === connId && title.textContent.indexOf('已断开') === -1 && title.textContent.indexOf('连接失败') === -1) {
                 title.textContent = `${host.name} - 连接已关闭`;
                 input.disabled = true;
@@ -5168,6 +5174,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const host = conn.host;
         const isOpen = ws && ws.readyState === WebSocket.OPEN;
 
+        const monitorSection = document.getElementById('serverMonitorSection');
         if (isOpen) {
             title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
@@ -5182,6 +5189,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 output.appendChild(span);
                 output.scrollTop = output.scrollHeight;
             }
+            if (monitorSection) {
+                if (conn.monitorData) {
+                    monitorSection.style.display = 'flex';
+                    updateMonitorUI(conn.monitorData);
+                } else {
+                    monitorSection.style.display = 'none';
+                }
+            }
         } else if (ws && ws.readyState === WebSocket.CONNECTING) {
             title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
             terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
@@ -5189,6 +5204,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
             fileManagerBtn.style.display = 'none';
+            if (monitorSection) monitorSection.style.display = 'none';
         } else {
             title.textContent = `${host.name} - 已断开`;
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
@@ -5196,6 +5212,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
             fileManagerBtn.style.display = 'none';
+            if (monitorSection) monitorSection.style.display = 'none';
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
                 const span = document.createElement('span');
@@ -5222,6 +5239,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try { conn.ws.close(); } catch(e) {}
         }
         if (conn.clientPing) clearInterval(conn.clientPing);
+        stopMonitor(connId);
         sshConnections.splice(idx, 1);
 
         if (activeConnId === connId) {
@@ -5579,6 +5597,116 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!overlay) return;
         overlay.querySelector('#fmStatus').style.color = '#f56c6c';
         overlay.querySelector('#fmStatus').textContent = '❌ ' + msg;
+    }
+
+    let monitorTimers = {};
+    let monitorPingStart = {};
+
+    function startMonitor(connId) {
+        stopMonitor(connId);
+        const conn = sshConnections.find(c => c.id === connId);
+        if (!conn || !conn.ws || conn.ws.readyState !== WebSocket.OPEN) return;
+
+        const doMonitor = () => {
+            const c = sshConnections.find(x => x.id === connId);
+            if (!c || !c.ws || c.ws.readyState !== WebSocket.OPEN) return;
+            monitorPingStart[connId] = Date.now();
+            c.ws.send(JSON.stringify({ type: 'monitor' }));
+        };
+
+        doMonitor();
+        monitorTimers[connId] = setInterval(doMonitor, 5000);
+
+        const section = document.getElementById('serverMonitorSection');
+        if (section && activeConnId === connId) {
+            section.style.display = 'flex';
+        }
+        const status = document.getElementById('monitorStatus');
+        if (status) status.classList.remove('offline');
+    }
+
+    function stopMonitor(connId) {
+        if (monitorTimers[connId]) {
+            clearInterval(monitorTimers[connId]);
+            delete monitorTimers[connId];
+        }
+        delete monitorPingStart[connId];
+        const section = document.getElementById('serverMonitorSection');
+        if (section && activeConnId === connId) {
+            section.style.display = 'none';
+        }
+    }
+
+    function handleMonitorData(data, connId) {
+        if (!data || data.error) {
+            console.log('监控数据错误:', data?.error || '无数据');
+            return;
+        }
+        const conn = sshConnections.find(c => c.id === connId);
+        if (!conn) return;
+
+        const pingMs = monitorPingStart[connId] ? Date.now() - monitorPingStart[connId] : null;
+
+        const uptimeSec = parseInt(data.uptime) || 0;
+        const days = Math.floor(uptimeSec / 86400);
+        const hours = Math.floor((uptimeSec % 86400) / 3600);
+        const uptimeStr = days > 0 ? `${days}天${hours}小时` : `${hours}小时`;
+
+        const load = data.load || '-';
+
+        const memUsed = parseInt(data.mem_used) || 0;
+        const memTotal = parseInt(data.mem_total) || 1;
+        const memPercent = Math.round(memUsed * 100 / memTotal);
+        const memStr = `${memUsed}M/${memTotal}M`;
+
+        const swapUsed = parseInt(data.swap_used) || 0;
+        const swapTotal = parseInt(data.swap_total) || 1;
+        const swapPercent = swapTotal > 0 ? Math.round(swapUsed * 100 / swapTotal) : 0;
+        const swapStr = swapTotal > 0 ? `${swapUsed}M/${swapTotal}M` : '0M/0M';
+
+        const cpu = parseInt(data.cpu) || 0;
+
+        conn.monitorData = { uptime: uptimeStr, load, memPercent, memStr, swapPercent, swapStr, cpu, ping: pingMs };
+
+        if (activeConnId === connId) {
+            updateMonitorUI(conn.monitorData);
+        }
+    }
+
+    function updateMonitorUI(d) {
+        if (!d) return;
+        const uptimeEl = document.getElementById('monitorUptime');
+        const loadEl = document.getElementById('monitorLoad');
+        const cpuBar = document.getElementById('monitorCpuBar');
+        const cpuText = document.getElementById('monitorCpuText');
+        const memBar = document.getElementById('monitorMemBar');
+        const memText = document.getElementById('monitorMemText');
+        const swapBar = document.getElementById('monitorSwapBar');
+        const swapText = document.getElementById('monitorSwapText');
+        const pingEl = document.getElementById('monitorPing');
+
+        if (uptimeEl) uptimeEl.textContent = d.uptime || '-';
+        if (loadEl) loadEl.textContent = d.load || '-';
+
+        if (cpuBar) {
+            cpuBar.style.setProperty('--bar-width', (d.cpu || 0) + '%');
+            cpuBar.className = 'monitor-bar' + (d.cpu > 80 ? ' danger' : d.cpu > 60 ? ' warning' : '');
+        }
+        if (cpuText) cpuText.textContent = (d.cpu || 0) + '%';
+
+        if (memBar) {
+            memBar.style.setProperty('--bar-width', (d.memPercent || 0) + '%');
+            memBar.className = 'monitor-bar' + (d.memPercent > 80 ? ' danger' : d.memPercent > 60 ? ' warning' : '');
+        }
+        if (memText) memText.textContent = (d.memPercent || 0) + '% ' + (d.memStr || '');
+
+        if (swapBar) {
+            swapBar.style.setProperty('--bar-width', (d.swapPercent || 0) + '%');
+            swapBar.className = 'monitor-bar' + (d.swapPercent > 80 ? ' danger' : d.swapPercent > 60 ? ' warning' : '');
+        }
+        if (swapText) swapText.textContent = (d.swapPercent || 0) + '% ' + (d.swapStr || '');
+
+        if (pingEl) pingEl.textContent = d.ping ? d.ping + 'ms' : '-';
     }
 
     function deleteFile(filePath) {

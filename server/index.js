@@ -345,6 +345,33 @@ function startHttp() {
                         connectOpts.port = port || 22;
                     }
                     sshConn.connect(connectOpts);
+                } else if (msg.type === 'monitor') {
+                    if (!sshConn) {
+                        ws.send(JSON.stringify({ type: 'monitor_data', error: 'SSH 未连接' }));
+                        return;
+                    }
+                    const monitorCmd = `echo "{\"uptime\":$(awk '{print int($1)}' /proc/uptime),\"load\":\"$(uptime | awk -F'load average:' '{print $2}' | xargs)\",\"mem_used\":$(free -m | awk 'NR==2{print $3}'),\"mem_total\":$(free -m | awk 'NR==2{print $2}'),\"swap_used\":$(free -m | awk 'NR==3{print $3}'),\"swap_total\":$(free -m | awk 'NR==3{print $2}'),\"cpu\":$(awk '/cpu /{printf "%.0f", ($2+$4)*100/($2+$4+$5)}' /proc/stat)}"`;
+                    sshConn.exec(monitorCmd, (err, stream) => {
+                        if (err) {
+                            ws.send(JSON.stringify({ type: 'monitor_data', error: err.message }));
+                            return;
+                        }
+                        let output = '';
+                        stream.on('data', (chunk) => { output += chunk.toString('utf-8'); });
+                        stream.on('close', () => {
+                            try {
+                                const cleanOutput = output.replace(/[\r\n]/g, '').trim();
+                                const data = JSON.parse(cleanOutput);
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'monitor_data', data }));
+                                }
+                            } catch (e) {
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'monitor_data', error: '解析失败: ' + e.message, raw: output }));
+                                }
+                            }
+                        });
+                    });
                 } else if (msg.type === 'input') {
                     if (sshStream && sshConn) {
                         sshStream.write(msg.data);
