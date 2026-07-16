@@ -4807,7 +4807,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         overlay.querySelector('.modal-close').onclick = () => overlay.remove();
         overlay.querySelector('.cancel-host-btn').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
         overlay.querySelector('#saveHostBtn').onclick = async () => {
             const name = overlay.querySelector('#hostNameInput').value.trim();
@@ -5082,6 +5081,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     handleSftpError(msg.data);
                 } else if (msg.type === 'monitor_data') {
                     handleMonitorData(msg.data, connId);
+                } else if (msg.type === 'pong') {
+                    handlePong(connId);
                 }
             } catch (e) { console.error('消息解析失败:', e); }
         };
@@ -5593,6 +5594,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let monitorTimers = {};
     let monitorPingStart = {};
+    let wsPingStart = {};
 
     function startMonitor(connId) {
         stopMonitor(connId);
@@ -5602,12 +5604,22 @@ document.addEventListener('DOMContentLoaded', function() {
         const doMonitor = () => {
             const c = sshConnections.find(x => x.id === connId);
             if (!c || !c.ws || c.ws.readyState !== WebSocket.OPEN) return;
-            monitorPingStart[connId] = Date.now();
             c.ws.send(JSON.stringify({ type: 'monitor' }));
         };
 
+        const doPing = () => {
+            const c = sshConnections.find(x => x.id === connId);
+            if (!c || !c.ws || c.ws.readyState !== WebSocket.OPEN) return;
+            wsPingStart[connId] = Date.now();
+            c.ws.send(JSON.stringify({ type: 'ping' }));
+        };
+
         doMonitor();
-        monitorTimers[connId] = setInterval(doMonitor, 1000);
+        doPing();
+        monitorTimers[connId] = setInterval(() => {
+            doMonitor();
+            doPing();
+        }, 1000);
 
         const status = document.getElementById('monitorStatus');
         if (status) status.classList.remove('offline');
@@ -5619,6 +5631,7 @@ document.addEventListener('DOMContentLoaded', function() {
             delete monitorTimers[connId];
         }
         delete monitorPingStart[connId];
+        delete wsPingStart[connId];
         const status = document.getElementById('monitorStatus');
         if (status) status.classList.add('offline');
     }
@@ -5631,12 +5644,18 @@ document.addEventListener('DOMContentLoaded', function() {
         const conn = sshConnections.find(c => c.id === connId);
         if (!conn) return;
 
-        const pingMs = monitorPingStart[connId] ? Date.now() - monitorPingStart[connId] : null;
-
         const uptimeSec = parseInt(data.uptime) || 0;
         const days = Math.floor(uptimeSec / 86400);
         const hours = Math.floor((uptimeSec % 86400) / 3600);
-        const uptimeStr = days > 0 ? `${days}天${hours}小时` : `${hours}小时`;
+        const mins = Math.floor((uptimeSec % 3600) / 60);
+        let uptimeStr = '';
+        if (days > 0) {
+            uptimeStr = `${days}天${hours}小时`;
+        } else if (hours > 0) {
+            uptimeStr = `${hours}小时${mins}分`;
+        } else {
+            uptimeStr = `${mins}分钟`;
+        }
 
         const load = data.load || '-';
 
@@ -5651,11 +5670,37 @@ document.addEventListener('DOMContentLoaded', function() {
         const swapStr = swapTotal > 0 ? `${swapUsed}M/${swapTotal}M` : '0M/0M';
 
         const cpu = parseInt(data.cpu) || 0;
+        const displayCpu = cpu > 0 || conn.lastCpu !== undefined ? (cpu > 0 ? cpu : conn.lastCpu || 0) : 0;
+        if (cpu > 0) conn.lastCpu = cpu;
 
-        conn.monitorData = { uptime: uptimeStr, load, memPercent, memStr, swapPercent, swapStr, cpu, ping: pingMs };
+        const currentPing = conn.monitorData?.ping;
+
+        conn.monitorData = {
+            uptime: uptimeStr,
+            load,
+            memPercent,
+            memStr,
+            swapPercent,
+            swapStr,
+            cpu: displayCpu,
+            ping: currentPing || null
+        };
 
         if (activeConnId === connId) {
             updateMonitorUI(conn.monitorData);
+        }
+    }
+
+    function handlePong(connId) {
+        const pingMs = wsPingStart[connId] ? Date.now() - wsPingStart[connId] : null;
+        const conn = sshConnections.find(c => c.id === connId);
+        if (!conn) return;
+        if (conn.monitorData) {
+            conn.monitorData.ping = pingMs;
+            if (activeConnId === connId) {
+                const pingEl = document.getElementById('monitorPing');
+                if (pingEl) pingEl.textContent = pingMs ? pingMs + 'ms' : '-';
+            }
         }
     }
 

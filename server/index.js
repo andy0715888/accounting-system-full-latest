@@ -203,6 +203,7 @@ function startHttp() {
         let sftp = null;
         let idleTimer = null;
         let pingTimer = null;
+        let lastCpuStat = null;
         const IDLE_TIMEOUT = 10 * 60 * 1000;
 
         function resetIdleTimer() {
@@ -350,7 +351,7 @@ function startHttp() {
                         ws.send(JSON.stringify({ type: 'monitor_data', error: 'SSH 未连接' }));
                         return;
                     }
-                    sshConn.exec('cat /proc/uptime /proc/stat /proc/meminfo', (err, stream) => {
+                    sshConn.exec('cat /proc/uptime /proc/stat /proc/meminfo 2>&1', (err, stream) => {
                         if (err) {
                             ws.send(JSON.stringify({ type: 'monitor_data', error: err.message }));
                             return;
@@ -360,59 +361,95 @@ function startHttp() {
                         stream.on('close', () => {
                             try {
                                 const lines = output.split('\n');
-                                let uptime = 0, load = '', memUsed = 0, memTotal = 0, swapUsed = 0, swapTotal = 0, cpu = 0;
-                                let cpuUser = 0, cpuSys = 0, cpuIdle = 0;
-                                lines.forEach(line => {
-                                    const parts = line.trim().split(/\s+/);
-                                    if (parts.length < 2) return;
-                                    if (line.startsWith('cpu ') && parts.length >= 5) {
+                                let uptime = 0;
+                                let cpuUser = 0, cpuNice = 0, cpuSys = 0, cpuIdle = 0;
+                                let memTotal = 0, memAvailable = 0;
+                                let swapTotal = 0, swapFree = 0;
+                                let cpuLineFound = false;
+
+                                for (let i = 0; i < lines.length; i++) {
+                                    const line = lines[i].trim();
+                                    if (!line) continue;
+                                    const parts = line.split(/\s+/);
+
+                                    if (!cpuLineFound && line.startsWith('cpu ') && parts.length >= 5) {
                                         cpuUser = parseInt(parts[1]) || 0;
+                                        cpuNice = parseInt(parts[2]) || 0;
                                         cpuSys = parseInt(parts[3]) || 0;
                                         cpuIdle = parseInt(parts[4]) || 0;
-                                    } else if (parts[0] === 'MemTotal:') {
+                                        cpuLineFound = true;
+                                    } else if (parts[0] === 'MemTotal:' && parts[1]) {
                                         memTotal = Math.round(parseInt(parts[1]) / 1024);
-                                    } else if (parts[0] === 'MemUsed:' || parts[0] === 'MemAvailable:') {
-                                        if (parts[0] === 'MemUsed:') memUsed = Math.round(parseInt(parts[1]) / 1024);
-                                        else if (memTotal > 0) memUsed = memTotal - Math.round(parseInt(parts[1]) / 1024);
-                                    } else if (parts[0] === 'SwapTotal:') {
+                                    } else if (parts[0] === 'MemAvailable:' && parts[1]) {
+                                        memAvailable = Math.round(parseInt(parts[1]) / 1024);
+                                    } else if (parts[0] === 'SwapTotal:' && parts[1]) {
                                         swapTotal = Math.round(parseInt(parts[1]) / 1024);
-                                    } else if (parts[0] === 'SwapUsed:' || parts[0] === 'SwapFree:') {
-                                        if (parts[0] === 'SwapUsed:') swapUsed = Math.round(parseInt(parts[1]) / 1024);
-                                        else if (swapTotal > 0) swapUsed = swapTotal - Math.round(parseInt(parts[1]) / 1024);
-                                    } else if (line.startsWith('0.') && uptime === 0) {
+                                    } else if (parts[0] === 'SwapFree:' && parts[1]) {
+                                        swapFree = Math.round(parseInt(parts[1]) / 1024);
+                                    } else if (i === 0 && parts.length >= 2) {
                                         uptime = Math.round(parseFloat(parts[0]));
                                     }
-                                });
-                                const memAvailableLine = lines.find(l => l.startsWith('MemAvailable:'));
-                                if (memAvailableLine && memTotal > 0) {
-                                    const avail = parseInt(memAvailableLine.trim().split(/\s+/)[1]);
-                                    if (avail) memUsed = memTotal - Math.round(avail / 1024);
                                 }
-                                if (cpuUser + cpuSys + cpuIdle > 0) {
-                                    cpu = Math.round((cpuUser + cpuSys) * 100 / (cpuUser + cpuSys + cpuIdle));
+
+                                let cpu = 0;
+                                if (cpuLineFound) {
+                                    const curTotal = cpuUser + cpuNice + cpuSys + cpuIdle;
+                                    if (lastCpuStat) {
+                                        const prevTotal = lastCpuStat.user + lastCpuStat.nice + lastCpuStat.sys + lastCpuStat.idle;
+                                        const totalDiff = curTotal - prevTotal;
+                                        const idleDiff = cpuIdle - lastCpuStat.idle;
+                                        if (totalDiff > 0) {
+                                            cpu = Math.round((totalDiff - idleDiff) * 100 / totalDiff);
+                                            if (cpu < 0) cpu = 0;
+                                            if (cpu > 100) cpu = 100;
+                                        }
+                                    }
+                                    lastCpuStat = { user: cpuUser, nice: cpuNice, sys: cpuSys, idle: cpuIdle };
                                 }
+
+                                const memUsed = memTotal - memAvailable;
+                                const swapUsed = swapTotal - swapFree;
+
                                 sshConn.exec('uptime', (err2, stream2) => {
+                                    let load = '';
                                     if (err2) {
-                                        ws.send(JSON.stringify({ type: 'monitor_data', data: { uptime, load, mem_used: memUsed, mem_total: memTotal, swap_used: swapUsed, swap_total: swapTotal, cpu } }));
+                                        finishMonitor();
                                         return;
                                     }
                                     let uptimeOutput = '';
                                     stream2.on('data', (chunk) => { uptimeOutput += chunk.toString('utf-8'); });
                                     stream2.on('close', () => {
-                                        const match = uptimeOutput.match(/load average:\s*([0-9.,\s]+)$/);
+                                        const match = uptimeOutput.match(/load average:\s*([0-9.,\s]+)/);
                                         load = match ? match[1].trim() : '';
-                                        if (ws.readyState === WebSocket.OPEN) {
-                                            ws.send(JSON.stringify({ type: 'monitor_data', data: { uptime, load, mem_used: memUsed, mem_total: memTotal, swap_used: swapUsed, swap_total: swapTotal, cpu } }));
-                                        }
+                                        finishMonitor();
                                     });
+
+                                    function finishMonitor() {
+                                        if (ws.readyState === WebSocket.OPEN) {
+                                            ws.send(JSON.stringify({
+                                                type: 'monitor_data',
+                                                data: {
+                                                    uptime,
+                                                    load,
+                                                    mem_used: memUsed,
+                                                    mem_total: memTotal,
+                                                    swap_used: swapUsed,
+                                                    swap_total: swapTotal,
+                                                    cpu
+                                                }
+                                            }));
+                                        }
+                                    }
                                 });
                             } catch (e) {
                                 if (ws.readyState === WebSocket.OPEN) {
-                                    ws.send(JSON.stringify({ type: 'monitor_data', error: '解析失败: ' + e.message, raw: output }));
+                                    ws.send(JSON.stringify({ type: 'monitor_data', error: '解析失败: ' + e.message }));
                                 }
                             }
                         });
                     });
+                } else if (msg.type === 'ping') {
+                    ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
                 } else if (msg.type === 'input') {
                     if (sshStream && sshConn) {
                         sshStream.write(msg.data);
