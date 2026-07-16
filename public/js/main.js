@@ -5913,23 +5913,42 @@ document.addEventListener('DOMContentLoaded', function() {
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
             output = document.getElementById('terminalOutput');
         }
+        
+        const conn = getActiveConn();
+        if (!conn) return;
+
         if (type) {
+            conn.terminalContent += text;
             const span = document.createElement('span');
             if (type === 'error') span.style.color = '#f56c6c';
             else if (type === 'warning') span.style.color = '#e6a23c';
             span.textContent = text;
             output.appendChild(span);
-        } else {
-            const span = document.createElement('span');
-            span.innerHTML = ansiToHtml(text);
-            output.appendChild(span);
+            output.scrollTop = output.scrollHeight;
+            return;
         }
-        output.scrollTop = output.scrollHeight;
 
-        const conn = getActiveConn();
-        if (conn) {
-            conn.terminalContent += text;
+        conn.terminalContent += text;
+        
+        let buffer = conn.terminalContent;
+        let hasStandaloneCr = true;
+        while (hasStandaloneCr) {
+            hasStandaloneCr = false;
+            for (let i = 0; i < buffer.length; i++) {
+                if (buffer[i] === '\r' && buffer[i + 1] !== '\n') {
+                    const before = buffer.substring(0, i);
+                    const after = buffer.substring(i + 1);
+                    const lastNl = before.lastIndexOf('\n');
+                    const lineStart = lastNl >= 0 ? lastNl + 1 : 0;
+                    buffer = before.substring(0, lineStart) + after;
+                    hasStandaloneCr = true;
+                    break;
+                }
+            }
         }
+
+        output.innerHTML = ansiToHtml(buffer);
+        output.scrollTop = output.scrollHeight;
     }
 
     function sendCommand(cmd) {
