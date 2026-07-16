@@ -5768,7 +5768,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
 
-    // ANSI 颜色代码解析器，将 SSH 终端颜色转义序列转为 HTML
     function ansiToHtml(text) {
         // ANSI SGR 颜色映射
         const colorMap = {
@@ -5884,11 +5883,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 i = j;
             } else {
                 const ch = text.charAt(i);
-                if (ch === '<') result += '&lt;';
-                else if (ch === '>') result += '&gt;';
-                else if (ch === '&') result += '&amp;';
-                else result += ch;
-                i++;
+                if (ch === '\r') {
+                    // 回车符：将 result 截断到当前行最后一个 \n 之后
+                    const lastNl = result.lastIndexOf('\n');
+                    if (lastNl >= 0) {
+                        result = result.substring(0, lastNl + 1);
+                    } else {
+                        result = '';
+                        closeSpan();
+                    }
+                    i++;
+                } else if (ch === '<') { result += '&lt;'; i++; }
+                else if (ch === '>') { result += '&gt;'; i++; }
+                else if (ch === '&') { result += '&amp;'; i++; }
+                else { result += ch; i++; }
             }
         }
         closeSpan();
@@ -5908,47 +5916,11 @@ document.addEventListener('DOMContentLoaded', function() {
             else if (type === 'warning') span.style.color = '#e6a23c';
             span.textContent = text;
             output.appendChild(span);
-            output.scrollTop = output.scrollHeight;
-            const conn = getActiveConn();
-            if (conn) conn.terminalContent += text;
-            return;
+        } else {
+            const span = document.createElement('span');
+            span.innerHTML = ansiToHtml(text);
+            output.appendChild(span);
         }
-
-        // 处理 \r 回车覆盖逻辑
-        // 如果文本包含 \r 但没有 \n，说明是原地覆盖当前行（如倒计时 15\r14\r13）
-        if (text.includes('\r') && !text.includes('\n')) {
-            const newContent = text.substring(text.lastIndexOf('\r') + 1);
-            const lastSpan = output.lastElementChild;
-            if (lastSpan && lastSpan.tagName === 'SPAN') {
-                lastSpan.innerHTML = ansiToHtml(newContent);
-            } else {
-                const span = document.createElement('span');
-                span.innerHTML = ansiToHtml(newContent);
-                output.appendChild(span);
-            }
-            output.scrollTop = output.scrollHeight;
-            const conn = getActiveConn();
-            if (conn) {
-                const idx = Math.max(conn.terminalContent.lastIndexOf('\n'), conn.terminalContent.lastIndexOf('\r'));
-                conn.terminalContent = (idx >= 0 ? conn.terminalContent.substring(0, idx + 1) : '') + newContent;
-            }
-            return;
-        }
-
-        // 混合 \r 和 \n 的情况：按行处理，每行取最后一个 \r 之后的内容
-        let processedText = text;
-        if (text.includes('\r')) {
-            processedText = text.split('\n').map(line => {
-                if (line.includes('\r')) {
-                    return line.substring(line.lastIndexOf('\r') + 1);
-                }
-                return line;
-            }).join('\n');
-        }
-
-        const span = document.createElement('span');
-        span.innerHTML = ansiToHtml(processedText);
-        output.appendChild(span);
         output.scrollTop = output.scrollHeight;
 
         const conn = getActiveConn();
