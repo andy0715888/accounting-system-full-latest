@@ -1,5 +1,7 @@
 const express = require('express');
 const { query, queryOne, execute } = require('../db');
+const { encrypt, decrypt } = require('../crypto');
+const { logAudit } = require('../audit');
 
 const router = express.Router();
 
@@ -41,9 +43,10 @@ router.post('/', requireAuth, async (req, res) => {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             userId, name, host, port || 22, username,
-            password || null, remark || null, order
+            encrypt(password || null), remark || null, order
         ]);
 
+        logAudit(userId, 'host_create', `${name} (${host}:${port || 22})`);
         res.json({ success: true, id: result.lastID, message: '主机添加成功' });
     } catch (err) {
         console.error('添加主机错误:', err);
@@ -57,7 +60,7 @@ router.put('/:id', requireAuth, async (req, res) => {
         const hostId = req.params.id;
         const { name, host, port, username, password, remark, sort_order } = req.body;
 
-        const existing = await queryOne('SELECT id FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        const existing = await queryOne('SELECT id, name FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
         if (!existing) return res.status(404).json({ error: '主机不存在' });
 
         const updates = [];
@@ -66,7 +69,7 @@ router.put('/:id', requireAuth, async (req, res) => {
         if (host !== undefined) { updates.push('host = ?'); params.push(host); }
         if (port !== undefined) { updates.push('port = ?'); params.push(port || 22); }
         if (username !== undefined) { updates.push('username = ?'); params.push(username); }
-        if (password !== undefined) { updates.push('password = ?'); params.push(password || null); }
+        if (password !== undefined) { updates.push('password = ?'); params.push(encrypt(password || null)); }
         if (remark !== undefined) { updates.push('remark = ?'); params.push(remark || null); }
         if (sort_order !== undefined) { updates.push('sort_order = ?'); params.push(sort_order); }
 
@@ -74,6 +77,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 
         params.push(hostId);
         await execute(`UPDATE hosts SET ${updates.join(', ')} WHERE id = ?`, params);
+        logAudit(userId, 'host_update', `${existing.name || ''}#${hostId}`);
         res.json({ success: true, message: '更新成功' });
     } catch (err) {
         console.error('更新主机错误:', err);
@@ -85,10 +89,11 @@ router.delete('/:id', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hostId = req.params.id;
-        const existing = await queryOne('SELECT id FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        const existing = await queryOne('SELECT id, name, host FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
         if (!existing) return res.status(404).json({ error: '主机不存在' });
 
         await execute('DELETE FROM hosts WHERE id = ?', [hostId]);
+        logAudit(userId, 'host_delete', `${existing.name || ''} (${existing.host || ''})`);
         res.json({ success: true, message: '删除成功' });
     } catch (err) {
         console.error('删除主机错误:', err);
@@ -100,9 +105,11 @@ router.get('/:id/password', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hostId = req.params.id;
-        const host = await queryOne('SELECT password FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        const host = await queryOne('SELECT name, password FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
         if (!host) return res.status(404).json({ error: '主机不存在' });
-        res.json({ password: host.password || '' });
+        logAudit(userId, 'host_password_view', `${host.name || ''}#${hostId}`);
+        // decrypt 兼容旧的明文密码（无冒号分隔符则原样返回）
+        res.json({ password: decrypt(host.password) || '' });
     } catch (err) {
         console.error('获取主机密码错误:', err);
         res.status(500).json({ error: '服务器错误' });

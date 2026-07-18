@@ -10,8 +10,11 @@ const net = require('net');
 const { Client } = require('ssh2');
 const WebSocket = require('ws');
 const { SocksClient } = require('socks');
+const cookieParser = require('cookie-parser');
 
-const { initDatabase, queryOne } = require('./db');
+const { initDatabase, queryOne, query } = require('./db');
+const { generateSecret } = require('./crypto');
+const { logAudit } = require('./audit');
 const authRoutes = require('./routes/auth');
 const recordRoutes = require('./routes/records');
 const columnRoutes = require('./routes/columns');
@@ -31,9 +34,53 @@ dirs.forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+// 持久化的 Session Secret：保存到文件，重启后仍能保持会话
+const SECRET_FILE = path.join(__dirname, '../data/.session_secret');
+let sessionSecret;
+if (process.env.SESSION_SECRET) {
+    sessionSecret = process.env.SESSION_SECRET;
+} else if (fs.existsSync(SECRET_FILE)) {
+    sessionSecret = fs.readFileSync(SECRET_FILE, 'utf8').trim();
+} else {
+    sessionSecret = generateSecret(64);
+    fs.writeFileSync(SECRET_FILE, sessionSecret, { mode: 0o600 });
+}
+
+// CORS：只允许同源
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// CSRF 防护：检查 Origin 头
+app.use((req, res, next) => {
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+        const origin = req.headers.origin || req.headers.referer;
+        const host = req.headers.host;
+        // 允许同源请求
+        if (origin) {
+            try {
+                const originUrl = new URL(origin);
+                if (originUrl.host !== host) {
+                    return res.status(403).json({ error: '跨站请求被拒绝' });
+                }
+            } catch {
+                return res.status(403).json({ error: '无效的请求来源' });
+            }
+        }
+    }
+    next();
+});
+
+// 安全响应头
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+});
+
 app.use(express.static('public', {
     etag: false,
     lastModified: false,
@@ -46,28 +93,69 @@ app.use(express.static('public', {
 // 托管上传目录，使背景图片等可被浏览器访问
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-app.use(session({
-    secret: 'accounting-system-secret-key-2024',
+const sessionMiddleware = session({
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
-}));
+    rolling: true,
+    cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true',
+        sameSite: 'strict',
+        maxAge: 24 * 60 * 60 * 1000
+    }
+});
+app.use(sessionMiddleware);
+// 保存 session 中间件引用，供 WebSocket 异步认证使用
+app.set('sessionMiddleware', sessionMiddleware);
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'uploads/'),
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname);
         const name = path.basename(file.originalname, ext);
-        cb(null, `${name}-${Date.now()}${ext}`);
+        // 生成安全的文件名，防止路径遍历
+        const safeName = name.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_');
+        cb(null, `${safeName}-${Date.now()}${ext}`);
     }
 });
+
+// 文件签名（magic bytes）验证
+const FILE_SIGNATURES = {
+    'image/jpeg': [0xFF, 0xD8, 0xFF],
+    'image/png': [0x89, 0x50, 0x4E, 0x47],
+    'image/gif': [0x47, 0x49, 0x46, 0x38],
+    'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF
+    'image/x-icon': [0x00, 0x00, 0x01, 0x00],
+    'image/svg+xml': null // SVG是文本，通过内容检查
+};
+
+function validateFileContent(filePath, mimetype) {
+    const header = fs.readFileSync(filePath, { start: 0, end: 12 });
+    const sig = FILE_SIGNATURES[mimetype];
+    if (sig === null) {
+        // SVG：检查是否包含 <svg 和是否有 <script
+        const content = fs.readFileSync(filePath, 'utf8');
+        if (!/<svg/i.test(content)) return false;
+        if (/<script|onerror|onload|javascript:/i.test(content)) return false;
+        return true;
+    }
+    if (!sig) return true;
+    for (let i = 0; i < sig.length; i++) {
+        if (header[i] !== sig[i]) return false;
+    }
+    return true;
+}
+
 const upload = multer({
     storage,
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        const types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml'];
-        if (types.includes(file.mimetype)) cb(null, true);
-        else cb(new Error('只支持图片格式'));
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml'];
+        if (!allowedTypes.includes(file.mimetype)) {
+            return cb(new Error('不支持的文件类型'));
+        }
+        cb(null, true);
     }
 });
 
@@ -83,6 +171,12 @@ app.post('/api/upload', requireUploadAuth, (req, res) => {
             return res.status(400).json({ error: message });
         }
         if (!req.file) return res.status(400).json({ error: '请上传图片' });
+        // 验证文件内容（magic bytes）
+        if (!validateFileContent(req.file.path, req.file.mimetype)) {
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: '文件内容与类型不匹配' });
+        }
+        logAudit(req.session.userId, 'upload', `文件: ${req.file.filename}`);
         res.json({ success: true, url: `/uploads/${req.file.filename}` });
     });
 });
@@ -108,6 +202,24 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
 app.get('/main', (req, res) => res.sendFile(path.join(__dirname, '../public/main.html')));
+
+// 兜底错误处理：避免向客户端泄露堆栈/内部信息
+app.use((req, res) => {
+    res.status(404).json({ error: '接口不存在' });
+});
+
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+    // multer 等中间件抛出的已知错误
+    if (err && err.message && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: '图片不能超过 10MB' });
+    }
+    if (err && err.message === '不支持的文件类型') {
+        return res.status(400).json({ error: err.message });
+    }
+    console.error('未处理错误:', err);
+    res.status(500).json({ error: '服务器内部错误' });
+});
 
 async function startServer() {
     let certPath = null, keyPath = null;
@@ -195,9 +307,58 @@ function createHttpProxyConnection(proxy, targetHost, targetPort) {
 
 function startHttp() {
     const server = http.createServer(app);
-    const wss = new WebSocket.Server({ server, path: '/ssh' });
+    // WebSocket 端点必须先通过 verifyClient 检查 cookie 存在性，
+    // 真正的 session 校验在 connection 事件里异步完成
+    const wss = new WebSocket.Server({
+        server,
+        path: '/ssh',
+        verifyClient: (info) => {
+            // 快速拒绝没有 cookie 的连接（避免无谓的握手开销）
+            return !!info.req.headers.cookie;
+        }
+    });
 
-    wss.on('connection', (ws) => {
+    const cookieLib = require('cookie');
+    const signedCookie = require('cookie-parser').signedCookie;
+
+    // 异步校验 WebSocket 升级请求是否携带有效登录 session
+    function verifyWsSession(req, callback) {
+        const cookieStr = req.headers.cookie || '';
+        const cookies = cookieLib.parse(cookieStr);
+        const connectSid = cookies['connect.sid'];
+        if (!connectSid) {
+            callback(null);
+            return;
+        }
+        const sessionId = signedCookie(connectSid, sessionSecret);
+        if (!sessionId) {
+            callback(null);
+            return;
+        }
+        sessionMiddleware.sessionStore.get(sessionId, (err, session) => {
+            if (err || !session || !session.userId) {
+                callback(null);
+                return;
+            }
+            callback({ userId: session.userId, username: session.username });
+        });
+    }
+
+    wss.on('connection', (ws, req) => {
+        // 异步校验 session：未登录则直接关闭连接
+        verifyWsSession(req, (sessionUser) => {
+            if (!sessionUser) {
+                try {
+                    ws.send(JSON.stringify({ type: 'disconnected', data: '未登录，连接被拒绝' }));
+                    ws.close(4401, '未授权');
+                } catch {}
+                return;
+            }
+            handleWsConnection(ws, req, sessionUser);
+        });
+    });
+
+    function handleWsConnection(ws, req, sessionUser) {
         let sshConn = null;
         let sshStream = null;
         let sftp = null;
@@ -251,6 +412,38 @@ function startHttp() {
             });
         }
 
+        // SFTP 路径安全化：规范化路径，禁止 .. 逃逸，拒绝系统关键目录写入/删除
+        // 注：用户已通过 SSH 登录目标主机，这里仅做基本防护避免误操作和明显滥用
+        const SFTP_PROTECTED_DIRS = ['/proc', '/sys', '/dev', '/boot', '/run'];
+        function sanitizeSftpPath(rawPath, isWrite = false) {
+            if (!rawPath || typeof rawPath !== 'string') return null;
+            // 拒绝空字节、回车换行注入
+            if (/[\0\r\n]/.test(rawPath)) return null;
+            // 转绝对路径（基于 /）
+            let p = rawPath.trim();
+            if (!p.startsWith('/')) p = '/' + p;
+            // 规范化：拆段，处理 . 和 ..
+            const segs = p.split('/');
+            const out = [];
+            for (const s of segs) {
+                if (s === '' || s === '.') continue;
+                if (s === '..') {
+                    if (out.length === 0) return null; // 逃逸根目录，拒绝
+                    out.pop();
+                    continue;
+                }
+                out.push(s);
+            }
+            let normalized = '/' + out.join('/');
+            // 写/删操作额外保护关键系统目录
+            if (isWrite) {
+                for (const d of SFTP_PROTECTED_DIRS) {
+                    if (normalized === d || normalized.startsWith(d + '/')) return null;
+                }
+            }
+            return normalized;
+        }
+
         ws.on('message', async (data) => {
             resetIdleTimer();
             try {
@@ -290,6 +483,7 @@ function startHttp() {
 
                     sshConn.on('ready', () => {
                         ws.send(JSON.stringify({ type: 'connected', data: 'SSH 连接成功' }));
+                        logAudit(sessionUser.userId, 'ssh_connect', `${username}@${host}:${port || 22}`);
 
                         sshConn.shell({ cols: 120, rows: 40 }, (err, stream) => {
                             if (err) {
@@ -466,7 +660,9 @@ function startHttp() {
                         sftp = null;
                     }
                 } else if (msg.type === 'sftp_list') {
-                    const path = msg.path || '.';
+                    const rawPath = msg.path || '.';
+                    const path = rawPath === '.' ? '.' : sanitizeSftpPath(rawPath, false);
+                    if (!path) { sendSftpError('非法的路径'); return; }
                     ensureSftp((err, sftpConn) => {
                         if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
                         sftpConn.readdir(path, (err2, list) => {
@@ -483,8 +679,8 @@ function startHttp() {
                         });
                     });
                 } else if (msg.type === 'sftp_read') {
-                    const path = msg.path;
-                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    const path = sanitizeSftpPath(msg.path, false);
+                    if (!path) { sendSftpError('文件路径不能为空或非法'); return; }
                     ensureSftp((err, sftpConn) => {
                         if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
                         sftpConn.readFile(path, 'utf-8', (err2, data) => {
@@ -495,37 +691,42 @@ function startHttp() {
                         });
                     });
                 } else if (msg.type === 'sftp_write') {
-                    const { path, content } = msg;
-                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    const path = sanitizeSftpPath(msg.path, true);
+                    if (!path) { sendSftpError('文件路径不能为空或非法'); return; }
+                    const { content } = msg;
                     ensureSftp((err, sftpConn) => {
                         if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
                         sftpConn.writeFile(path, content || '', 'utf-8', (err2) => {
                             if (err2) { sendSftpError('写入文件失败: ' + err2.message); return; }
+                            logAudit(sessionUser.userId, 'sftp_write', path);
                             if (ws.readyState === WebSocket.OPEN) {
                                 ws.send(JSON.stringify({ type: 'sftp_write', data: { path, success: true } }));
                             }
                         });
                     });
                 } else if (msg.type === 'sftp_upload') {
-                    const { path, content } = msg;
-                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    const path = sanitizeSftpPath(msg.path, true);
+                    if (!path) { sendSftpError('文件路径不能为空或非法'); return; }
+                    const { content } = msg;
                     ensureSftp((err, sftpConn) => {
                         if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
                         const buf = Buffer.from(content, 'base64');
                         sftpConn.writeFile(path, buf, (err2) => {
                             if (err2) { sendSftpError('上传文件失败: ' + err2.message); return; }
+                            logAudit(sessionUser.userId, 'sftp_upload', `${path} (${buf.length} bytes)`);
                             if (ws.readyState === WebSocket.OPEN) {
                                 ws.send(JSON.stringify({ type: 'sftp_upload', data: { path, success: true } }));
                             }
                         });
                     });
                 } else if (msg.type === 'sftp_delete') {
-                    const path = msg.path;
-                    if (!path) { sendSftpError('文件路径不能为空'); return; }
+                    const path = sanitizeSftpPath(msg.path, true);
+                    if (!path) { sendSftpError('文件路径不能为空或非法'); return; }
                     ensureSftp((err, sftpConn) => {
                         if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
                         sftpConn.unlink(path, (err2) => {
                             if (err2) { sendSftpError('删除文件失败: ' + err2.message); return; }
+                            logAudit(sessionUser.userId, 'sftp_delete', path);
                             if (ws.readyState === WebSocket.OPEN) {
                                 ws.send(JSON.stringify({ type: 'sftp_delete', data: { path, success: true } }));
                             }
@@ -535,7 +736,8 @@ function startHttp() {
             } catch (err) {
                 console.error('WebSocket 消息处理错误:', err);
                 if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'error', data: '处理错误: ' + err.message }));
+                    // 不向客户端泄露内部错误细节
+                    ws.send(JSON.stringify({ type: 'error', data: '请求处理失败' }));
                 }
             }
         });
@@ -551,9 +753,10 @@ function startHttp() {
         });
 
         ws.on('error', (err) => {
+            // 仅记录日志，不向客户端发送细节
             console.error('WebSocket 错误:', err.message);
         });
-    });
+    }
 
     server.listen(PORT, () => {
         console.log(`📊 网络管理系统已启动 (HTTP) 端口 ${PORT}`);

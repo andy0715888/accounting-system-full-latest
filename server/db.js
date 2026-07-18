@@ -2,6 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcrypt');
+const { generateRandomPassword } = require('./crypto');
 
 const DB_PATH = path.join(__dirname, '../data/accounting.db');
 let db = null;
@@ -174,17 +175,24 @@ function createTables() {
 }
 
 function createDefaultAdmin() {
-    const username = 'andy';
-    const password = 'andy0715';
-    const hashedPassword = bcrypt.hashSync(password, 10);
+    const username = process.env.ADMIN_USERNAME || 'admin';
+    const password = process.env.ADMIN_PASSWORD || generateRandomPassword();
 
     db.get('SELECT id FROM users WHERE username = ?', [username], (err, row) => {
         if (err) return;
         if (!row) {
+            const hashedPassword = bcrypt.hashSync(password, 10);
             db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword], function(err) {
                 if (err) return;
                 const newUserId = this.lastID;
-                console.log('✅ 默认管理员账号已创建: andy / andy0715');
+                console.log('✅ 管理员账号已创建');
+                console.log(`   用户名: ${username}`);
+                console.log(`   密码: ${password}`);
+                console.log('   ⚠️  请立即登录并修改密码！');
+                // 将密码写入一次性文件，方便用户查看
+                const credFile = path.join(__dirname, '../data/.admin_credentials');
+                fs.writeFileSync(credFile, `用户名: ${username}\n密码: ${password}\n\n请登录后立即修改密码并删除此文件！\n`, { mode: 0o600 });
+                console.log(`   凭证已保存到: ${credFile}`);
                 createDefaultTabForUser(newUserId);
             });
         } else {
