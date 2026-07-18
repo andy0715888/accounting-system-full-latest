@@ -46,6 +46,9 @@ if (process.env.SESSION_SECRET) {
     fs.writeFileSync(SECRET_FILE, sessionSecret, { mode: 0o600 });
 }
 
+// 显式创建 session store，供 express-session 和 WebSocket 认证共享使用
+const sessionStore = new session.MemoryStore();
+
 // CORS：只允许同源
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '200mb' }));
@@ -98,6 +101,7 @@ const sessionMiddleware = session({
     resave: false,
     saveUninitialized: false,
     rolling: true,
+    store: sessionStore,
     cookie: {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true',
@@ -108,6 +112,7 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 // 保存 session 中间件引用，供 WebSocket 异步认证使用
 app.set('sessionMiddleware', sessionMiddleware);
+app.set('sessionStore', sessionStore);
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'uploads/'),
@@ -335,7 +340,7 @@ function startHttp() {
             callback(null);
             return;
         }
-        sessionMiddleware.sessionStore.get(sessionId, (err, session) => {
+        sessionStore.get(sessionId, (err, session) => {
             if (err || !session || !session.userId) {
                 callback(null);
                 return;
