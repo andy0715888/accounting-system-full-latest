@@ -2184,35 +2184,109 @@ document.addEventListener('DOMContentLoaded', function() {
                 const record = state.records.find(r => r.id === id);
                 if (record && !isSimpleTab()) {
                     const unitPrice = parseExpenseUnitPrice(record.data.expense);
-                    if (unitPrice > 0) {
-                        const d = new Date();
-                        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                        // 首次添加明细时，日期用 host_purchase（如果存在）
-                        let useDate = today;
-                        if (!record._hostExpenseDetails || record._hostExpenseDetails.length === 0) {
-                            const hp = record.data.host_purchase || '';
-                            if (/^\d{4}-\d{2}-\d{2}/.test(hp)) useDate = hp.substring(0, 10);
-                        }
-                        try {
-                            const resp = await API.post('/host-expense', {
-                                record_id: id,
-                                unit_price: unitPrice,
-                                expense_date: useDate
-                            });
-                            if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
-                            record._hostExpenseDetails.push({
-                                id: resp.id,
-                                unit_price: resp.unit_price,
-                                expense_date: resp.expense_date
-                            });
-                            record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
-                        } catch (err) { console.error('新增明细失败:', err); }
+                    if (unitPrice <= 0) {
+                        // 单价为空：回退月数，提示用户先在支出列填单价
+                        val--;
+                        input.value = val;
+                        setStatus('请先点击支出列填写单价，再增加月数');
+                        setTimeout(() => setStatus('就绪'), 2500);
+                        // 直接打开主机支出明细弹窗，方便用户填单价
+                        openHostExpenseModal(id);
+                        return;
                     }
+                    const d = new Date();
+                    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    // 首次添加明细时，日期用 host_purchase（如果存在）
+                    let useDate = today;
+                    if (!record._hostExpenseDetails || record._hostExpenseDetails.length === 0) {
+                        const hp = record.data.host_purchase || '';
+                        if (/^\d{4}-\d{2}-\d{2}/.test(hp)) useDate = hp.substring(0, 10);
+                    }
+                    try {
+                        const resp = await API.post('/host-expense', {
+                            record_id: id,
+                            unit_price: unitPrice,
+                            expense_date: useDate
+                        });
+                        if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
+                        record._hostExpenseDetails.push({
+                            id: resp.id,
+                            unit_price: resp.unit_price,
+                            expense_date: resp.expense_date
+                        });
+                        record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
+                    } catch (err) { console.error('新增明细失败:', err); }
                 }
                 handleCellChange(input);
             };
         });
-        $$('.months-input').forEach(input => { input.onchange = function() { handleCellChange(this); }; });
+        $$('.months-input').forEach(input => {
+            input.onchange = async function() {
+                const id = parseInt(this.dataset.id);
+                const record = state.records.find(r => r.id === id);
+                if (!record) { handleCellChange(this); return; }
+                // 独享/共享标签：检测月数变化，同步明细（增删差额笔数）
+                if (!isSimpleTab()) {
+                    const newVal = Math.max(0, parseInt(this.value) || 0);
+                    const oldVal = parseInt(record.data.months) || 0;
+                    const diff = newVal - oldVal;
+                    if (diff > 0) {
+                        // 增加 diff 笔明细
+                        const unitPrice = parseExpenseUnitPrice(record.data.expense);
+                        if (unitPrice <= 0) {
+                            // 单价为空：回退月数，提示用户先填单价
+                            this.value = oldVal;
+                            setStatus('请先点击支出列填写单价，再增加月数');
+                            setTimeout(() => setStatus('就绪'), 2500);
+                            openHostExpenseModal(id);
+                            return;
+                        }
+                        for (let i = 0; i < diff; i++) {
+                            // 首笔明细日期用 host_purchase
+                            let useDate;
+                            const d = new Date();
+                            const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                            if (!record._hostExpenseDetails || record._hostExpenseDetails.length === 0) {
+                                const hp = record.data.host_purchase || '';
+                                useDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
+                            } else {
+                                useDate = today;
+                            }
+                            try {
+                                const resp = await API.post('/host-expense', {
+                                    record_id: id,
+                                    unit_price: unitPrice,
+                                    expense_date: useDate
+                                });
+                                if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
+                                record._hostExpenseDetails.push({
+                                    id: resp.id,
+                                    unit_price: resp.unit_price,
+                                    expense_date: resp.expense_date
+                                });
+                            } catch (err) { console.error('同步新增明细失败:', err); }
+                        }
+                        record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
+                    } else if (diff < 0) {
+                        // 删除 |diff| 笔最晚的明细
+                        for (let i = 0; i < -diff; i++) {
+                            if (!record._hostExpenseDetails || record._hostExpenseDetails.length === 0) break;
+                            try {
+                                await API.delete('/host-expense/latest/' + id);
+                                record._hostExpenseDetails.sort((a, b) => {
+                                    const da = a.expense_date || '', db = b.expense_date || '';
+                                    if (da !== db) return da < db ? -1 : 1;
+                                    return a.id - b.id;
+                                });
+                                record._hostExpenseDetails.pop();
+                            } catch (err) { console.error('同步删除明细失败:', err); }
+                        }
+                        record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
+                    }
+                }
+                handleCellChange(this);
+            };
+        });
 
         // 地址下拉
         $$('.address-select').forEach(sel => {
@@ -2318,18 +2392,19 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
-        // 支出交互（点击显示文字切换为编辑 / 有明细时打开弹窗）
+        // 支出交互（独享/共享标签：点击直接打开主机支出明细弹窗；普通记账标签：旧逻辑切换编辑）
         $$('.expense-display').forEach(display => {
             display.addEventListener('click', function(e) {
                 const parent = this.parentElement; // .expense-inline
                 const id = parseInt(parent.dataset.id || parent.closest('tr').dataset.id);
                 const record = state.records.find(r => r.id === id);
                 if (!record) return;
-                // 若已有明细，点击直接打开主机支出明细弹窗
-                if (record._hostExpenseDetails && record._hostExpenseDetails.length > 0) {
+                // 独享/共享标签：无论有无明细，点击都打开弹窗
+                if (!isSimpleTab()) {
                     openHostExpenseModal(id);
                     return;
                 }
+                // 普通记账标签：保持旧的"点击切换为编辑"逻辑（简单标签的支出列走 _expenseTotal 弹窗，不会走到这里）
                 const input = parent.querySelector('.expense-input');
                 const td = parent.closest('td');
                 this.style.display = 'none';
