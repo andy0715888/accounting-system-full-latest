@@ -3486,15 +3486,23 @@ document.addEventListener('DOMContentLoaded', function() {
             incomeList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无收入记录</div>';
             return;
         }
-        incomeList.innerHTML = state.incomeRecords.map(r => `
+        incomeList.innerHTML = `
+            <div class="income-list-header">
+                <span class="col-id">#ID</span>
+                <span class="col-amount">金额</span>
+                <span class="col-date">日期</span>
+                <span class="col-remark">备注</span>
+                <span class="col-action">操作</span>
+            </div>
+        ` + state.incomeRecords.map(r => `
             <div class="income-item" data-id="${r.id}">
-                <div class="income-item-info" style="flex:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                    <span style="color:#67c23a;font-size:12px;">#${r.id}</span>
-                    <input type="number" class="income-amount-input" data-id="${r.id}" value="${r.amount}" step="0.01" min="0" style="width:90px;" />
-                    <input type="date" class="income-date-input" data-id="${r.id}" value="${escapeAttr(r.income_date || '')}" style="width:150px;" />
-                    <input type="text" class="income-remark-input" data-id="${r.id}" value="${escapeAttr(r.remark || '')}" placeholder="备注" style="flex:1;min-width:100px;" />
+                <div class="income-item-info">
+                    <span class="item-id">#${r.id}</span>
+                    <div class="item-amount"><input type="number" class="income-amount-input" data-id="${r.id}" value="${r.amount}" step="0.01" min="0" /></div>
+                    <div class="item-date"><input type="date" class="income-date-input" data-id="${r.id}" value="${escapeAttr(r.income_date || '')}" /></div>
+                    <div class="item-remark"><input type="text" class="income-remark-input" data-id="${r.id}" value="${escapeAttr(r.remark || '')}" placeholder="备注" /></div>
+                    <button class="income-item-delete" data-id="${r.id}">删除</button>
                 </div>
-                <button class="income-item-delete" data-id="${r.id}">删除</button>
             </div>
         `).join('');
 
@@ -3605,15 +3613,23 @@ document.addEventListener('DOMContentLoaded', function() {
             expenseList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无支出记录</div>';
             return;
         }
-        expenseList.innerHTML = state.expenseRecords.map(r => `
-            <div class="income-item" data-id="${r.id}">
-                <div class="income-item-info" style="flex:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                    <span style="color:#c62828;font-size:12px;">#${r.id}</span>
-                    <input type="number" class="expense-amount-input" data-id="${r.id}" value="${r.amount}" step="0.01" min="0" style="width:90px;" />
-                    <input type="date" class="expense-date-input" data-id="${r.id}" value="${escapeAttr(r.expense_date || '')}" style="width:150px;" />
-                    <input type="text" class="expense-remark-input" data-id="${r.id}" value="${escapeAttr(r.remark || '')}" placeholder="备注" style="flex:1;min-width:100px;" />
+        expenseList.innerHTML = `
+            <div class="income-list-header">
+                <span class="col-id">#ID</span>
+                <span class="col-amount">金额</span>
+                <span class="col-date">日期</span>
+                <span class="col-remark">备注</span>
+                <span class="col-action">操作</span>
+            </div>
+        ` + state.expenseRecords.map(r => `
+            <div class="income-item expense-item" data-id="${r.id}">
+                <div class="income-item-info">
+                    <span class="item-id">#${r.id}</span>
+                    <div class="item-amount"><input type="number" class="expense-amount-input" data-id="${r.id}" value="${r.amount}" step="0.01" min="0" /></div>
+                    <div class="item-date"><input type="date" class="expense-date-input" data-id="${r.id}" value="${escapeAttr(r.expense_date || '')}" /></div>
+                    <div class="item-remark"><input type="text" class="expense-remark-input" data-id="${r.id}" value="${escapeAttr(r.remark || '')}" placeholder="备注" /></div>
+                    <button class="income-item-delete" data-id="${r.id}">删除</button>
                 </div>
-                <button class="income-item-delete" data-id="${r.id}">删除</button>
             </div>
         `).join('');
 
@@ -3742,28 +3758,33 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!hostExpenseList) return;
         const details = state.hostExpenseDetails || [];
         if (details.length === 0) {
-            hostExpenseList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无明细，点击"+月数"或"+ 手动添加明细"创建</div>';
+            hostExpenseList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无明细，点击"+月数"或"+ 添加明细"创建</div>';
             return;
         }
-        // 按日期升序展示
         const sorted = [...details].sort((a, b) => {
             const da = a.expense_date || '', db = b.expense_date || '';
             if (da !== db) return da < db ? -1 : 1;
             return a.id - b.id;
         });
-        hostExpenseList.innerHTML = sorted.map((d, idx) => `
-            <div class="income-item" data-id="${d.id}">
-                <div class="income-item-info" style="flex:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                    <span style="color:#909399;font-size:12px;">#${idx + 1}</span>
-                    <input type="number" class="host-expense-price-input" data-id="${d.id}" value="${d.unit_price}" step="0.01" min="0" style="width:90px;" />
-                    <span style="color:#909399;">×</span>
-                    <input type="date" class="host-expense-date-input" data-id="${d.id}" value="${escapeAttr(d.expense_date || '')}" style="width:150px;" />
+        hostExpenseList.innerHTML = `
+            <div class="income-list-header">
+                <span class="col-id">#ID</span>
+                <span class="col-amount">单价</span>
+                <span class="col-date">日期</span>
+                <span class="col-action">操作</span>
+            </div>
+        ` + sorted.map((d, idx) => `
+            <div class="income-item expense-item" data-id="${d.id}">
+                <div class="income-item-info">
+                    <span class="item-id">#${idx + 1}</span>
+                    <div class="item-amount"><input type="number" class="host-expense-price-input" data-id="${d.id}" value="${d.unit_price}" step="0.01" min="0" /></div>
+                    <div class="item-date"><input type="date" class="host-expense-date-input" data-id="${d.id}" value="${escapeAttr(d.expense_date || '')}" /></div>
+                    <div class="item-remark" style="visibility:hidden;flex:1;"></div>
+                    <button class="income-item-delete host-expense-delete" data-id="${d.id}">删除</button>
                 </div>
-                <button class="income-item-delete host-expense-delete" data-id="${d.id}">删除</button>
             </div>
         `).join('');
 
-        // 单价 / 日期 失焦自动保存
         hostExpenseList.querySelectorAll('.host-expense-price-input').forEach(inp => {
             inp.addEventListener('change', async function() {
                 const id = parseInt(this.dataset.id);
