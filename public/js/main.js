@@ -191,7 +191,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const closeHostExpenseModal = $('#closeHostExpenseModal');
     const hostExpenseUnitPriceInput = $('#hostExpenseUnitPrice');
     const hostExpenseExtraInput = $('#hostExpenseExtra');
-    const saveHostExpenseConfigBtn = $('#saveHostExpenseConfigBtn');
+    const hostExpenseRemarkInput = $('#hostExpenseRemarkInput');
     const addHostExpenseDetailBtn = $('#addHostExpenseDetailBtn');
     const hostExpenseList = $('#hostExpenseList');
     const hostExpenseTotalDisplay = $('#hostExpenseTotalDisplay');
@@ -3720,10 +3720,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const record = state.records.find(r => r.id === recordId);
         if (!record) return;
 
-        // 单价 / 附加输入框：从 expense 字段解析
+        // 单价 / 附加 / 备注输入框：从 record.data 读取
         const rawExpense = record.data.expense || '';
         hostExpenseUnitPriceInput.value = parseExpenseUnitPrice(rawExpense);
         hostExpenseExtraInput.value = parseExpenseExtra(rawExpense);
+        hostExpenseRemarkInput.value = record.data.remark || '';
         hostExpenseStatus.textContent = '';
         hostExpenseModal.classList.add('show');
         await loadHostExpenseDetails(recordId);
@@ -3771,6 +3772,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <span class="col-id">#ID</span>
                 <span class="col-amount">单价</span>
                 <span class="col-date">日期</span>
+                <span class="col-remark">备注</span>
                 <span class="col-action">操作</span>
             </div>
         ` + sorted.map((d, idx) => `
@@ -3779,7 +3781,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <span class="item-id">#${idx + 1}</span>
                     <div class="item-amount"><input type="number" class="host-expense-price-input" data-id="${d.id}" value="${d.unit_price}" step="0.01" min="0" /></div>
                     <div class="item-date"><input type="date" class="host-expense-date-input" data-id="${d.id}" value="${escapeAttr(d.expense_date || '')}" /></div>
-                    <div class="item-remark" style="visibility:hidden;flex:1;"></div>
+                    <div class="item-remark"><input type="text" class="host-expense-remark-input" data-id="${d.id}" value="${escapeAttr(d.remark || '')}" placeholder="备注" /></div>
                     <button class="income-item-delete host-expense-delete" data-id="${d.id}">删除</button>
                 </div>
             </div>
@@ -3816,6 +3818,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; }
             });
         });
+        hostExpenseList.querySelectorAll('.host-expense-remark-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const remark = this.value;
+                try {
+                    await API.put('/host-expense/' + id, { remark });
+                    const d = (state.hostExpenseDetails || []).find(x => x.id === id);
+                    if (d) d.remark = remark;
+                    hostExpenseStatus.textContent = '已保存';
+                    hostExpenseStatus.style.color = '#67c23a';
+                    setTimeout(() => hostExpenseStatus.textContent = '', 1200);
+                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
         hostExpenseList.querySelectorAll('.host-expense-delete').forEach(btn => {
             btn.addEventListener('click', async function() {
                 const id = parseInt(this.dataset.id);
@@ -3843,29 +3859,36 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 保存单价 / 附加配置（写入 record.data.expense 字段，格式 =单价+(附加)）
-    async function saveHostExpenseConfig() {
+    // 保存单价 / 附加 / 备注配置（光标离开自动保存）
+    async function saveHostExpenseConfig(field) {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
         const unitPrice = parseFloat(hostExpenseUnitPriceInput.value) || 0;
         const extra = parseFloat(hostExpenseExtraInput.value) || 0;
+        const remark = hostExpenseRemarkInput.value;
         const newStr = buildExpenseString(unitPrice, extra);
         record.data.expense = newStr;
+        record.data.remark = remark;
         record._updated = true;
         try {
             await saveRecord(record);
+            await API.put('/host-expense/record-config/' + state.hostExpenseRecordId, {
+                unit_price: unitPrice,
+                extra: extra,
+                remark: remark
+            });
             updateHostExpenseTotalDisplay();
             renderTable(false);
-            hostExpenseStatus.textContent = '配置已保存';
+            hostExpenseStatus.textContent = '已保存';
             hostExpenseStatus.style.color = '#67c23a';
-            setTimeout(() => hostExpenseStatus.textContent = '', 1500);
+            setTimeout(() => hostExpenseStatus.textContent = '', 1200);
         } catch (err) {
             hostExpenseStatus.textContent = '保存失败: ' + err.message;
             hostExpenseStatus.style.color = '#f56c6c';
         }
     }
 
-    // 手动添加一笔明细（使用当前单价输入框的值，日期默认今天）
+    // 手动添加一笔明细（使用当前单价、附加、备注输入框的值，日期默认今天）
     async function addHostExpenseDetailManually() {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
@@ -3881,9 +3904,9 @@ document.addEventListener('DOMContentLoaded', function() {
             await API.post('/host-expense', {
                 record_id: state.hostExpenseRecordId,
                 unit_price: unitPrice,
-                expense_date: today
+                expense_date: today,
+                remark: hostExpenseRemarkInput.value || ''
             });
-            // 本地月数 +1
             let m = parseInt(record.data.months) || 0;
             record.data.months = m + 1;
             record._updated = true;
@@ -4708,10 +4731,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 主机支出明细弹窗事件
     if (closeHostExpenseModal) closeHostExpenseModal.addEventListener('click', () => hostExpenseModal.classList.remove('show'));
-    if (saveHostExpenseConfigBtn) saveHostExpenseConfigBtn.addEventListener('click', saveHostExpenseConfig);
     if (addHostExpenseDetailBtn) addHostExpenseDetailBtn.addEventListener('click', addHostExpenseDetailManually);
-    if (hostExpenseExtraInput) hostExpenseExtraInput.addEventListener('input', updateHostExpenseTotalDisplay);
-    if (hostExpenseUnitPriceInput) hostExpenseUnitPriceInput.addEventListener('input', updateHostExpenseTotalDisplay);
+    if (hostExpenseExtraInput) {
+        hostExpenseExtraInput.addEventListener('input', updateHostExpenseTotalDisplay);
+        hostExpenseExtraInput.addEventListener('blur', () => saveHostExpenseConfig('extra'));
+    }
+    if (hostExpenseUnitPriceInput) {
+        hostExpenseUnitPriceInput.addEventListener('input', updateHostExpenseTotalDisplay);
+        hostExpenseUnitPriceInput.addEventListener('blur', () => saveHostExpenseConfig('unit_price'));
+    }
+    if (hostExpenseRemarkInput) {
+        hostExpenseRemarkInput.addEventListener('blur', () => saveHostExpenseConfig('remark'));
+    }
 
     // --- 分页事件 ---
     firstPageBtn.addEventListener('click', async () => {

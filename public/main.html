@@ -648,23 +648,23 @@
                     <strong id="hostExpenseTotalDisplay" style="color: #c62828;">0</strong>
                 </div>
                 <div class="income-add-form expense-add-form">
-                    <div style="flex:1;min-width:120px;">
+                    <div style="flex:1;min-width:100px;">
                         <label style="display:block;margin-bottom:6px;font-size:13px;color:#666;">单价</label>
-                        <input type="number" id="hostExpenseUnitPrice" step="0.01" min="0" placeholder="80" style="width:100%;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:14px;transition:border-color 0.2s,box-shadow 0.2s;" />
+                        <input type="number" id="hostExpenseUnitPrice" step="0.01" min="0" placeholder="80" />
                     </div>
-                    <div style="flex:1;min-width:120px;">
+                    <div style="flex:1;min-width:100px;">
                         <label style="display:block;margin-bottom:6px;font-size:13px;color:#666;">附加</label>
-                        <input type="number" id="hostExpenseExtra" step="0.01" placeholder="+10 或 -10" style="width:100%;padding:8px 12px;border:1px solid #e0e0e0;border-radius:6px;font-size:14px;transition:border-color 0.2s,box-shadow 0.2s;" />
+                        <input type="number" id="hostExpenseExtra" step="0.01" placeholder="+10 或 -10" />
+                    </div>
+                    <div style="flex:2;min-width:160px;">
+                        <label style="display:block;margin-bottom:6px;font-size:13px;color:#666;">备注</label>
+                        <input type="text" id="hostExpenseRemarkInput" placeholder="备注" />
                     </div>
                     <div style="display:flex;align-items:flex-end;">
-                        <button class="tool-btn primary" id="saveHostExpenseConfigBtn" style="height:38px;">保存配置</button>
+                        <button class="tool-btn primary" id="addHostExpenseDetailBtn" style="height:38px;">添加</button>
                     </div>
                 </div>
-                <div style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;">
-                    <strong style="font-size:14px;color:#333;">明细列表</strong>
-                    <button class="tool-btn" id="addHostExpenseDetailBtn" style="background:#67c23a;color:#fff;">+ 添加明细</button>
-                </div>
-                <div class="income-list" id="hostExpenseList" style="margin-top:8px;"></div>
+                <div class="income-list" id="hostExpenseList" style="margin-top:16px;"></div>
                 <span id="hostExpenseStatus" style="color:#67c23a;display:block;margin-top:8px;font-size:13px;"></span>
             </div>
         </div>

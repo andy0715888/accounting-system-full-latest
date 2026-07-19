@@ -167,11 +167,13 @@ function createTables() {
             record_id INTEGER NOT NULL,
             unit_price REAL NOT NULL DEFAULT 0,
             expense_date DATE NOT NULL,
+            remark TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (record_id) REFERENCES records(id) ON DELETE CASCADE
         )`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_host_expense_record ON host_expense_details(record_id)`);
+        db.run(`ALTER TABLE host_expense_details ADD COLUMN remark TEXT`, () => {});
 
         // Migration: add tab_type and tab_order to existing tabs table
         db.run(`ALTER TABLE tabs ADD COLUMN tab_type TEXT DEFAULT 'dedicated'`, () => {});

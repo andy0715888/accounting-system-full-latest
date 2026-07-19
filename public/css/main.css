@@ -1574,6 +1574,11 @@ body {
     border-color: #c62828 !important;
     box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.1) !important;
 }
+.host-expense-remark-input:focus {
+    outline: none;
+    border-color: #c62828;
+    box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.1);
+}
 
 /* 收入列在表格中的样式 - 只读显示，可点击 */
 .fee-summary-cell {
