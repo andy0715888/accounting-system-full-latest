@@ -2416,7 +2416,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         $$('.expense-input').forEach(input => {
-            const finishEditing = () => {
+            const finishEditing = async () => {
                 const parent = input.closest('.expense-inline');
                 const display = parent.querySelector('.expense-display');
                 const td = parent.closest('td');
@@ -2425,6 +2425,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!record) return;
 
                 const rawValue = input.value.trim();
+                const oldRaw = record.data['expense'] || '0';
                 record.data['expense'] = rawValue || '0';
                 record._updated = true;
 
@@ -2435,6 +2436,46 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.style.display = 'none';
                 display.style.display = 'inline';
                 td.classList.remove('editing-cell');
+
+                // 独享/共享标签：首次填入单价时，自动生成 months 笔明细
+                if (!isSimpleTab()) {
+                    const newUnitPrice = parseExpenseUnitPrice(rawValue);
+                    const oldUnitPrice = parseExpenseUnitPrice(oldRaw);
+                    if (newUnitPrice > 0 && oldUnitPrice <= 0 && months > 0) {
+                        // 需要确保明细已加载
+                        if (!record._hostExpenseDetails) {
+                            try {
+                                const resp = await API.get('/host-expense/by-record/' + id);
+                                record._hostExpenseDetails = resp.details || [];
+                                record._hostExpenseTotal = resp.total || 0;
+                            } catch (err) { console.error('加载明细失败:', err); }
+                        }
+                        const detailCount = (record._hostExpenseDetails || []).length;
+                        const needToAdd = months - detailCount;
+                        if (needToAdd > 0) {
+                            const d = new Date();
+                            const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                            const hp = record.data.host_purchase || '';
+                            const firstDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
+                            for (let i = 0; i < needToAdd; i++) {
+                                try {
+                                    const resp = await API.post('/host-expense', {
+                                        record_id: id,
+                                        unit_price: newUnitPrice,
+                                        expense_date: i === 0 ? firstDate : today
+                                    });
+                                    if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
+                                    record._hostExpenseDetails.push({
+                                        id: resp.id,
+                                        unit_price: resp.unit_price,
+                                        expense_date: resp.expense_date
+                                    });
+                                } catch (err) { console.error('自动生成明细失败:', err); }
+                            }
+                            record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
+                        }
+                    }
+                }
 
                 saveRecord(record);
                 updateFilterOptionsForCol('expense');
@@ -3869,6 +3910,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function saveHostExpenseConfig(field) {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
+        const oldRaw = record.data.expense || '0';
+        const oldUnitPrice = parseExpenseUnitPrice(oldRaw);
         const unitPrice = parseFloat(hostExpenseUnitPriceInput.value) || 0;
         const extra = parseFloat(hostExpenseExtraInput.value) || 0;
         const remark = hostExpenseRemarkInput.value;
@@ -3883,6 +3926,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 extra: extra,
                 remark: remark
             });
+
+            // 首次填入单价时，自动补齐 months 笔明细
+            const months = parseInt(record.data.months) || 0;
+            if (unitPrice > 0 && oldUnitPrice <= 0 && months > 0) {
+                if (!record._hostExpenseDetails) {
+                    const resp = await API.get('/host-expense/by-record/' + state.hostExpenseRecordId);
+                    record._hostExpenseDetails = resp.details || [];
+                    record._hostExpenseTotal = resp.total || 0;
+                }
+                const detailCount = (record._hostExpenseDetails || []).length;
+                const needToAdd = months - detailCount;
+                if (needToAdd > 0) {
+                    const d = new Date();
+                    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    const hp = record.data.host_purchase || '';
+                    const firstDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
+                    for (let i = 0; i < needToAdd; i++) {
+                        try {
+                            const resp = await API.post('/host-expense', {
+                                record_id: state.hostExpenseRecordId,
+                                unit_price: unitPrice,
+                                expense_date: i === 0 ? firstDate : today
+                            });
+                            record._hostExpenseDetails.push({
+                                id: resp.id,
+                                unit_price: resp.unit_price,
+                                expense_date: resp.expense_date
+                            });
+                        } catch (err) { console.error('自动补齐明细失败:', err); }
+                    }
+                    record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
+                    await loadHostExpenseDetails(state.hostExpenseRecordId);
+                }
+            }
+
             updateHostExpenseTotalDisplay();
             renderTable(false);
             hostExpenseStatus.textContent = '已保存';
