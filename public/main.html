@@ -639,7 +639,7 @@
     <div class="modal-overlay" id="hostExpenseModal">
         <div class="modal" style="width:560px;">
             <div class="modal-header">
-                <h2>主机支出明细</h2>
+                <h2>支出管理</h2>
                 <button class="modal-close" id="closeHostExpenseModal">✕</button>
             </div>
             <div class="modal-body">
@@ -647,16 +647,16 @@
                     <span>总支出（明细合计 + 附加）：</span>
                     <strong id="hostExpenseTotalDisplay" style="color: #c62828;">0</strong>
                 </div>
-                <div class="input-group" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
-                    <div style="flex:1;min-width:140px;">
+                <div style="display:flex;gap:12px;align-items:flex-end;margin-top:12px;">
+                    <div style="flex:1;">
                         <label>单价（用于下次 +月数 生成新明细）</label>
                         <input type="number" id="hostExpenseUnitPrice" step="0.01" min="0" placeholder="例如 80" />
                     </div>
-                    <div style="flex:1;min-width:140px;">
+                    <div style="flex:1;">
                         <label>附加（一次性 +5/-10 等）</label>
                         <input type="number" id="hostExpenseExtra" step="0.01" placeholder="例如 +10 或 -10" />
                     </div>
-                    <button class="tool-btn primary" id="saveHostExpenseConfigBtn" style="height:36px;">保存配置</button>
+                    <button class="tool-btn primary" id="saveHostExpenseConfigBtn" style="height:36px;margin-top:20px;">保存配置</button>
                 </div>
                 <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
                     <strong style="font-size:14px;">明细列表（每笔对应一次 +月数）</strong>

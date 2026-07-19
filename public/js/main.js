@@ -3487,15 +3487,58 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         incomeList.innerHTML = state.incomeRecords.map(r => `
-            <div class="income-item">
-                <div class="income-item-info">
-                    <span class="income-item-amount">${Number(r.amount).toFixed(2)}</span>
-                    <span class="income-item-date">${escapeHtml(formatDisplayDate(r.income_date || ''))}</span>
-                    <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
+            <div class="income-item" data-id="${r.id}">
+                <div class="income-item-info" style="flex:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <span style="color:#67c23a;font-size:12px;">#${r.id}</span>
+                    <input type="number" class="income-amount-input" data-id="${r.id}" value="${r.amount}" step="0.01" min="0" style="width:90px;" />
+                    <input type="date" class="income-date-input" data-id="${r.id}" value="${escapeAttr(r.income_date || '')}" style="width:150px;" />
+                    <input type="text" class="income-remark-input" data-id="${r.id}" value="${escapeAttr(r.remark || '')}" placeholder="备注" style="flex:1;min-width:100px;" />
                 </div>
                 <button class="income-item-delete" data-id="${r.id}">删除</button>
             </div>
         `).join('');
+
+        incomeList.querySelectorAll('.income-amount-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const amount = parseFloat(this.value);
+                if (isNaN(amount) || amount <= 0) { incomeStatus.textContent = '金额无效'; return; }
+                try {
+                    await API.put('/income/' + id, { amount });
+                    await loadIncomeRecords(state.incomeRecordId);
+                    incomeStatus.textContent = '已保存';
+                    setTimeout(() => incomeStatus.textContent = '', 1200);
+                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
+
+        incomeList.querySelectorAll('.income-date-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const date = this.value;
+                if (!date) return;
+                try {
+                    await API.put('/income/' + id, { income_date: date });
+                    await loadIncomeRecords(state.incomeRecordId);
+                    incomeStatus.textContent = '已保存';
+                    setTimeout(() => incomeStatus.textContent = '', 1200);
+                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
+
+        incomeList.querySelectorAll('.income-remark-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const remark = this.value;
+                try {
+                    await API.put('/income/' + id, { remark });
+                    await loadIncomeRecords(state.incomeRecordId);
+                    incomeStatus.textContent = '已保存';
+                    setTimeout(() => incomeStatus.textContent = '', 1200);
+                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
+
         incomeList.querySelectorAll('.income-item-delete').forEach(btn => {
             btn.addEventListener('click', async function() {
                 const id = parseInt(this.dataset.id);
@@ -3563,15 +3606,58 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         expenseList.innerHTML = state.expenseRecords.map(r => `
-            <div class="income-item">
-                <div class="income-item-info">
-                    <span class="income-item-amount" style="color:#c62828;">${Number(r.amount).toFixed(2)}</span>
-                    <span class="income-item-date">${escapeHtml(formatDisplayDate(r.expense_date || ''))}</span>
-                    <span class="income-item-remark">${escapeHtml(r.remark || '')}</span>
+            <div class="income-item" data-id="${r.id}">
+                <div class="income-item-info" style="flex:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <span style="color:#c62828;font-size:12px;">#${r.id}</span>
+                    <input type="number" class="expense-amount-input" data-id="${r.id}" value="${r.amount}" step="0.01" min="0" style="width:90px;" />
+                    <input type="date" class="expense-date-input" data-id="${r.id}" value="${escapeAttr(r.expense_date || '')}" style="width:150px;" />
+                    <input type="text" class="expense-remark-input" data-id="${r.id}" value="${escapeAttr(r.remark || '')}" placeholder="备注" style="flex:1;min-width:100px;" />
                 </div>
                 <button class="income-item-delete" data-id="${r.id}">删除</button>
             </div>
         `).join('');
+
+        expenseList.querySelectorAll('.expense-amount-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const amount = parseFloat(this.value);
+                if (isNaN(amount) || amount <= 0) { expenseStatus.textContent = '金额无效'; return; }
+                try {
+                    await API.put('/expense/' + id, { amount });
+                    await loadExpenseRecords(state.expenseRecordId);
+                    expenseStatus.textContent = '已保存';
+                    setTimeout(() => expenseStatus.textContent = '', 1200);
+                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
+
+        expenseList.querySelectorAll('.expense-date-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const date = this.value;
+                if (!date) return;
+                try {
+                    await API.put('/expense/' + id, { expense_date: date });
+                    await loadExpenseRecords(state.expenseRecordId);
+                    expenseStatus.textContent = '已保存';
+                    setTimeout(() => expenseStatus.textContent = '', 1200);
+                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
+
+        expenseList.querySelectorAll('.expense-remark-input').forEach(inp => {
+            inp.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const remark = this.value;
+                try {
+                    await API.put('/expense/' + id, { remark });
+                    await loadExpenseRecords(state.expenseRecordId);
+                    expenseStatus.textContent = '已保存';
+                    setTimeout(() => expenseStatus.textContent = '', 1200);
+                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
+            });
+        });
+
         expenseList.querySelectorAll('.income-item-delete').forEach(btn => {
             btn.addEventListener('click', async function() {
                 const id = parseInt(this.dataset.id);

@@ -58,6 +58,42 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 });
 
+// Update income record
+router.put('/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const id = parseInt(req.params.id);
+        const { amount, income_date, remark } = req.body;
+        const existing = await queryOne('SELECT id FROM income_records WHERE id = ? AND user_id = ?', [id, userId]);
+        if (!existing) return res.status(404).json({ error: '记录不存在' });
+
+        const updates = [];
+        const params = [];
+        if (amount !== undefined) {
+            const num = parseFloat(amount);
+            if (isNaN(num) || num <= 0) return res.status(400).json({ error: '金额无效' });
+            updates.push('amount = ?');
+            params.push(num);
+        }
+        if (income_date !== undefined) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(income_date)) return res.status(400).json({ error: '日期格式无效' });
+            updates.push('income_date = ?');
+            params.push(income_date);
+        }
+        if (remark !== undefined) {
+            updates.push('remark = ?');
+            params.push(remark);
+        }
+        if (updates.length === 0) return res.status(400).json({ error: '没有要更新的字段' });
+        params.push(id);
+        await execute(`UPDATE income_records SET ${updates.join(', ')} WHERE id = ?`, params);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('更新收入记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 // Get all income records for a tab (for stats)
 router.get('/by-tab/:tabId', requireAuth, async (req, res) => {
     try {
