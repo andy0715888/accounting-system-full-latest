@@ -3515,6 +3515,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await API.put('/income/' + id, { amount });
                     await loadIncomeRecords(state.incomeRecordId);
                     incomeStatus.textContent = '已保存';
+                    incomeStatus.style.color = '#67c23a';
                     setTimeout(() => incomeStatus.textContent = '', 1200);
                 } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
             });
@@ -3529,6 +3530,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await API.put('/income/' + id, { income_date: date });
                     await loadIncomeRecords(state.incomeRecordId);
                     incomeStatus.textContent = '已保存';
+                    incomeStatus.style.color = '#67c23a';
                     setTimeout(() => incomeStatus.textContent = '', 1200);
                 } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
             });
@@ -3542,6 +3544,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await API.put('/income/' + id, { remark });
                     await loadIncomeRecords(state.incomeRecordId);
                     incomeStatus.textContent = '已保存';
+                    incomeStatus.style.color = '#67c23a';
                     setTimeout(() => incomeStatus.textContent = '', 1200);
                 } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
             });
@@ -3557,7 +3560,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     await loadRecords(state.currentTabId);
                     renderTable(false);
                     incomeStatus.textContent = '已删除';
-                    setTimeout(() => incomeStatus.textContent = '', 1500);
+                    incomeStatus.style.color = '#67c23a';
+                    setTimeout(() => incomeStatus.textContent = '', 1200);
                 } catch (err) { incomeStatus.textContent = '删除失败: ' + err.message; }
             });
         });
@@ -3838,12 +3842,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!await showConfirm('确定删除此笔明细？对应月数会自动 -1')) return;
                 try {
                     await API.delete('/host-expense/' + id);
-                    // 本地月数 -1
                     const record = state.records.find(r => r.id === state.hostExpenseRecordId);
                     if (record) {
                         let m = parseInt(record.data.months) || 0;
                         if (m > 0) {
                             record.data.months = m - 1;
+                            if (record.data.host_purchase) {
+                                record.data.host_expire = calcHostExpire(record.data.host_purchase, record.data.months);
+                            }
                             record._updated = true;
                             saveRecord(record);
                         }
@@ -3909,6 +3915,9 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             let m = parseInt(record.data.months) || 0;
             record.data.months = m + 1;
+            if (record.data.host_purchase) {
+                record.data.host_expire = calcHostExpire(record.data.host_purchase, record.data.months);
+            }
             record._updated = true;
             await saveRecord(record);
             await loadHostExpenseDetails(state.hostExpenseRecordId);

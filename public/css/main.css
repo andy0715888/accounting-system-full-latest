@@ -1581,6 +1581,12 @@ body {
     border-color: #c62828;
     box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.1);
 }
+.modal-status-text {
+    display: block;
+    margin-top: 8px;
+    font-size: 13px;
+    color: #67c23a;
+}
 
 /* 收入列在表格中的样式 - 只读显示，可点击 */
 .fee-summary-cell {
