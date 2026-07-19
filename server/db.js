@@ -159,6 +159,20 @@ function createTables() {
             FOREIGN KEY (folder_id) REFERENCES command_folders(id) ON DELETE CASCADE
         )`);
 
+        // 主机支出明细表：每条记录对应一次"月数+1"的续费/购买行为
+        // 单价 unit_price 为该笔明细生成时的单价；expense_date 可由用户编辑
+        db.run(`CREATE TABLE IF NOT EXISTS host_expense_details (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            record_id INTEGER NOT NULL,
+            unit_price REAL NOT NULL DEFAULT 0,
+            expense_date DATE NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (record_id) REFERENCES records(id) ON DELETE CASCADE
+        )`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_host_expense_record ON host_expense_details(record_id)`);
+
         // Migration: add tab_type and tab_order to existing tabs table
         db.run(`ALTER TABLE tabs ADD COLUMN tab_type TEXT DEFAULT 'dedicated'`, () => {});
         db.run(`ALTER TABLE tabs ADD COLUMN tab_order INTEGER DEFAULT 0`, () => {});

@@ -128,9 +128,31 @@ router.get('/', requireAuth, async (req, res) => {
             expenseRows.forEach(row => { expenseMap[row.record_id] = row.total; });
         }
 
+        // 主机支出明细（独享/共享标签用）：一次性查全部明细，按 record_id 分组
+        let hostExpenseMap = {}; // record_id -> { total, details: [...] }
+        if (recordIds.length > 0) {
+            const placeholders = recordIds.map(() => '?').join(',');
+            const hostExpenseRows = await query(
+                `SELECT id, record_id, unit_price, expense_date FROM host_expense_details WHERE record_id IN (${placeholders}) ORDER BY record_id, expense_date ASC, id ASC`,
+                recordIds
+            );
+            hostExpenseRows.forEach(row => {
+                if (!hostExpenseMap[row.record_id]) hostExpenseMap[row.record_id] = { total: 0, details: [] };
+                hostExpenseMap[row.record_id].total += (row.unit_price || 0);
+                hostExpenseMap[row.record_id].details.push({
+                    id: row.id,
+                    unit_price: row.unit_price,
+                    expense_date: row.expense_date
+                });
+            });
+        }
+
         parsed.forEach(r => {
             r._incomeTotal = incomeMap[r.id] || 0;
             r._expenseTotal = expenseMap[r.id] || 0;
+            const he = hostExpenseMap[r.id];
+            r._hostExpenseDetails = he ? he.details : [];
+            r._hostExpenseTotal = he ? he.total : 0;
         });
 
         res.json({ records: parsed, total, page, pageSize, totalPages });
@@ -198,6 +220,7 @@ router.get('/children/:parentId', requireAuth, async (req, res) => {
         });
         const recordIds = parsed.map(r => r.id);
         let incomeMap = {};
+        let hostExpenseMap = {};
         if (recordIds.length > 0) {
             const placeholders = recordIds.map(() => '?').join(',');
             const incomeRows = await query(
@@ -205,8 +228,25 @@ router.get('/children/:parentId', requireAuth, async (req, res) => {
                 recordIds
             );
             incomeRows.forEach(row => { incomeMap[row.record_id] = row.total; });
+
+            const hostExpenseRows = await query(
+                `SELECT id, record_id, unit_price, expense_date FROM host_expense_details WHERE record_id IN (${placeholders}) ORDER BY record_id, expense_date ASC, id ASC`,
+                recordIds
+            );
+            hostExpenseRows.forEach(row => {
+                if (!hostExpenseMap[row.record_id]) hostExpenseMap[row.record_id] = { total: 0, details: [] };
+                hostExpenseMap[row.record_id].total += (row.unit_price || 0);
+                hostExpenseMap[row.record_id].details.push({
+                    id: row.id, unit_price: row.unit_price, expense_date: row.expense_date
+                });
+            });
         }
-        parsed.forEach(r => { r._incomeTotal = incomeMap[r.id] || 0; });
+        parsed.forEach(r => {
+            r._incomeTotal = incomeMap[r.id] || 0;
+            const he = hostExpenseMap[r.id];
+            r._hostExpenseDetails = he ? he.details : [];
+            r._hostExpenseTotal = he ? he.total : 0;
+        });
         res.json(parsed);
     } catch (err) {
         console.error('获取子记录错误:', err);
