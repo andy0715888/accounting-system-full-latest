@@ -1437,6 +1437,8 @@ body {
 .income-add-form input[type="number"] { width: 100px; }
 .income-add-form input[type="date"] { width: 160px; }
 .income-add-form input[type="text"] { flex: 1; min-width: 150px; }
+.expense-add-form input[type="number"] { width: 120px; }
+.expense-add-form input[type="text"] { flex: 1; min-width: 150px; }
 .income-list { 
     max-height: 350px; 
     overflow-y: auto; 
@@ -1488,7 +1490,7 @@ body {
 }
 .income-item-info .item-amount {
     width: 100px;
-    text-align: right;
+    text-align: left;
 }
 .income-item-info .item-amount input {
     width: 100%;
@@ -1498,7 +1500,7 @@ body {
     font-size: 14px;
     font-weight: 600;
     color: #2e7d32;
-    text-align: right;
+    text-align: left;
     transition: border-color 0.2s;
 }
 .income-item-info .item-amount input:focus {
