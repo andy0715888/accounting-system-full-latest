@@ -82,6 +82,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const conditionalFormatBtn = $('#conditionalFormatBtn');
     const conditionalFormatModal = $('#conditionalFormatModal');
     const closeConditionalFormatModal = $('#closeConditionalFormatModal');
+    const incomeExpenseStatsBtn = $('#incomeExpenseStatsBtn');
+    const incomeExpenseStatsModal = $('#incomeExpenseStatsModal');
+    const closeIncomeExpenseStatsModal = $('#closeIncomeExpenseStatsModal');
+    const statsTotalIncome = $('#statsTotalIncome');
+    const statsTotalExpense = $('#statsTotalExpense');
+    const statsNetProfit = $('#statsNetProfit');
+    const statsRecordCount = $('#statsRecordCount');
     const cfModalTabName = $('#cfModalTabName');
     const cfColSelect = $('#cfColSelect');
     const cfConditionSelect = $('#cfConditionSelect');
@@ -4774,6 +4781,51 @@ document.addEventListener('DOMContentLoaded', function() {
     manageColumnsBtn.addEventListener('click', showColumnManager);
     conditionalFormatBtn.addEventListener('click', openConditionalFormatModal);
     closeConditionalFormatModal.addEventListener('click', () => conditionalFormatModal.classList.remove('show'));
+
+    // 收支统计
+    function openIncomeExpenseStats() {
+        const records = state.records || [];
+        let totalIncome = 0;
+        let totalExpense = 0;
+        let count = 0;
+
+        records.forEach(record => {
+            if (!record || !record.data) return;
+            count++;
+
+            // 收入：fee 字段
+            const feeRaw = record.data.fee;
+            if (feeRaw) {
+                const feeVal = computeFeeValue(feeRaw);
+                if (typeof feeVal === 'number' && !isNaN(feeVal)) {
+                    totalIncome += feeVal;
+                }
+            }
+
+            // 支出：expense 字段
+            const expenseRaw = record.data.expense;
+            if (expenseRaw) {
+                const months = parseInt(record.data.months) || 0;
+                const expenseVal = computeExpenseValue(expenseRaw, months);
+                if (typeof expenseVal === 'number' && !isNaN(expenseVal)) {
+                    totalExpense += expenseVal;
+                }
+            }
+        });
+
+        const netProfit = totalIncome - totalExpense;
+
+        statsTotalIncome.textContent = totalIncome.toFixed(2);
+        statsTotalExpense.textContent = totalExpense.toFixed(2);
+        statsNetProfit.textContent = (netProfit >= 0 ? '+' : '') + netProfit.toFixed(2);
+        statsNetProfit.style.color = netProfit >= 0 ? '#2e7d32' : '#c62828';
+        statsRecordCount.textContent = count;
+
+        incomeExpenseStatsModal.classList.add('show');
+    }
+
+    incomeExpenseStatsBtn.addEventListener('click', openIncomeExpenseStats);
+    closeIncomeExpenseStatsModal.addEventListener('click', () => incomeExpenseStatsModal.classList.remove('show'));
     cfAddBtn.addEventListener('click', addConditionalFormat);
     cfValueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addConditionalFormat(); });
     logoutBtn.addEventListener('click', async function() {

@@ -70,6 +70,7 @@
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="manageColumnsBtn">📋 列管理</button>
                         <button class="tool-btn" id="conditionalFormatBtn">🎨 条件管理</button>
+                        <button class="tool-btn" id="incomeExpenseStatsBtn">📊 收支统计</button>
                     </div>
                     <div class="toolbar-right">
                         <span class="record-count" id="recordCount">共 0 条记录</span>
@@ -328,6 +329,37 @@
                 </div>
                 <div class="cf-list" id="cfList"></div>
                 <p style="font-size:12px;color:#999;margin-top:8px;">💡 条件从上到下依次匹配，先匹配到的先生效。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 收支统计弹窗 -->
+    <div class="modal-overlay" id="incomeExpenseStatsModal">
+        <div class="modal" style="width:420px;">
+            <div class="modal-header">
+                <h2>📊 收支统计</h2>
+                <button class="modal-close" id="closeIncomeExpenseStatsModal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div style="background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 10px; padding: 20px; margin-bottom: 16px; text-align: center;">
+                    <div style="font-size: 14px; color: #555; margin-bottom: 8px;">净利润</div>
+                    <div style="font-size: 36px; font-weight: 700; color: #2e7d32;" id="statsNetProfit">0</div>
+                </div>
+                <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                    <div style="flex: 1; background: #fff3e0; border-radius: 8px; padding: 16px; text-align: center;">
+                        <div style="font-size: 13px; color: #777; margin-bottom: 6px;">总收入</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #f57c00;" id="statsTotalIncome">0</div>
+                    </div>
+                    <div style="flex: 1; background: #ffebee; border-radius: 8px; padding: 16px; text-align: center;">
+                        <div style="font-size: 13px; color: #777; margin-bottom: 6px;">总支出</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #c62828;" id="statsTotalExpense">0</div>
+                    </div>
+                </div>
+                <div style="background: #f5f5f5; border-radius: 8px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 13px; color: #666;">统计记录数</span>
+                    <span style="font-size: 16px; font-weight: 600; color: #333;" id="statsRecordCount">0</span>
+                </div>
+                <p style="font-size: 12px; color: #999; margin-top: 12px; text-align: center;">💡 统计范围为当前页面所有可见记录</p>
             </div>
         </div>
     </div>
