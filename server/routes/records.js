@@ -450,17 +450,30 @@ router.post('/import', requireAuth, async (req, res) => {
     }
 });
 
-// 收支统计：汇总整个标签的所有记录
+// 收支统计：汇总整个标签的所有记录（计算逻辑和前端显示完全一致）
 router.get('/stats', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const { tabId } = req.query;
         if (!tabId) return res.status(400).json({ error: '缺少 tabId' });
 
+        // 1. 取所有记录的 id + data
         const rows = await query(
-            `SELECT data FROM records WHERE user_id = ? AND tab_id = ?`,
+            `SELECT id, data FROM records WHERE user_id = ? AND tab_id = ?`,
             [userId, tabId]
         );
+
+        // 2. 批量查主机支出明细总和（按 record_id 分组）
+        const recordIds = rows.map(r => r.id);
+        let hostExpenseSums = {};
+        if (recordIds.length > 0) {
+            const placeholders = recordIds.map(() => '?').join(',');
+            const detailRows = await query(
+                `SELECT record_id, SUM(unit_price) as total FROM host_expense_details WHERE record_id IN (${placeholders}) GROUP BY record_id`,
+                recordIds
+            );
+            detailRows.forEach(r => { hostExpenseSums[r.record_id] = r.total || 0; });
+        }
 
         let totalIncome = 0;
         let totalExpense = 0;
@@ -470,49 +483,75 @@ router.get('/stats', requireAuth, async (req, res) => {
             try { data = JSON.parse(row.data || '{}'); }
             catch { data = {}; }
 
-            // 收入 fee
+            // ========== 收入 fee ==========
             const feeRaw = data.fee;
             if (feeRaw) {
                 const str = String(feeRaw).trim();
                 let feeVal = 0;
                 if (str.startsWith('=')) {
-                    const numStr = str.slice(1);
-                    const num = parseFloat(numStr);
-                    if (!isNaN(num)) feeVal = num;
+                    // 尝试 safeEval（支持 =80+10 这种）
+                    try {
+                        const sanitized = str.slice(1).replace(/[^0-9+\-*/().]/g, '');
+                        if (sanitized) {
+                            feeVal = Function('"use strict"; return (' + sanitized + ')')();
+                        }
+                    } catch (e) {
+                        const num = parseFloat(str.slice(1));
+                        if (!isNaN(num)) feeVal = num;
+                    }
                 } else {
                     const num = parseFloat(str);
                     if (!isNaN(num)) feeVal = num;
                 }
-                totalIncome += feeVal;
+                if (typeof feeVal === 'number' && !isNaN(feeVal)) {
+                    totalIncome += feeVal;
+                }
             }
 
-            // 支出 expense
+            // ========== 支出 expense ==========
             const expenseRaw = data.expense;
             if (expenseRaw) {
                 const str = String(expenseRaw).trim();
                 const months = parseInt(data.months) || 0;
                 let expenseVal = 0;
 
-                // =单价+(附加)
-                const match = str.match(/^=(\d+(?:\.\d+)?)(?:\+\((.+)\))?$/);
-                if (match) {
-                    const unitPrice = parseFloat(match[1]) || 0;
-                    const extraExpr = match[2];
+                // 先查是否有主机支出明细 —— 有明细就用"明细总和 + 附加"，和前端显示一致
+                const detailSum = hostExpenseSums[row.id] || 0;
+                if (detailSum > 0) {
+                    // 有明细：支出 = 明细总和 + 附加
                     let extra = 0;
-                    if (extraExpr) {
+                    const match = str.match(/^=(?:\d+(?:\.\d+)?)\+\((.+)\)$/);
+                    if (match) {
                         try {
-                            const sanitized = extraExpr.replace(/[^0-9+\-*/().]/g, '');
+                            const sanitized = match[1].replace(/[^0-9+\-*/().]/g, '');
                             if (sanitized) {
                                 extra = Function('"use strict"; return (' + sanitized + ')')();
                             }
                         } catch (e) { extra = 0; }
                     }
-                    expenseVal = months * unitPrice + extra;
+                    expenseVal = detailSum + extra;
                 } else {
-                    // 纯数字或 =数字
-                    const numStr = str.startsWith('=') ? str.slice(1) : str;
-                    const num = parseFloat(numStr);
-                    if (!isNaN(num)) expenseVal = months * num;
+                    // 无明细：月数 × 单价 + 附加
+                    const match = str.match(/^=(\d+(?:\.\d+)?)(?:\+\((.+)\))?$/);
+                    if (match) {
+                        const unitPrice = parseFloat(match[1]) || 0;
+                        const extraExpr = match[2];
+                        let extra = 0;
+                        if (extraExpr) {
+                            try {
+                                const sanitized = extraExpr.replace(/[^0-9+\-*/().]/g, '');
+                                if (sanitized) {
+                                    extra = Function('"use strict"; return (' + sanitized + ')')();
+                                }
+                            } catch (e) { extra = 0; }
+                        }
+                        expenseVal = months * unitPrice + extra;
+                    } else {
+                        // 纯数字或 =数字
+                        const numStr = str.startsWith('=') ? str.slice(1) : str;
+                        const num = parseFloat(numStr);
+                        if (!isNaN(num)) expenseVal = months * num;
+                    }
                 }
                 totalExpense += expenseVal;
             }
