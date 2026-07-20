@@ -4782,46 +4782,20 @@ document.addEventListener('DOMContentLoaded', function() {
     conditionalFormatBtn.addEventListener('click', openConditionalFormatModal);
     closeConditionalFormatModal.addEventListener('click', () => conditionalFormatModal.classList.remove('show'));
 
-    // 收支统计
-    function openIncomeExpenseStats() {
-        const records = state.records || [];
-        let totalIncome = 0;
-        let totalExpense = 0;
-        let count = 0;
-
-        records.forEach(record => {
-            if (!record || !record.data) return;
-            count++;
-
-            // 收入：fee 字段
-            const feeRaw = record.data.fee;
-            if (feeRaw) {
-                const feeVal = computeFeeValue(feeRaw);
-                if (typeof feeVal === 'number' && !isNaN(feeVal)) {
-                    totalIncome += feeVal;
-                }
-            }
-
-            // 支出：expense 字段
-            const expenseRaw = record.data.expense;
-            if (expenseRaw) {
-                const months = parseInt(record.data.months) || 0;
-                const expenseVal = computeExpenseValue(expenseRaw, months);
-                if (typeof expenseVal === 'number' && !isNaN(expenseVal)) {
-                    totalExpense += expenseVal;
-                }
-            }
-        });
-
-        const netProfit = totalIncome - totalExpense;
-
-        statsTotalIncome.textContent = totalIncome.toFixed(2);
-        statsTotalExpense.textContent = totalExpense.toFixed(2);
-        statsNetProfit.textContent = (netProfit >= 0 ? '+' : '') + netProfit.toFixed(2);
-        statsNetProfit.style.color = netProfit >= 0 ? '#2e7d32' : '#c62828';
-        statsRecordCount.textContent = count;
-
-        incomeExpenseStatsModal.classList.add('show');
+    // 收支统计：调用后端接口汇总整个标签
+    async function openIncomeExpenseStats() {
+        if (!state.currentTabId) return;
+        try {
+            const result = await API.get('/records/stats?tabId=' + state.currentTabId);
+            statsTotalIncome.textContent = result.totalIncome.toFixed(2);
+            statsTotalExpense.textContent = result.totalExpense.toFixed(2);
+            statsNetProfit.textContent = (result.netProfit >= 0 ? '+' : '') + result.netProfit.toFixed(2);
+            statsNetProfit.style.color = result.netProfit >= 0 ? '#2e7d32' : '#c62828';
+            statsRecordCount.textContent = result.recordCount;
+            incomeExpenseStatsModal.classList.add('show');
+        } catch (err) {
+            setStatus('统计失败: ' + err.message);
+        }
     }
 
     incomeExpenseStatsBtn.addEventListener('click', openIncomeExpenseStats);

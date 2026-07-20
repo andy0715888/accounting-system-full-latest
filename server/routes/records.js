@@ -450,4 +450,84 @@ router.post('/import', requireAuth, async (req, res) => {
     }
 });
 
+// 收支统计：汇总整个标签的所有记录
+router.get('/stats', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { tabId } = req.query;
+        if (!tabId) return res.status(400).json({ error: '缺少 tabId' });
+
+        const rows = await query(
+            `SELECT data FROM records WHERE user_id = ? AND tab_id = ?`,
+            [userId, tabId]
+        );
+
+        let totalIncome = 0;
+        let totalExpense = 0;
+
+        rows.forEach(row => {
+            let data;
+            try { data = JSON.parse(row.data || '{}'); }
+            catch { data = {}; }
+
+            // 收入 fee
+            const feeRaw = data.fee;
+            if (feeRaw) {
+                const str = String(feeRaw).trim();
+                let feeVal = 0;
+                if (str.startsWith('=')) {
+                    const numStr = str.slice(1);
+                    const num = parseFloat(numStr);
+                    if (!isNaN(num)) feeVal = num;
+                } else {
+                    const num = parseFloat(str);
+                    if (!isNaN(num)) feeVal = num;
+                }
+                totalIncome += feeVal;
+            }
+
+            // 支出 expense
+            const expenseRaw = data.expense;
+            if (expenseRaw) {
+                const str = String(expenseRaw).trim();
+                const months = parseInt(data.months) || 0;
+                let expenseVal = 0;
+
+                // =单价+(附加)
+                const match = str.match(/^=(\d+(?:\.\d+)?)(?:\+\((.+)\))?$/);
+                if (match) {
+                    const unitPrice = parseFloat(match[1]) || 0;
+                    const extraExpr = match[2];
+                    let extra = 0;
+                    if (extraExpr) {
+                        try {
+                            const sanitized = extraExpr.replace(/[^0-9+\-*/().]/g, '');
+                            if (sanitized) {
+                                extra = Function('"use strict"; return (' + sanitized + ')')();
+                            }
+                        } catch (e) { extra = 0; }
+                    }
+                    expenseVal = months * unitPrice + extra;
+                } else {
+                    // 纯数字或 =数字
+                    const numStr = str.startsWith('=') ? str.slice(1) : str;
+                    const num = parseFloat(numStr);
+                    if (!isNaN(num)) expenseVal = months * num;
+                }
+                totalExpense += expenseVal;
+            }
+        });
+
+        res.json({
+            totalIncome: Math.round(totalIncome * 100) / 100,
+            totalExpense: Math.round(totalExpense * 100) / 100,
+            netProfit: Math.round((totalIncome - totalExpense) * 100) / 100,
+            recordCount: rows.length
+        });
+    } catch (err) {
+        console.error('统计收支错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 module.exports = router;
