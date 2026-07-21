@@ -746,6 +746,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         return tab && tab.tab_type === 'simple';
     }
+    // 按单条记录判断是否属于普通记账标签（用 record.tabId 反查 tab_type）
+    // 比全局 isSimpleTab() 更可靠：财务统计会聚合所有标签的记录，全局判断只看当前 tab 会误判
+    function isRecordSimpleTab(record) {
+        if (!record || !record.tabId) return isSimpleTab();
+        const tab = state.tabs.find(t => t.id === record.tabId);
+        return !!(tab && tab.tab_type === 'simple');
+    }
 
     // Server-only columns (inherited by client rows, not editable)
     const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info', 'address']);
@@ -4294,7 +4301,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // ========== 收入 ==========
         // 普通记账（isSimpleTab）：收入是累计总额，不按月分配，只在总计中体现
         // 其他标签：用 income_records 明细按 income_date 分配，无明细时用 fee 兜底
-        if (!isSimpleTab()) {
+        if (!isRecordSimpleTab(record)) {
             // Add income by date
             const incomes = record._incomes || [];
             incomes.forEach(inc => {
