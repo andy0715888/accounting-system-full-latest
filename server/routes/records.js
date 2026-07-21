@@ -463,97 +463,73 @@ router.get('/stats', requireAuth, async (req, res) => {
             [userId, tabId]
         );
 
-        // 2. 批量查主机支出明细总和（按 record_id 分组）
         const recordIds = rows.map(r => r.id);
-        let hostExpenseSums = {};
-        if (recordIds.length > 0) {
-            const placeholders = recordIds.map(() => '?').join(',');
-            const detailRows = await query(
-                `SELECT record_id, SUM(unit_price) as total FROM host_expense_details WHERE record_id IN (${placeholders}) GROUP BY record_id`,
-                recordIds
-            );
-            detailRows.forEach(r => { hostExpenseSums[r.record_id] = r.total || 0; });
+
+        // 2. 批量查三张子表（按 record_id 分组求和）
+        const placeholders = recordIds.length > 0 ? recordIds.map(() => '?').join(',') : null;
+        let incomeSums = {};      // record_id -> SUM(amount) from income_records
+        let expenseSums = {};     // record_id -> SUM(amount) from expense_records
+        let hostExpenseSums = {}; // record_id -> SUM(unit_price) from host_expense_details
+
+        if (placeholders) {
+            const [incomeRows, expenseRows, hostDetailRows] = await Promise.all([
+                query(`SELECT record_id, SUM(amount) as total FROM income_records WHERE record_id IN (${placeholders}) GROUP BY record_id`, recordIds),
+                query(`SELECT record_id, SUM(amount) as total FROM expense_records WHERE record_id IN (${placeholders}) GROUP BY record_id`, recordIds),
+                query(`SELECT record_id, SUM(unit_price) as total FROM host_expense_details WHERE record_id IN (${placeholders}) GROUP BY record_id`, recordIds),
+            ]);
+            incomeRows.forEach(r => { incomeSums[r.record_id] = r.total || 0; });
+            expenseRows.forEach(r => { expenseSums[r.record_id] = r.total || 0; });
+            hostDetailRows.forEach(r => { hostExpenseSums[r.record_id] = r.total || 0; });
         }
 
         let totalIncome = 0;
         let totalExpense = 0;
+        let countedRecords = 0;
 
         rows.forEach(row => {
             let data;
             try { data = JSON.parse(row.data || '{}'); }
             catch { data = {}; }
 
-            // ========== 收入 fee ==========
-            const feeRaw = data.fee;
-            if (feeRaw) {
-                const str = String(feeRaw).trim();
-                let feeVal = 0;
-                if (str.startsWith('=')) {
-                    // 尝试 safeEval（支持 =80+10 这种）
-                    try {
-                        const sanitized = str.slice(1).replace(/[^0-9+\-*/().]/g, '');
-                        if (sanitized) {
-                            feeVal = Function('"use strict"; return (' + sanitized + ')')();
-                        }
-                    } catch (e) {
-                        const num = parseFloat(str.slice(1));
-                        if (!isNaN(num)) feeVal = num;
-                    }
-                } else {
-                    const num = parseFloat(str);
-                    if (!isNaN(num)) feeVal = num;
-                }
+            // 跳过结余调整记录（不参与统计）
+            if (data.remark && String(data.remark).includes('结余调整')) {
+                return;
+            }
+            countedRecords++;
+
+            // ========== 收入（二分支） ==========
+            // 有 income_records → 用 income_records 总和；否则 → 用 data.fee（支持 =80+10 表达式）
+            const incomeTotal = incomeSums[row.id] || 0;
+            if (incomeTotal > 0) {
+                totalIncome += incomeTotal;
+            } else {
+                const feeVal = evalAmountExpr(data.fee);
                 if (typeof feeVal === 'number' && !isNaN(feeVal)) {
                     totalIncome += feeVal;
                 }
             }
 
-            // ========== 支出 expense ==========
-            const expenseRaw = data.expense;
-            if (expenseRaw) {
-                const str = String(expenseRaw).trim();
-                const months = parseInt(data.months) || 0;
-                let expenseVal = 0;
-
-                // 先查是否有主机支出明细 —— 有明细就用"明细总和 + 附加"，和前端显示一致
+            // ========== 支出（三分支） ==========
+            // 有 expense_records → 用 expense_records 总和；
+            // 否则有 host_expense_details → 用 明细总和 + 附加；
+            // 否则 → 用 月数 × 单价 + 附加
+            const expenseTotal = expenseSums[row.id] || 0;
+            if (expenseTotal > 0) {
+                totalExpense += expenseTotal;
+            } else {
                 const detailSum = hostExpenseSums[row.id] || 0;
                 if (detailSum > 0) {
-                    // 有明细：支出 = 明细总和 + 附加
-                    let extra = 0;
-                    const match = str.match(/^=(?:\d+(?:\.\d+)?)\+\((.+)\)$/);
-                    if (match) {
-                        try {
-                            const sanitized = match[1].replace(/[^0-9+\-*/().]/g, '');
-                            if (sanitized) {
-                                extra = Function('"use strict"; return (' + sanitized + ')')();
-                            }
-                        } catch (e) { extra = 0; }
-                    }
-                    expenseVal = detailSum + extra;
-                } else {
+                    // 有主机支出明细：支出 = 明细总和 + 附加
+                    const extra = parseExpenseExtraStr(data.expense);
+                    totalExpense += detailSum + extra;
+                } else if (data.expense) {
                     // 无明细：月数 × 单价 + 附加
-                    const match = str.match(/^=(\d+(?:\.\d+)?)(?:\+\((.+)\))?$/);
-                    if (match) {
-                        const unitPrice = parseFloat(match[1]) || 0;
-                        const extraExpr = match[2];
-                        let extra = 0;
-                        if (extraExpr) {
-                            try {
-                                const sanitized = extraExpr.replace(/[^0-9+\-*/().]/g, '');
-                                if (sanitized) {
-                                    extra = Function('"use strict"; return (' + sanitized + ')')();
-                                }
-                            } catch (e) { extra = 0; }
-                        }
-                        expenseVal = months * unitPrice + extra;
-                    } else {
-                        // 纯数字或 =数字
-                        const numStr = str.startsWith('=') ? str.slice(1) : str;
-                        const num = parseFloat(numStr);
-                        if (!isNaN(num)) expenseVal = months * num;
+                    const months = parseInt(data.months) || 0;
+                    const expVal = evalExpenseExpr(data.expense, months);
+                    if (typeof expVal === 'number' && !isNaN(expVal)) {
+                        totalExpense += expVal;
                     }
                 }
-                totalExpense += expenseVal;
             }
         });
 
@@ -561,12 +537,62 @@ router.get('/stats', requireAuth, async (req, res) => {
             totalIncome: Math.round(totalIncome * 100) / 100,
             totalExpense: Math.round(totalExpense * 100) / 100,
             netProfit: Math.round((totalIncome - totalExpense) * 100) / 100,
-            recordCount: rows.length
+            recordCount: countedRecords
         });
     } catch (err) {
         console.error('统计收支错误:', err);
         res.status(500).json({ error: '服务器错误' });
     }
 });
+
+// 工具：解析金额表达式（支持 "80"、"=80+10"、"=80" 等）
+function evalAmountExpr(raw) {
+    if (!raw) return 0;
+    const str = String(raw).trim();
+    if (!str) return 0;
+    let expr = str.startsWith('=') ? str.slice(1) : str;
+    const sanitized = expr.replace(/[^0-9+\-*/().]/g, '');
+    if (!sanitized) {
+        const num = parseFloat(expr);
+        return isNaN(num) ? 0 : num;
+    }
+    try {
+        const v = Function('"use strict"; return (' + sanitized + ')')();
+        return typeof v === 'number' ? v : 0;
+    } catch (e) {
+        const num = parseFloat(expr);
+        return isNaN(num) ? 0 : num;
+    }
+}
+
+// 工具：解析支出表达式附加部分（"=40+(10)" → 10）
+function parseExpenseExtraStr(raw) {
+    if (!raw) return 0;
+    const str = String(raw).trim();
+    const match = str.match(/^=(?:\d+(?:\.\d+)?)\+\((.+)\)$/);
+    if (!match) return 0;
+    const sanitized = match[1].replace(/[^0-9+\-*/().]/g, '');
+    if (!sanitized) return 0;
+    try {
+        const v = Function('"use strict"; return (' + sanitized + ')')();
+        return typeof v === 'number' ? v : 0;
+    } catch (e) { return 0; }
+}
+
+// 工具：解析支出表达式（无明细场景）"=40+(10)" 或 "=40" 或 "40"
+function evalExpenseExpr(raw, months) {
+    if (!raw) return 0;
+    const str = String(raw).trim();
+    const match = str.match(/^=(\d+(?:\.\d+)?)(?:\+\((.+)\))?$/);
+    if (match) {
+        const unitPrice = parseFloat(match[1]) || 0;
+        const extra = match[2] ? parseExpenseExtraStr(str) : 0;
+        return months * unitPrice + extra;
+    }
+    const numStr = str.startsWith('=') ? str.slice(1) : str;
+    const num = parseFloat(numStr);
+    if (isNaN(num)) return 0;
+    return months * num;
+}
 
 module.exports = router;

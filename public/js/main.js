@@ -4190,6 +4190,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getRecordFinancials(record) {
+        // 跳过结余调整记录（不参与财务统计）
+        if (record.data.remark && String(record.data.remark).includes('结余调整')) {
+            return { income: 0, expense: 0, net: 0 };
+        }
         const months = parseInt(record.data.months) || 0;
         let expense = 0;
         // 普通记账标签：支出在 expense_records 表，用 _expenseTotal
@@ -4213,21 +4217,30 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function getRecordFinancialsByMonth(record) {
+        // 跳过结余调整记录（不参与财务统计）
+        if (record.data.remark && String(record.data.remark).includes('结余调整')) {
+            return [];
+        }
         // Returns array of { month: 'YYYY-MM', income, expense } broken down by month
         const results = [];
         const months = parseInt(record.data.months) || 0;
-        // 普通记账用 _expenseTotal，独享/共享用 computeExpenseValue
+        // 支出计算三分支（与 getRecordFinancials 对齐）：
+        //   普通记账标签：用 _expenseTotal（expense_records 表汇总）
+        //   独享/共享且有主机明细：用 _hostExpenseTotal + 附加
+        //   其余：用 computeExpenseValue（月数 × 单价 + 附加）
         let totalExpense;
+        const hostDetails = record._hostExpenseDetails;
         if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
             totalExpense = record._expenseTotal;
+        } else if (hostDetails && hostDetails.length > 0) {
+            totalExpense = (record._hostExpenseTotal || 0) + parseExpenseExtra(record.data.expense);
         } else {
             totalExpense = computeExpenseValue(record.data.expense, months) || 0;
         }
-        const purchaseDate = record.data.host_purchase;
-        const startDate = purchaseDate ? new Date(purchaseDate) : null;
+        const purchaseDate = record.data.host_purchase || record.data.client_purchase;
+        const startDate = purchaseDate ? new Date(purchaseDate) : (record.created_at ? new Date(record.created_at) : null);
 
         // 独享/共享标签：若存在主机支出明细，按明细的实际日期+金额统计（不再平摊）
-        const hostDetails = record._hostExpenseDetails;
         if (hostDetails && hostDetails.length > 0) {
             hostDetails.forEach(d => {
                 if (d.expense_date) {
