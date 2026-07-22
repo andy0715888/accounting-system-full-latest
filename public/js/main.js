@@ -4299,8 +4299,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // ========== 收入 ==========
-        // 普通记账（isSimpleTab）：收入是累计总额，不按月分配，只在总计中体现
-        // 其他标签：用 income_records 明细按 income_date 分配，无明细时用 fee 兜底
+        // 普通记账（isSimpleTab）：income_records 是累计总额，不按月分配
+        // 其他标签：用 income_records 明细按 income_date 分配
         if (!isRecordSimpleTab(record)) {
             // Add income by date
             const incomes = record._incomes || [];
@@ -4319,21 +4319,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
 
-            // 独享/共享标签：收入在 record.data.fee，没有 _incomes 明细时按 host_purchase 分配
-            if (incomes.length === 0) {
-                const fee = parseFloat(record.data.fee);
-                if (!isNaN(fee) && fee > 0 && startDate && !isNaN(startDate)) {
-                    // 分配到 host_purchase 当月
-                    const monthKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
-                    let bucket = results.find(r => r.month === monthKey);
-                    if (!bucket) {
-                        bucket = { month: monthKey, income: 0, expense: 0 };
-                        results.push(bucket);
-                    }
-                    bucket.income += fee;
-                }
-            }
-
             // Add expense by date (独享/共享标签的 expense_records 明细按日期分配)
             const expenses = record._expenses || [];
             expenses.forEach(exp => {
@@ -4350,6 +4335,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             });
+        }
+
+        // 所有标签：收入在 record.data.fee，没有 _incomes 明细时按日期分配
+        const incomes = record._incomes || [];
+        if (incomes.length === 0) {
+            const fee = parseFloat(record.data.fee);
+            if (!isNaN(fee) && fee > 0 && startDate && !isNaN(startDate)) {
+                const monthKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+                let bucket = results.find(r => r.month === monthKey);
+                if (!bucket) {
+                    bucket = { month: monthKey, income: 0, expense: 0 };
+                    results.push(bucket);
+                }
+                bucket.income += fee;
+            }
         }
 
         return results;
