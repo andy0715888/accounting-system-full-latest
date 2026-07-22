@@ -746,13 +746,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         return tab && tab.tab_type === 'simple';
     }
-    // 按单条记录判断是否属于普通记账标签（用 record.tabId 反查 tab_type）
-    // 比全局 isSimpleTab() 更可靠：财务统计会聚合所有标签的记录，全局判断只看当前 tab 会误判
-    function isRecordSimpleTab(record) {
-        if (!record || !record.tabId) return isSimpleTab();
-        const tab = state.tabs.find(t => t.id === record.tabId);
-        return !!(tab && tab.tab_type === 'simple');
-    }
 
     // Server-only columns (inherited by client rows, not editable)
     const SERVER_ONLY_COLS = new Set(['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'expense', 'ip_info', 'address']);
@@ -4201,6 +4194,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (record.data.remark && String(record.data.remark).includes('结余调整')) {
             return { income: 0, expense: 0, net: 0 };
         }
+
         const months = parseInt(record.data.months) || 0;
         let expense = 0;
         // 普通记账标签：支出在 expense_records 表，用 _expenseTotal
@@ -4228,27 +4222,26 @@ document.addEventListener('DOMContentLoaded', function() {
         if (record.data.remark && String(record.data.remark).includes('结余调整')) {
             return [];
         }
+
         // Returns array of { month: 'YYYY-MM', income, expense } broken down by month
         const results = [];
         const months = parseInt(record.data.months) || 0;
-        // 支出计算三分支（与 getRecordFinancials 对齐）：
-        //   普通记账标签：用 _expenseTotal（expense_records 表汇总）
-        //   独享/共享且有主机明细：用 _hostExpenseTotal + 附加
-        //   其余：用 computeExpenseValue（月数 × 单价 + 附加）
-        let totalExpense;
-        const hostDetails = record._hostExpenseDetails;
-        if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
-            totalExpense = record._expenseTotal;
-        } else if (hostDetails && hostDetails.length > 0) {
-            totalExpense = (record._hostExpenseTotal || 0) + parseExpenseExtra(record.data.expense);
-        } else {
-            totalExpense = computeExpenseValue(record.data.expense, months) || 0;
-        }
+        // 优先用 host_purchase，其次 client_purchase，最后 created_at
         const purchaseDate = record.data.host_purchase || record.data.client_purchase;
         const startDate = purchaseDate ? new Date(purchaseDate) : (record.created_at ? new Date(record.created_at) : null);
 
-        // 独享/共享标签：若存在主机支出明细，按明细的实际日期+金额统计（不再平摊）
-        if (hostDetails && hostDetails.length > 0) {
+        // 优先使用明细统计（避免 _expenseTotal / computeExpenseValue 与 _expenses 重复计算）
+        const expenses = record._expenses || [];
+        const hostDetails = record._hostExpenseDetails || [];
+        const incomes = record._incomes || [];
+
+        // 判断是否为简单标签（普通记账等）：有 _expenses 明细或无 hostDetails
+        // 使用 tabId 判断更可靠：tabId=3 是普通记账
+        const SIMPLE_TAB_IDS = [3]; // 普通记账的 tab_id 列表
+        const isSimpleTab = SIMPLE_TAB_IDS.includes(record.tabId) || (expenses.length > 0 && hostDetails.length === 0);
+
+        if (hostDetails.length > 0) {
+            // 独享/共享标签：按主机支出明细的实际日期+金额统计
             hostDetails.forEach(d => {
                 if (d.expense_date) {
                     const dd = new Date(d.expense_date);
@@ -4281,60 +4274,58 @@ document.addEventListener('DOMContentLoaded', function() {
                     bucket.expense += extra;
                 }
             }
+        } else if (isSimpleTab) {
+            // 普通记账等简单标签：支出由 _expenses（expense_records明细）按日期分布（见下方收入区块后的支出处理）
         } else if (months > 0 && startDate && !isNaN(startDate)) {
-            // Distribute expense across months based on host_purchase date
+            // 无明细时按 host_purchase 日期平摊
+            let totalExpense;
+            if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
+                totalExpense = record._expenseTotal;
+            } else {
+                totalExpense = computeExpenseValue(record.data.expense, months) || 0;
+            }
             const unitExpense = totalExpense / months;
             for (let i = 0; i < months; i++) {
                 const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
                 const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                 results.push({ month: monthKey, income: 0, expense: unitExpense });
             }
-        } else if (totalExpense > 0) {
-            // No date info, put in a single bucket
-            const d = record.data.host_purchase ? new Date(record.data.host_purchase) : new Date(record.created_at);
-            if (!isNaN(d)) {
-                const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                results.push({ month: monthKey, income: 0, expense: totalExpense });
+        } else {
+            // 无明细、无日期时，兜底使用 _expenseTotal / computeExpenseValue
+            let totalExpense;
+            if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
+                totalExpense = record._expenseTotal;
+            } else {
+                totalExpense = computeExpenseValue(record.data.expense, months) || 0;
+            }
+            if (totalExpense > 0) {
+                const d = record.data.host_purchase ? new Date(record.data.host_purchase) : new Date(record.created_at);
+                if (!isNaN(d)) {
+                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    results.push({ month: monthKey, income: 0, expense: totalExpense });
+                }
             }
         }
 
         // ========== 收入 ==========
-        // 所有标签：用 income_records 明细按 income_date 分配
-        const incomes = record._incomes || [];
-        incomes.forEach(inc => {
-            if (inc.income_date) {
-                const d = new Date(inc.income_date);
-                if (!isNaN(d)) {
-                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    let bucket = results.find(r => r.month === monthKey);
-                    if (!bucket) {
-                        bucket = { month: monthKey, income: 0, expense: 0 };
-                        results.push(bucket);
+        // 所有标签：有 income_records 时按 income_date 分配月度收入
+        if (incomes.length > 0) {
+            incomes.forEach(inc => {
+                if (inc.income_date) {
+                    const d = new Date(inc.income_date);
+                    if (!isNaN(d)) {
+                        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                        let bucket = results.find(r => r.month === monthKey);
+                        if (!bucket) {
+                            bucket = { month: monthKey, income: 0, expense: 0 };
+                            results.push(bucket);
+                        }
+                        bucket.income += (inc.amount || 0);
                     }
-                    bucket.income += (inc.amount || 0);
                 }
-            }
-        });
-
-        // Add expense by date (expense_records 明细按日期分配)
-        const expenses = record._expenses || [];
-        expenses.forEach(exp => {
-            if (exp.expense_date) {
-                const d = new Date(exp.expense_date);
-                if (!isNaN(d)) {
-                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    let bucket = results.find(r => r.month === monthKey);
-                    if (!bucket) {
-                        bucket = { month: monthKey, income: 0, expense: 0 };
-                        results.push(bucket);
-                    }
-                    bucket.expense += (exp.amount || 0);
-                }
-            }
-        });
-
-        // 所有标签：收入在 record.data.fee，没有 _incomes 明细时按日期分配
-        if (incomes.length === 0) {
+            });
+        } else {
+            // 无 _incomes 明细时，从 records.data.fee 读取（所有标签）
             const fee = parseFloat(record.data.fee);
             if (!isNaN(fee) && fee > 0 && startDate && !isNaN(startDate)) {
                 const monthKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
@@ -4345,6 +4336,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 bucket.income += fee;
             }
+        }
+
+        // 普通记账的支出：按 expense_records 日期分配月度支出
+        if (isSimpleTab && expenses.length > 0) {
+            expenses.forEach(exp => {
+                if (exp.expense_date) {
+                    const d = new Date(exp.expense_date);
+                    if (!isNaN(d)) {
+                        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                        let bucket = results.find(r => r.month === monthKey);
+                        if (!bucket) {
+                            bucket = { month: monthKey, income: 0, expense: 0 };
+                            results.push(bucket);
+                        }
+                        bucket.expense += (exp.amount || 0);
+                    }
+                }
+            });
         }
 
         return results;
