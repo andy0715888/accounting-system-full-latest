@@ -488,6 +488,20 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { return 0; }
     }
 
+    // 解析金额表达式（支持 "80"、"=80+10"、"=80" 等），与后端 evalAmountExpr 等价
+    function evalAmountExpr(raw) {
+        if (!raw) return 0;
+        const str = String(raw).trim();
+        if (!str) return 0;
+        let expr = str.startsWith('=') ? str.slice(1) : str;
+        const sanitized = expr.replace(/[^0-9+\-*/().]/g, '');
+        if (!sanitized) {
+            const num = parseFloat(expr);
+            return isNaN(num) ? 0 : num;
+        }
+        return safeEval(sanitized);
+    }
+
     function calcColumnWidth(col) {
         let headerText = getColumnDisplayName(col);
         let lines = headerText.split('<br>');
@@ -1586,6 +1600,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (e.target.classList.contains('filter-ok')) {
                 const colKey = e.target.dataset.col;
+                if (!colKey) return;
                 const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
                 if (!panel) return;
                 const searchInput = panel.querySelector('.filter-search');
@@ -1629,6 +1644,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (e.target.classList.contains('filter-clear')) {
                 const colKey = e.target.dataset.col;
+                if (!colKey) return;
                 delete state.filters[colKey];
                 state.tabFilters[state.currentTabId] = { ...state.filters };
                 saveTabFiltersToStorage();
@@ -4211,8 +4227,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 独享/共享标签收入在 record.data.fee 中，_incomeTotal 为 0 时 fallback
         let income = record._incomeTotal || 0;
         if (income <= 0) {
-            const fee = parseFloat(record.data.fee);
-            if (!isNaN(fee)) income = fee;
+            income = evalAmountExpr(record.data.fee) || 0;
         }
         return { income, expense, net: income - expense };
     }
@@ -4235,12 +4250,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const hostDetails = record._hostExpenseDetails || [];
         const incomes = record._incomes || [];
 
-        // 判断是否为简单标签（普通记账等）：有 _expenses 明细或无 hostDetails
-        // 使用 tabId 判断更可靠：tabId=3 是普通记账
-        const SIMPLE_TAB_IDS = [3]; // 普通记账的 tab_id 列表
-        const isSimpleTab = SIMPLE_TAB_IDS.includes(record.tabId) || (expenses.length > 0 && hostDetails.length === 0);
-
-        if (hostDetails.length > 0) {
+        // 支出优先级（与 getRecordFinancials 一致）：
+        // expense_records > host_expense_details > 月数×单价+附加
+        if (expenses.length > 0) {
+            // 有 expense_records 明细：支出按明细日期分配（见下方统一处理）
+        } else if (hostDetails.length > 0) {
             // 独享/共享标签：按主机支出明细的实际日期+金额统计
             hostDetails.forEach(d => {
                 if (d.expense_date) {
@@ -4274,8 +4288,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     bucket.expense += extra;
                 }
             }
-        } else if (isSimpleTab) {
-            // 普通记账等简单标签：支出由 _expenses（expense_records明细）按日期分布（见下方收入区块后的支出处理）
         } else if (months > 0 && startDate && !isNaN(startDate)) {
             // 无明细时按 host_purchase 日期平摊
             let totalExpense;
@@ -4325,9 +4337,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         } else {
-            // 无 _incomes 明细时，从 records.data.fee 读取（所有标签）
-            const fee = parseFloat(record.data.fee);
-            if (!isNaN(fee) && fee > 0 && startDate && !isNaN(startDate)) {
+            // 无 _incomes 明细时，从 records.data.fee 读取（所有标签，支持 =80+10 表达式）
+            const fee = evalAmountExpr(record.data.fee);
+            if (fee > 0 && startDate && !isNaN(startDate)) {
                 const monthKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
                 let bucket = results.find(r => r.month === monthKey);
                 if (!bucket) {
@@ -4338,8 +4350,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // 普通记账的支出：按 expense_records 日期分配月度支出
-        if (isSimpleTab && expenses.length > 0) {
+        // 所有标签：按 expense_records 日期分配月度支出
+        if (expenses.length > 0) {
             expenses.forEach(exp => {
                 if (exp.expense_date) {
                     const d = new Date(exp.expense_date);
