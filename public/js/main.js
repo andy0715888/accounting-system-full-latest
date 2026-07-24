@@ -227,6 +227,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     loadHosts();
                     loadCommandFolders();
                 }
+                if (view === 'memos') {
+                    loadMemoTags();
+                }
             });
         });
     }
@@ -3713,16 +3716,20 @@ document.addEventListener('DOMContentLoaded', function() {
         `).join('');
 
         expenseList.querySelectorAll('.expense-amount-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
-                const id = parseInt(this.dataset.id);
-                const amount = parseFloat(this.value);
-                if (isNaN(amount) || amount <= 0) { expenseStatus.textContent = '金额无效'; return; }
+            const saveAmount = async function() {
+                const id = parseInt(inp.dataset.id);
+                const amount = parseFloat(inp.value);
+                if (isNaN(amount) || amount < 0) { expenseStatus.textContent = '金额无效'; return; }
                 try {
                     await API.put('/expense/' + id, { amount });
                     await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
                     setTimeout(() => expenseStatus.textContent = '', 1200);
                 } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
+            };
+            inp.addEventListener('change', saveAmount);
+            inp.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
             });
         });
 
@@ -4520,12 +4527,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const hidden = state.statsHidden;
             const maskVal = () => '••••••';
-            const showNet = hidden ? maskVal() : formatMoney(total.net);
-            const showIncome = hidden ? maskVal() : formatMoney(total.income);
-            const showExpense = hidden ? maskVal() : formatMoney(total.expense);
-            const showProfit = hidden ? maskVal() : (profitRate.toFixed(1) + '%');
-            const showAvgIncome = hidden ? maskVal() : formatMoney(avgIncome);
-            const showAvgExpense = hidden ? maskVal() : formatMoney(avgExpense);
+            const realNet = formatMoney(total.net);
+            const realIncome = formatMoney(total.income);
+            const realExpense = formatMoney(total.expense);
+            const realProfit = profitRate.toFixed(1) + '%';
+            const realAvgIncome = formatMoney(avgIncome);
+            const realAvgExpense = formatMoney(avgExpense);
+            const showNet = hidden ? maskVal() : realNet;
+            const showIncome = hidden ? maskVal() : realIncome;
+            const showExpense = hidden ? maskVal() : realExpense;
+            const showProfit = hidden ? maskVal() : realProfit;
+            const showAvgIncome = hidden ? maskVal() : realAvgIncome;
+            const showAvgExpense = hidden ? maskVal() : realAvgExpense;
             const eyeIcon = hidden ? '👁️' : '🙈';
             const eyeTitle = hidden ? '显示敏感数字' : '隐藏敏感数字';
 
@@ -4540,14 +4553,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="stats-hero-net ${total.net >= 0 ? 'positive' : 'negative'}">
                         <span>净收入</span>
-                        <strong>${showNet}</strong>
+                        <strong class="stats-sensitive" data-real="${realNet}">${showNet}</strong>
                     </div>
                 </div>
 
                 <div class="stats-grid premium">
-                    <div class="stat-card dark"><div class="stat-label">总收入</div><div class="stat-value positive">${showIncome}</div><div class="stat-sub">平均每条 ${showAvgIncome}</div></div>
-                    <div class="stat-card dark"><div class="stat-label">总支出</div><div class="stat-value negative">${showExpense}</div><div class="stat-sub">平均每条 ${showAvgExpense}</div></div>
-                    <div class="stat-card dark"><div class="stat-label">利润率</div><div class="stat-value neutral">${showProfit}</div><div class="stat-sub">收入转化净额占比</div></div>
+                    <div class="stat-card dark"><div class="stat-label">总收入</div><div class="stat-value positive stats-sensitive" data-real="${realIncome}">${showIncome}</div><div class="stat-sub">平均每条 <span class="stats-sensitive" data-real="${realAvgIncome}">${showAvgIncome}</span></div></div>
+                    <div class="stat-card dark"><div class="stat-label">总支出</div><div class="stat-value negative stats-sensitive" data-real="${realExpense}">${showExpense}</div><div class="stat-sub">平均每条 <span class="stats-sensitive" data-real="${realAvgExpense}">${showAvgExpense}</span></div></div>
+                    <div class="stat-card dark"><div class="stat-label">利润率</div><div class="stat-value neutral stats-sensitive" data-real="${realProfit}">${showProfit}</div><div class="stat-sub">收入转化净额占比</div></div>
                     <div class="stat-card dark"><div class="stat-label">到期状态</div><div class="stat-value neutral">${activeCount}/${expiredCount}</div><div class="stat-sub">有效 / 过期</div></div>
                 </div>
 
@@ -4619,14 +4632,28 @@ document.addEventListener('DOMContentLoaded', function() {
         renderStats();
     });
 
-    // 财务统计眼睛按钮（显示/隐藏敏感数字）
+    // 财务统计眼睛按钮（显示/隐藏敏感数字）— 只切换DOM，不重新统计
     document.addEventListener('click', function(e) {
         if (!e.target.classList.contains('stats-eye-btn')) return;
         state.statsHidden = !state.statsHidden;
         try {
             if (state.userId) localStorage.setItem('statsHidden_' + state.userId, state.statsHidden ? '1' : '0');
         } catch(e) {}
-        renderStats();
+        const hidden = state.statsHidden;
+        const mask = '••••••';
+        // 切换按钮图标
+        e.target.textContent = hidden ? '👁️' : '🙈';
+        e.target.title = hidden ? '显示敏感数字' : '隐藏敏感数字';
+        // 切换所有敏感值文本
+        const sensitives = statsContainer.querySelectorAll('.stats-sensitive');
+        sensitives.forEach(el => {
+            if (hidden) {
+                el.dataset.real = el.textContent;
+                el.textContent = mask;
+            } else {
+                el.textContent = el.dataset.real || el.textContent;
+            }
+        });
     });
 
     // 收入/支出/主机支出明细：点击表头排序
@@ -5487,6 +5514,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             initHostsModule();
+            initMemosModule();
             hideTableLoading();
         } catch (err) { console.error('初始化失败:', err); setStatus('❌ 初始化失败: ' + err.message); hideTableLoading(); }
     }
@@ -5833,6 +5861,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'connected') {
+                    fetch(`/api/hosts/${host.id}/touch`, { method: 'POST' }).then(() => loadHosts()).catch(() => {});
                     if (activeConnId === connId) {
                         title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
                         terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
@@ -6766,8 +6795,22 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('addCmdFolderBtn').onclick = () => showAddFolderModal();
 
         const searchInput = document.getElementById('hostSearchInput');
+        const searchClear = document.getElementById('hostSearchClear');
         if (searchInput) {
-            searchInput.addEventListener('input', () => renderHosts());
+            searchInput.addEventListener('input', () => {
+                renderHosts();
+                if (searchClear) searchClear.style.display = searchInput.value ? 'flex' : 'none';
+            });
+        }
+        if (searchClear) {
+            searchClear.addEventListener('click', () => {
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchInput.focus();
+                    renderHosts();
+                }
+                searchClear.style.display = 'none';
+            });
         }
 
         const hostsList = document.getElementById('hostsList');
@@ -7195,6 +7238,298 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         loadSshSettings();
+    }
+
+    // --- 备忘记录模块 ---
+    let memoTags = [];
+    let memoItems = [];
+    let currentMemoTagId = null;
+
+    async function loadMemoTags() {
+        try {
+            const res = await fetch('/api/memos/tags');
+            if (res.ok) {
+                memoTags = await res.json();
+                renderMemoTags();
+                if (memoTags.length > 0 && !memoTags.find(t => t.id === currentMemoTagId)) {
+                    selectMemoTag(memoTags[0].id);
+                }
+            }
+        } catch (err) { console.error('加载备忘标签失败:', err); }
+    }
+
+    function renderMemoTags() {
+        const bar = document.getElementById('memoTabBar');
+        if (!bar) return;
+        if (!memoTags.length) {
+            bar.innerHTML = '<div style="color:#909399;font-size:13px;padding:8px 12px;">暂无标签，点击右侧"添加标签"创建</div>';
+            return;
+        }
+        bar.innerHTML = memoTags.map(t => `
+            <div class="memo-tab-item ${t.id === currentMemoTagId ? 'active' : ''}" data-id="${t.id}" draggable="true">
+                <span class="memo-tab-name">${escapeHtml(t.name)}</span>
+                <button class="memo-tab-rename" data-id="${t.id}" title="重命名">✏️</button>
+                <button class="memo-tab-delete" data-id="${t.id}" title="删除">✕</button>
+            </div>
+        `).join('');
+    }
+
+    async function selectMemoTag(tagId) {
+        currentMemoTagId = tagId;
+        const tag = memoTags.find(t => t.id === tagId);
+        const nameEl = document.getElementById('memoCurrentTagName');
+        const addBtn = document.getElementById('addMemoItemBtn');
+        if (nameEl && tag) nameEl.textContent = tag.name;
+        if (addBtn) addBtn.disabled = false;
+        renderMemoTags();
+        await loadMemoItems(tagId);
+    }
+
+    async function loadMemoItems(tagId) {
+        try {
+            const res = await fetch(`/api/memos/tags/${tagId}/items`);
+            if (res.ok) {
+                memoItems = await res.json();
+                renderMemoItems();
+            }
+        } catch (err) { console.error('加载备忘记录失败:', err); }
+    }
+
+    function renderMemoItems() {
+        const list = document.getElementById('memosList');
+        if (!list) return;
+        if (!memoItems.length) {
+            list.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">暂无备忘记录，点击右上角"添加备忘"创建</div>';
+            return;
+        }
+        list.innerHTML = memoItems.map(m => `
+            <div class="memo-card ${m.is_visible ? '' : 'memo-hidden'}" data-id="${m.id}">
+                <div class="memo-card-header">
+                    <div class="memo-card-title">${escapeHtml(m.title || '（无标题）')}</div>
+                    <div class="memo-card-actions">
+                        <button class="memo-action-btn" data-action="copy" data-id="${m.id}" title="复制">📋</button>
+                        <button class="memo-action-btn" data-action="edit" data-id="${m.id}" title="编辑">✏️</button>
+                        <button class="memo-action-btn" data-action="delete" data-id="${m.id}" title="删除">🗑️</button>
+                    </div>
+                </div>
+                <div class="memo-card-body">${escapeHtml(m.content || '').replace(/\n/g, '<br>') || '<span style="color:#c0c4cc;">（无内容）</span>'}</div>
+                <div class="memo-card-footer">
+                    <span>更新: ${formatDateTime(m.updated_at || m.created_at)}</span>
+                    ${m.is_visible ? '<span style="color:#67c23a;">● 显示中</span>' : '<span style="color:#909399;">○ 已隐藏</span>'}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function formatDateTime(str) {
+        if (!str) return '-';
+        const d = new Date(str);
+        if (isNaN(d.getTime())) return str;
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    function showMemoItemModal(item = null) {
+        const isEdit = !!item;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:560px;">
+                <div class="modal-header">
+                    <h2>${isEdit ? '✏️ 编辑备忘' : '➕ 添加备忘'}</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>标题</label><input type="text" id="memoTitleInput" value="${isEdit ? escapeAttr(item.title || '') : ''}" placeholder="请输入标题" /></div>
+                    <div class="input-group"><label>内容</label><textarea id="memoContentInput" rows="8" placeholder="请输入内容...">${isEdit ? escapeHtml(item.content || '') : ''}</textarea></div>
+                    <div class="input-group" style="display:flex;align-items:center;gap:8px;">
+                        <label style="margin:0;">是否显示</label>
+                        <input type="checkbox" id="memoVisibleInput" ${isEdit ? (item.is_visible ? 'checked' : '') : 'checked'} />
+                    </div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveMemoItemBtn">${isEdit ? '保存' : '添加'}</button>
+                        <button class="tool-btn cancel-memo-btn">取消</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-memo-btn').onclick = () => overlay.remove();
+        overlay.querySelector('#saveMemoItemBtn').onclick = async () => {
+            const title = overlay.querySelector('#memoTitleInput').value.trim();
+            const content = overlay.querySelector('#memoContentInput').value;
+            const is_visible = overlay.querySelector('#memoVisibleInput').checked;
+            try {
+                let res;
+                if (isEdit) {
+                    res = await fetch(`/api/memos/items/${item.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title, content, is_visible })
+                    });
+                } else {
+                    res = await fetch(`/api/memos/tags/${currentMemoTagId}/items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title, content, is_visible })
+                    });
+                }
+                if (res.ok) {
+                    overlay.remove();
+                    loadMemoItems(currentMemoTagId);
+                }
+            } catch (err) { console.error('保存备忘失败:', err); }
+        };
+    }
+
+    function initMemosModule() {
+        const addTagBtn = document.getElementById('addMemoTagBtn');
+        if (addTagBtn) {
+            addTagBtn.onclick = async () => {
+                const name = prompt('请输入标签名称:');
+                if (!name || !name.trim()) return;
+                try {
+                    const res = await fetch('/api/memos/tags', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: name.trim() })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        await loadMemoTags();
+                        selectMemoTag(data.id);
+                    }
+                } catch (err) { console.error('添加标签失败:', err); }
+            };
+        }
+
+        const addItemBtn = document.getElementById('addMemoItemBtn');
+        if (addItemBtn) {
+            addItemBtn.onclick = () => {
+                if (!currentMemoTagId) return;
+                showMemoItemModal();
+            };
+        }
+
+        const tabBar = document.getElementById('memoTabBar');
+        if (tabBar) {
+            tabBar.addEventListener('click', async (e) => {
+                const tabItem = e.target.closest('.memo-tab-item');
+                const renameBtn = e.target.closest('.memo-tab-rename');
+                const deleteBtn = e.target.closest('.memo-tab-delete');
+                if (deleteBtn) {
+                    e.stopPropagation();
+                    const id = parseInt(deleteBtn.dataset.id);
+                    if (!confirm('确定要删除此标签及其下所有备忘记录吗？')) return;
+                    try {
+                        const res = await fetch(`/api/memos/tags/${id}`, { method: 'DELETE' });
+                        if (res.ok) {
+                            if (currentMemoTagId === id) currentMemoTagId = null;
+                            await loadMemoTags();
+                            if (memoTags.length > 0) selectMemoTag(memoTags[0].id);
+                            else {
+                                document.getElementById('memosList').innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>';
+                                document.getElementById('memoCurrentTagName').textContent = '请选择标签';
+                                addItemBtn.disabled = true;
+                            }
+                        }
+                    } catch (err) { console.error('删除标签失败:', err); }
+                    return;
+                }
+                if (renameBtn) {
+                    e.stopPropagation();
+                    const id = parseInt(renameBtn.dataset.id);
+                    const tag = memoTags.find(t => t.id === id);
+                    if (!tag) return;
+                    const newName = prompt('请输入新的标签名称:', tag.name);
+                    if (!newName || !newName.trim()) return;
+                    try {
+                        const res = await fetch(`/api/memos/tags/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: newName.trim() })
+                        });
+                        if (res.ok) {
+                            await loadMemoTags();
+                            if (currentMemoTagId === id) {
+                                document.getElementById('memoCurrentTagName').textContent = newName.trim();
+                            }
+                        }
+                    } catch (err) { console.error('重命名标签失败:', err); }
+                    return;
+                }
+                if (tabItem) {
+                    const id = parseInt(tabItem.dataset.id);
+                    selectMemoTag(id);
+                }
+            });
+
+            // 拖拽排序
+            let draggedTagId = null;
+            tabBar.addEventListener('dragstart', (e) => {
+                const item = e.target.closest('.memo-tab-item');
+                if (item) { draggedTagId = parseInt(item.dataset.id); e.dataTransfer.effectAllowed = 'move'; }
+            });
+            tabBar.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+            tabBar.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                const target = e.target.closest('.memo-tab-item');
+                if (!target || draggedTagId === null) return;
+                const targetId = parseInt(target.dataset.id);
+                if (targetId === draggedTagId) return;
+                const newOrder = memoTags.map(t => t.id);
+                const fromIdx = newOrder.indexOf(draggedTagId);
+                const toIdx = newOrder.indexOf(targetId);
+                if (fromIdx < 0 || toIdx < 0) return;
+                newOrder.splice(fromIdx, 1);
+                newOrder.splice(toIdx, 0, draggedTagId);
+                try {
+                    await fetch('/api/memos/tags/reorder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tagIds: newOrder })
+                    });
+                    loadMemoTags();
+                } catch (err) { console.error('排序失败:', err); }
+            });
+        }
+
+        const memosList = document.getElementById('memosList');
+        if (memosList) {
+            memosList.addEventListener('click', async (e) => {
+                const actionBtn = e.target.closest('.memo-action-btn');
+                if (!actionBtn) return;
+                const action = actionBtn.dataset.action;
+                const id = parseInt(actionBtn.dataset.id);
+                const item = memoItems.find(m => m.id === id);
+                if (!item) return;
+                if (action === 'edit') {
+                    showMemoItemModal(item);
+                } else if (action === 'delete') {
+                    if (!confirm('确定要删除此备忘记录吗？')) return;
+                    try {
+                        const res = await fetch(`/api/memos/items/${id}`, { method: 'DELETE' });
+                        if (res.ok) loadMemoItems(currentMemoTagId);
+                    } catch (err) { console.error('删除备忘失败:', err); }
+                } else if (action === 'copy') {
+                    const text = (item.title ? item.title + '\n' : '') + (item.content || '');
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        setStatus('✅ 已复制到剪贴板');
+                        setTimeout(() => setStatus(''), 1500);
+                    } catch (err) {
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        setStatus('✅ 已复制到剪贴板');
+                        setTimeout(() => setStatus(''), 1500);
+                    }
+                }
+            });
+        }
     }
 
     init();

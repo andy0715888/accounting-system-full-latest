@@ -182,6 +182,7 @@ function createTables() {
         db.run(`ALTER TABLE records ADD COLUMN record_type TEXT DEFAULT 'server'`, () => {});
         db.run(`ALTER TABLE records ADD COLUMN parent_id INTEGER`, () => {});
         db.run(`ALTER TABLE records ADD COLUMN sort_order INTEGER DEFAULT 0`, () => {});
+        db.run(`ALTER TABLE hosts ADD COLUMN last_connected DATETIME`, () => {});
 
         // 备忘标签表
         db.run(`CREATE TABLE IF NOT EXISTS memo_tags (

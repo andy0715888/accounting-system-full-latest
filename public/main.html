@@ -123,6 +123,7 @@
                         </div>
                         <div class="hosts-search-box">
                             <input type="text" id="hostSearchInput" placeholder="🔍 搜索IP或名称..." />
+                            <button class="host-search-clear" id="hostSearchClear" style="display:none;" title="清空">✕</button>
                         </div>
                         <div class="hosts-list" id="hostsList">
                             <div style="text-align:center;color:#999;padding:20px 0;">暂无主机</div>
@@ -204,27 +205,22 @@
             </div>
             <div id="view-memos" class="view-panel">
                 <h2>📝 辅助工具 - 备忘记录</h2>
-                <div class="memos-container" id="memosContainer">
-                    <div class="memos-sidebar">
-                        <div class="memos-sidebar-header">
-                            <span>备忘标签</span>
-                            <button class="tool-btn sm primary" id="addMemoTagBtn">➕ 添加</button>
-                        </div>
-                        <div class="memo-tags-list" id="memoTagsList"></div>
+                <div class="memo-tab-bar-container">
+                    <div class="memo-tab-bar" id="memoTabBar"></div>
+                    <div class="memo-tab-actions">
+                        <button class="tab-action-btn primary" id="addMemoTagBtn">➕ 添加标签</button>
                     </div>
-                    <div class="memos-main">
-                        <div class="memos-toolbar">
-                            <div class="memos-toolbar-left">
-                                <h3 id="memoCurrentTagName">请选择标签</h3>
-                            </div>
-                            <div class="memos-toolbar-right">
-                                <button class="tool-btn primary" id="addMemoItemBtn" disabled>➕ 添加备忘</button>
-                            </div>
-                        </div>
-                        <div class="memos-list" id="memosList">
-                            <div style="text-align:center;color:#999;padding:40px 0;">请从左侧选择一个标签开始</div>
-                        </div>
+                </div>
+                <div class="memo-toolbar">
+                    <div class="toolbar-left">
+                        <h3 id="memoCurrentTagName" style="margin:0;color:#303133;">请选择标签</h3>
                     </div>
+                    <div class="toolbar-right">
+                        <button class="tool-btn primary" id="addMemoItemBtn" disabled>➕ 添加备忘</button>
+                    </div>
+                </div>
+                <div class="memos-list" id="memosList">
+                    <div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>
                 </div>
             </div>
             <div id="view-stats" class="view-panel">

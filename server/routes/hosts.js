@@ -14,7 +14,7 @@ router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hosts = await query(
-            'SELECT id, name, host, port, username, remark, sort_order, created_at FROM hosts WHERE user_id = ? ORDER BY sort_order, id',
+            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
             [userId]
         );
         res.json(hosts);
@@ -128,6 +128,20 @@ router.get('/by-ip/:ip', requireAuth, async (req, res) => {
         res.json(host || null);
     } catch (err) {
         console.error('按IP查找主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.post('/:id/touch', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hostId = req.params.id;
+        const existing = await queryOne('SELECT id FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        if (!existing) return res.status(404).json({ error: '主机不存在' });
+        await execute('UPDATE hosts SET last_connected = CURRENT_TIMESTAMP WHERE id = ?', [hostId]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('更新主机连接时间错误:', err);
         res.status(500).json({ error: '服务器错误' });
     }
 });
