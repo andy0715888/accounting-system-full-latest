@@ -49,6 +49,32 @@ function buildFilterConditions(filters, params) {
             if (expiredClauses.length > 0) {
                 conditions.push(`(${expiredClauses.join(' OR ')})`);
             }
+        } else if (colKey === 'host_remaining' || colKey === 'client_remaining') {
+            const dateField = colKey === 'host_remaining' ? 'host_expire' : 'client_expire';
+            const dayClauses = [];
+            const blankValues = values.filter(v => v === '(空白)');
+            const dayValues = values.filter(v => v !== '(空白)');
+
+            if (blankValues.length > 0) {
+                dayClauses.push(`json_extract(data, '$.${dateField}') = ''`);
+            }
+            if (dayValues.length > 0) {
+                const dayNums = dayValues.map(v => {
+                    const m = String(v).match(/-?\d+/);
+                    return m ? parseInt(m[0]) : null;
+                }).filter(v => v !== null);
+                if (dayNums.length > 0) {
+                    const placeholders = dayNums.map(() => '?').join(',');
+                    allParams.push(...dayNums);
+                    dayClauses.push(`(
+                        json_extract(data, '$.${dateField}') != '' AND
+                        CAST(julianday(json_extract(data, '$.${dateField}')) - julianday('now', 'localtime', 'start of day') AS INTEGER) IN (${placeholders})
+                    )`);
+                }
+            }
+            if (dayClauses.length > 0) {
+                conditions.push(`(${dayClauses.join(' OR ')})`);
+            }
         } else if (colKey === 'ip_info') {
             // ip_info 等于 ip_address
             const placeholders = values.map(() => '?').join(',');
@@ -304,6 +330,25 @@ router.get('/filter-options', requireAuth, async (req, res) => {
             if ((unknownCount?.cnt || 0) > 0) {
                 options.push({ value: '未知', count: unknownCount?.cnt || 0 });
             }
+        } else if (colKey === 'host_remaining' || colKey === 'client_remaining') {
+            const dateField = colKey === 'host_remaining' ? 'host_expire' : 'client_expire';
+            const blankCount = await queryOne(
+                `SELECT COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND (json_extract(data, '$.${dateField}') = '' OR json_extract(data, '$.${dateField}') IS NULL)`,
+                [userId, tabId, ...filterParams]
+            );
+            const rows = await query(
+                `SELECT CAST(julianday(json_extract(data, '$.${dateField}')) - julianday('now', 'localtime', 'start of day') AS INTEGER) as val, COUNT(*) as cnt FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} AND json_extract(data, '$.${dateField}') != '' AND json_extract(data, '$.${dateField}') IS NOT NULL GROUP BY val ORDER BY val LIMIT 500`,
+                [userId, tabId, ...filterParams]
+            );
+            options = [];
+            if ((blankCount?.cnt || 0) > 0) {
+                options.push({ value: '(空白)', count: blankCount.cnt });
+            }
+            rows.forEach(r => {
+                if (r.val !== null && r.val !== undefined) {
+                    options.push({ value: `${r.val} 天`, count: r.cnt });
+                }
+            });
         } else if (colKey === 'ip_info') {
             const searchLike = search ? `%${search}%` : '%';
             const rows = await query(

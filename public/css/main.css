@@ -2965,6 +2965,20 @@ tr.client-row.cut-pending {
 }
 
 /* ========== 备忘记录模块 ========== */
+.memo-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 12px 0;
+}
+
+.memo-tab-bar.drag-active .memo-tab-item {
+    cursor: move;
+}
+
+.memo-tab-item .memo-tab-checkbox {
+    margin-right: 4px;
+    cursor: pointer;
+}
 .memo-tab-bar-container {
     display: flex;
     align-items: center;

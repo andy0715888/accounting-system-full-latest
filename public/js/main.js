@@ -7244,6 +7244,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let memoTags = [];
     let memoItems = [];
     let currentMemoTagId = null;
+    let memoTagManageMode = false;
+    let selectedMemoTags = new Set();
 
     async function loadMemoTags() {
         try {
@@ -7261,17 +7263,185 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderMemoTags() {
         const bar = document.getElementById('memoTabBar');
         if (!bar) return;
+        const manageBtn = document.getElementById('manageMemoTagsBtn');
+        const deleteBtn = document.getElementById('deleteMemoTagsBtn');
+        if (manageBtn) {
+            manageBtn.textContent = memoTagManageMode ? '完成' : '管理';
+            manageBtn.classList.toggle('active', memoTagManageMode);
+        }
+        if (deleteBtn) {
+            deleteBtn.disabled = !memoTagManageMode || selectedMemoTags.size === 0;
+        }
+        bar.classList.toggle('drag-active', memoTagManageMode);
+
         if (!memoTags.length) {
-            bar.innerHTML = '<div style="color:#909399;font-size:13px;padding:8px 12px;">暂无标签，点击右侧"添加标签"创建</div>';
+            bar.innerHTML = '<div style="color:#909399;font-size:13px;padding:8px 12px;">暂无标签，点击右侧"添加"创建</div>';
             return;
         }
-        bar.innerHTML = memoTags.map(t => `
-            <div class="memo-tab-item ${t.id === currentMemoTagId ? 'active' : ''}" data-id="${t.id}" draggable="true">
-                <span class="memo-tab-name">${escapeHtml(t.name)}</span>
-                <button class="memo-tab-rename" data-id="${t.id}" title="重命名">✏️</button>
-                <button class="memo-tab-delete" data-id="${t.id}" title="删除">✕</button>
+        bar.innerHTML = memoTags.map(t => {
+            const active = t.id === currentMemoTagId ? 'active' : '';
+            const checked = selectedMemoTags.has(t.id) ? 'checked' : '';
+            const checkbox = memoTagManageMode
+                ? `<input type="checkbox" class="memo-tab-checkbox" data-id="${t.id}" ${checked} />`
+                : '';
+            const draggable = memoTagManageMode ? 'draggable="true"' : '';
+            return `<div class="memo-tab-item ${active}" data-id="${t.id}" ${draggable}>
+                ${checkbox}
+                <span class="memo-tab-name" data-id="${t.id}">${escapeHtml(t.name)}</span>
+            </div>`;
+        }).join('');
+
+        bar.querySelectorAll('.memo-tab-checkbox').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = parseInt(el.dataset.id);
+                if (el.checked) selectedMemoTags.add(id);
+                else selectedMemoTags.delete(id);
+                if (deleteBtn) deleteBtn.disabled = selectedMemoTags.size === 0;
+            });
+        });
+
+        bar.querySelectorAll('.memo-tab-name').forEach(el => {
+            el.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                const id = parseInt(el.dataset.id);
+                showRenameMemoTagModal(id);
+            });
+        });
+
+        bar.querySelectorAll('.memo-tab-item').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if (e.target.classList.contains('memo-tab-checkbox')) return;
+                if (memoTagManageMode) return;
+                selectMemoTag(parseInt(el.dataset.id));
+            });
+        });
+
+        if (memoTagManageMode) initMemoTagDragDrop();
+    }
+
+    function initMemoTagDragDrop() {
+        const bar = document.getElementById('memoTabBar');
+        if (!bar) return;
+        let draggedId = null;
+        bar.addEventListener('dragstart', (e) => {
+            const item = e.target.closest('.memo-tab-item');
+            if (item) { draggedId = parseInt(item.dataset.id); e.dataTransfer.effectAllowed = 'move'; }
+        });
+        bar.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+        bar.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const target = e.target.closest('.memo-tab-item');
+            if (!target || draggedId === null) return;
+            const targetId = parseInt(target.dataset.id);
+            if (targetId === draggedId) return;
+            const newOrder = memoTags.map(t => t.id);
+            const fromIdx = newOrder.indexOf(draggedId);
+            const toIdx = newOrder.indexOf(targetId);
+            if (fromIdx < 0 || toIdx < 0) return;
+            newOrder.splice(fromIdx, 1);
+            newOrder.splice(toIdx, 0, draggedId);
+            try {
+                await fetch('/api/memos/tags/reorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tagIds: newOrder })
+                });
+                loadMemoTags();
+            } catch (err) { console.error('排序失败:', err); }
+        });
+    }
+
+    function showAddMemoTagModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:400px;">
+                <div class="modal-header">
+                    <h2>➕ 添加备忘标签</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>标签名称</label><input type="text" id="newMemoTagName" placeholder="请输入标签名称" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveNewMemoTagBtn">添加</button>
+                        <button class="tool-btn cancel-add-memo-tag">取消</button>
+                    </div>
+                </div>
             </div>
-        `).join('');
+        `;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#newMemoTagName');
+        setTimeout(() => input.focus(), 50);
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-add-memo-tag').onclick = () => overlay.remove();
+        const save = async () => {
+            const name = input.value.trim();
+            if (!name) return;
+            try {
+                const res = await fetch('/api/memos/tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    overlay.remove();
+                    await loadMemoTags();
+                    selectMemoTag(data.id);
+                }
+            } catch (err) { console.error('添加标签失败:', err); }
+        };
+        overlay.querySelector('#saveNewMemoTagBtn').onclick = save;
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    }
+
+    function showRenameMemoTagModal(tagId) {
+        const tag = memoTags.find(t => t.id === tagId);
+        if (!tag) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:400px;">
+                <div class="modal-header">
+                    <h2>✏️ 重命名标签</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>标签名称</label><input type="text" id="renameMemoTagName" value="${escapeAttr(tag.name)}" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveRenameMemoTagBtn">保存</button>
+                        <button class="tool-btn cancel-rename-memo-tag">取消</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#renameMemoTagName');
+        setTimeout(() => { input.focus(); input.select(); }, 50);
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-rename-memo-tag').onclick = () => overlay.remove();
+        const save = async () => {
+            const name = input.value.trim();
+            if (!name) return;
+            try {
+                const res = await fetch(`/api/memos/tags/${tagId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                if (res.ok) {
+                    overlay.remove();
+                    await loadMemoTags();
+                    if (currentMemoTagId === tagId) {
+                        const nameEl = document.getElementById('memoCurrentTagName');
+                        if (nameEl) nameEl.textContent = name;
+                    }
+                }
+            } catch (err) { console.error('重命名标签失败:', err); }
+        };
+        overlay.querySelector('#saveRenameMemoTagBtn').onclick = save;
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
     }
 
     async function selectMemoTag(tagId) {
@@ -7384,22 +7554,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function initMemosModule() {
         const addTagBtn = document.getElementById('addMemoTagBtn');
-        if (addTagBtn) {
-            addTagBtn.onclick = async () => {
-                const name = prompt('请输入标签名称:');
-                if (!name || !name.trim()) return;
+        if (addTagBtn) addTagBtn.onclick = () => showAddMemoTagModal();
+
+        const manageBtn = document.getElementById('manageMemoTagsBtn');
+        if (manageBtn) {
+            manageBtn.onclick = () => {
+                memoTagManageMode = !memoTagManageMode;
+                if (!memoTagManageMode) selectedMemoTags.clear();
+                renderMemoTags();
+            };
+        }
+
+        const deleteBtn = document.getElementById('deleteMemoTagsBtn');
+        if (deleteBtn) {
+            deleteBtn.onclick = async () => {
+                if (selectedMemoTags.size === 0) return;
+                if (!confirm(`确定删除选中的 ${selectedMemoTags.size} 个标签及其所有备忘记录吗？`)) return;
                 try {
-                    const res = await fetch('/api/memos/tags', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: name.trim() })
+                    const ids = Array.from(selectedMemoTags);
+                    await Promise.all(ids.map(id => fetch(`/api/memos/tags/${id}`, { method: 'DELETE' })));
+                    ids.forEach(id => {
+                        if (currentMemoTagId === id) currentMemoTagId = null;
+                        selectedMemoTags.delete(id);
                     });
-                    if (res.ok) {
-                        const data = await res.json();
-                        await loadMemoTags();
-                        selectMemoTag(data.id);
+                    memoTagManageMode = false;
+                    await loadMemoTags();
+                    const addItemBtn = document.getElementById('addMemoItemBtn');
+                    if (memoTags.length > 0) {
+                        if (!currentMemoTagId) selectMemoTag(memoTags[0].id);
+                    } else {
+                        document.getElementById('memosList').innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>';
+                        document.getElementById('memoCurrentTagName').textContent = '请选择标签';
+                        if (addItemBtn) addItemBtn.disabled = true;
                     }
-                } catch (err) { console.error('添加标签失败:', err); }
+                } catch (err) { console.error('删除标签失败:', err); }
             };
         }
 
@@ -7409,89 +7597,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!currentMemoTagId) return;
                 showMemoItemModal();
             };
-        }
-
-        const tabBar = document.getElementById('memoTabBar');
-        if (tabBar) {
-            tabBar.addEventListener('click', async (e) => {
-                const tabItem = e.target.closest('.memo-tab-item');
-                const renameBtn = e.target.closest('.memo-tab-rename');
-                const deleteBtn = e.target.closest('.memo-tab-delete');
-                if (deleteBtn) {
-                    e.stopPropagation();
-                    const id = parseInt(deleteBtn.dataset.id);
-                    if (!confirm('确定要删除此标签及其下所有备忘记录吗？')) return;
-                    try {
-                        const res = await fetch(`/api/memos/tags/${id}`, { method: 'DELETE' });
-                        if (res.ok) {
-                            if (currentMemoTagId === id) currentMemoTagId = null;
-                            await loadMemoTags();
-                            if (memoTags.length > 0) selectMemoTag(memoTags[0].id);
-                            else {
-                                document.getElementById('memosList').innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>';
-                                document.getElementById('memoCurrentTagName').textContent = '请选择标签';
-                                addItemBtn.disabled = true;
-                            }
-                        }
-                    } catch (err) { console.error('删除标签失败:', err); }
-                    return;
-                }
-                if (renameBtn) {
-                    e.stopPropagation();
-                    const id = parseInt(renameBtn.dataset.id);
-                    const tag = memoTags.find(t => t.id === id);
-                    if (!tag) return;
-                    const newName = prompt('请输入新的标签名称:', tag.name);
-                    if (!newName || !newName.trim()) return;
-                    try {
-                        const res = await fetch(`/api/memos/tags/${id}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name: newName.trim() })
-                        });
-                        if (res.ok) {
-                            await loadMemoTags();
-                            if (currentMemoTagId === id) {
-                                document.getElementById('memoCurrentTagName').textContent = newName.trim();
-                            }
-                        }
-                    } catch (err) { console.error('重命名标签失败:', err); }
-                    return;
-                }
-                if (tabItem) {
-                    const id = parseInt(tabItem.dataset.id);
-                    selectMemoTag(id);
-                }
-            });
-
-            // 拖拽排序
-            let draggedTagId = null;
-            tabBar.addEventListener('dragstart', (e) => {
-                const item = e.target.closest('.memo-tab-item');
-                if (item) { draggedTagId = parseInt(item.dataset.id); e.dataTransfer.effectAllowed = 'move'; }
-            });
-            tabBar.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
-            tabBar.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                const target = e.target.closest('.memo-tab-item');
-                if (!target || draggedTagId === null) return;
-                const targetId = parseInt(target.dataset.id);
-                if (targetId === draggedTagId) return;
-                const newOrder = memoTags.map(t => t.id);
-                const fromIdx = newOrder.indexOf(draggedTagId);
-                const toIdx = newOrder.indexOf(targetId);
-                if (fromIdx < 0 || toIdx < 0) return;
-                newOrder.splice(fromIdx, 1);
-                newOrder.splice(toIdx, 0, draggedTagId);
-                try {
-                    await fetch('/api/memos/tags/reorder', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tagIds: newOrder })
-                    });
-                    loadMemoTags();
-                } catch (err) { console.error('排序失败:', err); }
-            });
         }
 
         const memosList = document.getElementById('memosList');
