@@ -30,6 +30,7 @@
         <ul class="menu">
             <li class="menu-item active" data-view="table"><span>📋</span> 网络信息</li>
             <li class="menu-item" data-view="hosts"><span>🖥️</span> 主机管理</li>
+            <li class="menu-item" data-view="memos"><span>📝</span> 辅助工具</li>
             <li class="menu-item" data-view="stats"><span>📈</span> 财务统计</li>
             <li class="menu-item" data-view="settings"><span>⚙️</span> 系统设置</li>
         </ul>
@@ -197,6 +198,31 @@
                             <div class="folders-list" id="foldersList">
                                 <div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="view-memos" class="view-panel">
+                <h2>📝 辅助工具 - 备忘记录</h2>
+                <div class="memos-container" id="memosContainer">
+                    <div class="memos-sidebar">
+                        <div class="memos-sidebar-header">
+                            <span>备忘标签</span>
+                            <button class="tool-btn sm primary" id="addMemoTagBtn">➕ 添加</button>
+                        </div>
+                        <div class="memo-tags-list" id="memoTagsList"></div>
+                    </div>
+                    <div class="memos-main">
+                        <div class="memos-toolbar">
+                            <div class="memos-toolbar-left">
+                                <h3 id="memoCurrentTagName">请选择标签</h3>
+                            </div>
+                            <div class="memos-toolbar-right">
+                                <button class="tool-btn primary" id="addMemoItemBtn" disabled>➕ 添加备忘</button>
+                            </div>
+                        </div>
+                        <div class="memos-list" id="memosList">
+                            <div style="text-align:center;color:#999;padding:40px 0;">请从左侧选择一个标签开始</div>
                         </div>
                     </div>
                 </div>

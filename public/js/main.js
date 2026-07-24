@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 统计时间范围（0=所有）
         statsMonthRange: 6,
         statsYearRange: 6,
+        // 财务统计隐藏敏感数字（默认隐藏）
+        statsHidden: true,
         // 分页
         page: 1,
         pageSize: 100,
@@ -39,6 +41,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // 主机支出明细弹窗（独享/共享标签）
         hostExpenseRecordId: null,
         hostExpenseDetails: [],
+        // 收入/支出明细排序：{ field: 'date'|'amount', order: 'asc'|'desc' }
+        incomeSort: { field: 'date', order: 'desc' },
+        expenseSort: { field: 'date', order: 'desc' },
+        hostExpenseSort: { field: 'date', order: 'asc' },
         // 客户信息复制
         copiedClientRecordId: null,
         // 服务器信息复制
@@ -969,22 +975,23 @@ document.addEventListener('DOMContentLoaded', function() {
             tabIds.forEach(tabId => {
                 invalidateTabCache(tabId);
                 state.selectedTabs.delete(tabId);
+                delete state.tabFilters[tabId];
             });
+            saveTabFiltersToStorage();
             state.tabs = state.tabs.filter(t => !tabIds.includes(t.id));
             const wasCurrentTabDeleted = tabIds.includes(oldCurrentTabId);
-            if (!state.tabs.some(t => t.id === state.currentTabId)) {
-                state.currentTabId = state.tabs.length > 0 ? state.tabs[0].id : null;
-            }
             renderTabs();
-            if (state.currentTabId) {
-                if (!wasCurrentTabDeleted && oldCurrentTabId === state.currentTabId) {
+            if (state.tabs.length > 0) {
+                if (!wasCurrentTabDeleted) {
                     await loadDataForTab(state.currentTabId, true);
                     renderTable(false);
                 } else {
-                    await switchTab(state.currentTabId, true);
+                    const firstTabId = state.tabs[0].id;
+                    await switchTab(firstTabId, true);
                 }
+            } else {
+                await createDefaultTab();
             }
-            else await createDefaultTab();
             setStatus(`✅ 已删除 ${tabIds.length} 个标签`);
         } catch (err) { setStatus('❌ 删除标签失败: ' + err.message); }
     }
@@ -2207,16 +2214,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 const record = state.records.find(r => r.id === id);
                 if (record && !isSimpleTab()) {
                     const unitPrice = parseExpenseUnitPrice(record.data.expense);
-                    if (unitPrice <= 0) {
-                        // 单价为空：回退月数，提示用户先在支出列填单价
-                        val--;
-                        input.value = val;
-                        setStatus('请先点击支出列填写单价，再增加月数');
-                        setTimeout(() => setStatus('就绪'), 2500);
-                        // 直接打开主机支出明细弹窗，方便用户填单价
-                        openHostExpenseModal(id);
-                        return;
-                    }
                     const d = new Date();
                     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     // 首次添加明细时，日期用 host_purchase（如果存在）
@@ -2256,14 +2253,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (diff > 0) {
                         // 增加 diff 笔明细
                         const unitPrice = parseExpenseUnitPrice(record.data.expense);
-                        if (unitPrice <= 0) {
-                            // 单价为空：回退月数，提示用户先填单价
-                            this.value = oldVal;
-                            setStatus('请先点击支出列填写单价，再增加月数');
-                            setTimeout(() => setStatus('就绪'), 2500);
-                            openHostExpenseModal(id);
-                            return;
-                        }
                         for (let i = 0; i < diff; i++) {
                             // 首笔明细日期用 host_purchase
                             let useDate;
@@ -3550,15 +3539,26 @@ document.addEventListener('DOMContentLoaded', function() {
             incomeList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无收入记录</div>';
             return;
         }
+        const sort = state.incomeSort;
+        const sorted = [...state.incomeRecords].sort((a, b) => {
+            let va, vb;
+            if (sort.field === 'amount') { va = a.amount; vb = b.amount; }
+            else { va = a.income_date || ''; vb = b.income_date || ''; }
+            if (va < vb) return sort.order === 'asc' ? -1 : 1;
+            if (va > vb) return sort.order === 'asc' ? 1 : -1;
+            return a.id - b.id;
+        });
+        const amountCls = sort.field === 'amount' ? (sort.order === 'asc' ? 'col-sort-asc' : 'col-sort-desc') : '';
+        const dateCls = sort.field === 'date' ? (sort.order === 'asc' ? 'col-sort-asc' : 'col-sort-desc') : '';
         incomeList.innerHTML = `
             <div class="income-list-header">
                 <span class="col-id">#ID</span>
-                <span class="col-amount">金额</span>
-                <span class="col-date">日期</span>
+                <span class="col-amount ${amountCls}" data-sort-field="amount">金额</span>
+                <span class="col-date ${dateCls}" data-sort-field="date">日期</span>
                 <span class="col-remark">备注</span>
                 <span class="col-action">操作</span>
             </div>
-        ` + state.incomeRecords.map(r => `
+        ` + sorted.map(r => `
             <div class="income-item" data-id="${r.id}">
                 <div class="income-item-info">
                     <span class="item-id">#${r.id}</span>
@@ -3681,15 +3681,26 @@ document.addEventListener('DOMContentLoaded', function() {
             expenseList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无支出记录</div>';
             return;
         }
+        const sort = state.expenseSort;
+        const sorted = [...state.expenseRecords].sort((a, b) => {
+            let va, vb;
+            if (sort.field === 'amount') { va = a.amount; vb = b.amount; }
+            else { va = a.expense_date || ''; vb = b.expense_date || ''; }
+            if (va < vb) return sort.order === 'asc' ? -1 : 1;
+            if (va > vb) return sort.order === 'asc' ? 1 : -1;
+            return a.id - b.id;
+        });
+        const amountCls = sort.field === 'amount' ? (sort.order === 'asc' ? 'col-sort-asc' : 'col-sort-desc') : '';
+        const dateCls = sort.field === 'date' ? (sort.order === 'asc' ? 'col-sort-asc' : 'col-sort-desc') : '';
         expenseList.innerHTML = `
             <div class="income-list-header">
                 <span class="col-id">#ID</span>
-                <span class="col-amount">金额</span>
-                <span class="col-date">日期</span>
+                <span class="col-amount ${amountCls}" data-sort-field="amount">金额</span>
+                <span class="col-date ${dateCls}" data-sort-field="date">日期</span>
                 <span class="col-remark">备注</span>
                 <span class="col-action">操作</span>
             </div>
-        ` + state.expenseRecords.map(r => `
+        ` + sorted.map(r => `
             <div class="income-item expense-item" data-id="${r.id}">
                 <div class="income-item-info">
                     <span class="item-id">#${r.id}</span>
@@ -3830,16 +3841,22 @@ document.addEventListener('DOMContentLoaded', function() {
             hostExpenseList.innerHTML = '<div style="text-align:center;color:#999;padding:16px;">暂无明细，点击"+月数"或"+ 添加明细"创建</div>';
             return;
         }
+        const sort = state.hostExpenseSort;
         const sorted = [...details].sort((a, b) => {
-            const da = a.expense_date || '', db = b.expense_date || '';
-            if (da !== db) return da < db ? -1 : 1;
+            let va, vb;
+            if (sort.field === 'amount') { va = a.unit_price; vb = b.unit_price; }
+            else { va = a.expense_date || ''; vb = b.expense_date || ''; }
+            if (va < vb) return sort.order === 'asc' ? -1 : 1;
+            if (va > vb) return sort.order === 'asc' ? 1 : -1;
             return a.id - b.id;
         });
+        const amountCls = sort.field === 'amount' ? (sort.order === 'asc' ? 'col-sort-asc' : 'col-sort-desc') : '';
+        const dateCls = sort.field === 'date' ? (sort.order === 'asc' ? 'col-sort-asc' : 'col-sort-desc') : '';
         hostExpenseList.innerHTML = `
             <div class="income-list-header">
                 <span class="col-id">#ID</span>
-                <span class="col-amount">单价</span>
-                <span class="col-date">日期</span>
+                <span class="col-amount ${amountCls}" data-sort-field="amount">单价</span>
+                <span class="col-date ${dateCls}" data-sort-field="date">日期</span>
                 <span class="col-remark">备注</span>
                 <span class="col-action">操作</span>
             </div>
@@ -4000,7 +4017,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
         const unitPrice = parseFloat(hostExpenseUnitPriceInput.value) || 0;
-        if (unitPrice <= 0) {
+        if (isNaN(unitPrice) || unitPrice < 0) {
             hostExpenseStatus.textContent = '请先填入有效单价';
             hostExpenseStatus.style.color = '#f56c6c';
             return;
@@ -4501,23 +4518,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 </tr>
             `).join('');
 
+            const hidden = state.statsHidden;
+            const maskVal = () => '••••••';
+            const showNet = hidden ? maskVal() : formatMoney(total.net);
+            const showIncome = hidden ? maskVal() : formatMoney(total.income);
+            const showExpense = hidden ? maskVal() : formatMoney(total.expense);
+            const showProfit = hidden ? maskVal() : (profitRate.toFixed(1) + '%');
+            const showAvgIncome = hidden ? maskVal() : formatMoney(avgIncome);
+            const showAvgExpense = hidden ? maskVal() : formatMoney(avgExpense);
+            const eyeIcon = hidden ? '👁️' : '🙈';
+            const eyeTitle = hidden ? '显示敏感数字' : '隐藏敏感数字';
+
             statsContainer.innerHTML = `
                 <div class="stats-hero">
                     <div>
                         <div class="stats-eyebrow">All Tabs Financial Intelligence</div>
-                        <h2>全标签财务统计</h2>
+                        <h2>全标签财务统计
+                            <button class="stats-eye-btn" id="statsEyeBtn" title="${eyeTitle}">${eyeIcon}</button>
+                        </h2>
                         <p>已合并 ${state.tabs.length} 个标签，共 ${records.length} 条记录。</p>
                     </div>
                     <div class="stats-hero-net ${total.net >= 0 ? 'positive' : 'negative'}">
                         <span>净收入</span>
-                        <strong>${formatMoney(total.net)}</strong>
+                        <strong>${showNet}</strong>
                     </div>
                 </div>
 
                 <div class="stats-grid premium">
-                    <div class="stat-card dark"><div class="stat-label">总收入</div><div class="stat-value positive">${formatMoney(total.income)}</div><div class="stat-sub">平均每条 ${formatMoney(avgIncome)}</div></div>
-                    <div class="stat-card dark"><div class="stat-label">总支出</div><div class="stat-value negative">${formatMoney(total.expense)}</div><div class="stat-sub">平均每条 ${formatMoney(avgExpense)}</div></div>
-                    <div class="stat-card dark"><div class="stat-label">利润率</div><div class="stat-value neutral">${profitRate.toFixed(1)}%</div><div class="stat-sub">收入转化净额占比</div></div>
+                    <div class="stat-card dark"><div class="stat-label">总收入</div><div class="stat-value positive">${showIncome}</div><div class="stat-sub">平均每条 ${showAvgIncome}</div></div>
+                    <div class="stat-card dark"><div class="stat-label">总支出</div><div class="stat-value negative">${showExpense}</div><div class="stat-sub">平均每条 ${showAvgExpense}</div></div>
+                    <div class="stat-card dark"><div class="stat-label">利润率</div><div class="stat-value neutral">${showProfit}</div><div class="stat-sub">收入转化净额占比</div></div>
                     <div class="stat-card dark"><div class="stat-label">到期状态</div><div class="stat-value neutral">${activeCount}/${expiredCount}</div><div class="stat-sub">有效 / 过期</div></div>
                 </div>
 
@@ -4587,6 +4617,37 @@ document.addEventListener('DOMContentLoaded', function() {
             state.statsYearRange = rangeVal;
         }
         renderStats();
+    });
+
+    // 财务统计眼睛按钮（显示/隐藏敏感数字）
+    document.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('stats-eye-btn')) return;
+        state.statsHidden = !state.statsHidden;
+        try {
+            if (state.userId) localStorage.setItem('statsHidden_' + state.userId, state.statsHidden ? '1' : '0');
+        } catch(e) {}
+        renderStats();
+    });
+
+    // 收入/支出/主机支出明细：点击表头排序
+    document.addEventListener('click', function(e) {
+        const field = e.target.dataset.sortField;
+        if (!field) return;
+        const header = e.target.closest('.income-list-header');
+        if (!header) return;
+        const list = header.parentElement;
+        let sortState, renderFn;
+        if (list.id === 'incomeList') { sortState = state.incomeSort; renderFn = renderIncomeList; }
+        else if (list.id === 'expenseList') { sortState = state.expenseSort; renderFn = renderExpenseList; }
+        else if (list.id === 'hostExpenseList') { sortState = state.hostExpenseSort; renderFn = renderHostExpenseList; }
+        else return;
+        if (sortState.field === field) {
+            sortState.order = sortState.order === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState.field = field;
+            sortState.order = field === 'date' ? 'desc' : 'asc';
+        }
+        renderFn();
     });
 
     // --- 密码修改 ---
@@ -4886,16 +4947,25 @@ document.addEventListener('DOMContentLoaded', function() {
     // 主机支出明细弹窗事件
     if (closeHostExpenseModal) closeHostExpenseModal.addEventListener('click', () => hostExpenseModal.classList.remove('show'));
     if (addHostExpenseDetailBtn) addHostExpenseDetailBtn.addEventListener('click', addHostExpenseDetailManually);
-    if (hostExpenseExtraInput) {
-        hostExpenseExtraInput.addEventListener('input', updateHostExpenseTotalDisplay);
-        hostExpenseExtraInput.addEventListener('blur', () => saveHostExpenseConfig('extra'));
-    }
     if (hostExpenseUnitPriceInput) {
         hostExpenseUnitPriceInput.addEventListener('input', updateHostExpenseTotalDisplay);
         hostExpenseUnitPriceInput.addEventListener('blur', () => saveHostExpenseConfig('unit_price'));
+        hostExpenseUnitPriceInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); addHostExpenseDetailManually(); }
+        });
+    }
+    if (hostExpenseExtraInput) {
+        hostExpenseExtraInput.addEventListener('input', updateHostExpenseTotalDisplay);
+        hostExpenseExtraInput.addEventListener('blur', () => saveHostExpenseConfig('extra'));
+        hostExpenseExtraInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); addHostExpenseDetailManually(); }
+        });
     }
     if (hostExpenseRemarkInput) {
         hostExpenseRemarkInput.addEventListener('blur', () => saveHostExpenseConfig('remark'));
+        hostExpenseRemarkInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); addHostExpenseDetailManually(); }
+        });
     }
 
     // --- 分页事件 ---
@@ -5355,6 +5425,8 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const savedFilters = localStorage.getItem('tabFilters_' + auth.user.id);
                 if (savedFilters) state.tabFilters = JSON.parse(savedFilters);
+                const savedHidden = localStorage.getItem('statsHidden_' + auth.user.id);
+                if (savedHidden !== null) state.statsHidden = savedHidden === '1';
             } catch(e) {}
             if (state.tabs.length === 0) await createDefaultTab();
             else {

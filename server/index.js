@@ -26,6 +26,7 @@ const conditionalFormatRoutes = require('./routes/conditionalFormats');
 const hostRoutes = require('./routes/hosts');
 const commandRoutes = require('./routes/commands');
 const hostExpenseRoutes = require('./routes/hostExpense');
+const memoRoutes = require('./routes/memos');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -204,6 +205,7 @@ app.use('/api/conditional-formats', conditionalFormatRoutes);
 app.use('/api/hosts', hostRoutes);
 app.use('/api/commands', commandRoutes);
 app.use('/api/host-expense', hostExpenseRoutes);
+app.use('/api/memos', memoRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));

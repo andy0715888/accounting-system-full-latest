@@ -617,6 +617,22 @@ body {
     -moz-appearance: textfield;
 }
 
+/* 收入/支出管理弹窗：移除number输入框上下三角键 */
+#incomeModal input[type="number"]::-webkit-outer-spin-button,
+#incomeModal input[type="number"]::-webkit-inner-spin-button,
+#expenseModal input[type="number"]::-webkit-outer-spin-button,
+#expenseModal input[type="number"]::-webkit-inner-spin-button,
+#hostExpenseModal input[type="number"]::-webkit-outer-spin-button,
+#hostExpenseModal input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+#incomeModal input[type="number"],
+#expenseModal input[type="number"],
+#hostExpenseModal input[type="number"] {
+    -moz-appearance: textfield;
+}
+
 /* 状态栏 */
 .status-bar {
     padding: 4px 20px;
@@ -1461,8 +1477,12 @@ body {
     z-index: 1;
 }
 .income-list-header .col-id { width: 50px; flex-shrink: 0; }
-.income-list-header .col-amount { width: 100px; text-align: right; flex-shrink: 0; }
-.income-list-header .col-date { width: 150px; flex-shrink: 0; }
+.income-list-header .col-amount { width: 100px; text-align: left; flex-shrink: 0; cursor: pointer; user-select: none; }
+.income-list-header .col-amount:hover { color: #409eff; }
+.income-list-header .col-date { width: 150px; flex-shrink: 0; cursor: pointer; user-select: none; }
+.income-list-header .col-date:hover { color: #409eff; }
+.income-list-header .col-sort-asc::after { content: ' ↑'; color: #409eff; font-weight: bold; }
+.income-list-header .col-sort-desc::after { content: ' ↓'; color: #409eff; font-weight: bold; }
 .income-list-header .col-remark { flex: 1; min-width: 0; }
 .income-list-header .col-action { width: 60px; text-align: center; flex-shrink: 0; }
 .income-item {

@@ -183,6 +183,31 @@ function createTables() {
         db.run(`ALTER TABLE records ADD COLUMN parent_id INTEGER`, () => {});
         db.run(`ALTER TABLE records ADD COLUMN sort_order INTEGER DEFAULT 0`, () => {});
 
+        // 备忘标签表
+        db.run(`CREATE TABLE IF NOT EXISTS memo_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            tag_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )`);
+
+        // 备忘记录表
+        db.run(`CREATE TABLE IF NOT EXISTS memos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            is_visible INTEGER DEFAULT 1,
+            memo_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (tag_id) REFERENCES memo_tags(id) ON DELETE CASCADE
+        )`);
+
         createDefaultAdmin();
         // 默认关闭注册功能（INSERT OR IGNORE 不更新已有记录，所以额外用 UPDATE 确保）
         db.run(`INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (1, 'allow_register', 'false')`);
