@@ -222,6 +222,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 $$('.view-panel').forEach(p => p.classList.remove('active'));
                 const target = document.getElementById('view-' + view);
                 if (target) target.classList.add('active');
+                // 切出财务统计时，重置隐藏状态为默认隐藏
+                if (view !== 'stats') state.statsHidden = true;
                 if (view === 'stats') renderStats();
                 if (view === 'hosts') {
                     loadHosts();
@@ -3518,7 +3520,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- 收入管理弹窗 ---
     async function openIncomeModal(recordId) {
         state.incomeRecordId = recordId;
-        incomeAmountInput.value = '';
+        try {
+            const savedAmount = localStorage.getItem('incomeLastAmount_' + state.userId);
+            incomeAmountInput.value = savedAmount || '';
+        } catch(e) { incomeAmountInput.value = ''; }
         incomeRemarkInput.value = '';
         incomeDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         incomeStatus.textContent = '';
@@ -3647,7 +3652,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 income_date: date,
                 remark: incomeRemarkInput.value.trim()
             });
-            incomeAmountInput.value = '';
+            try {
+                localStorage.setItem('incomeLastAmount_' + state.userId, String(amount));
+            } catch(e) {}
             incomeRemarkInput.value = '';
             await loadIncomeRecords(state.incomeRecordId);
             await loadRecords(state.currentTabId);
@@ -7569,7 +7576,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (deleteBtn) {
             deleteBtn.onclick = async () => {
                 if (selectedMemoTags.size === 0) return;
-                if (!confirm(`确定删除选中的 ${selectedMemoTags.size} 个标签及其所有备忘记录吗？`)) return;
+                if (!await showConfirm(`确定删除选中的 ${selectedMemoTags.size} 个标签及其所有备忘记录吗？`, '删除标签')) return;
                 try {
                     const ids = Array.from(selectedMemoTags);
                     await Promise.all(ids.map(id => fetch(`/api/memos/tags/${id}`, { method: 'DELETE' })));
@@ -7611,7 +7618,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (action === 'edit') {
                     showMemoItemModal(item);
                 } else if (action === 'delete') {
-                    if (!confirm('确定要删除此备忘记录吗？')) return;
+                    if (!await showConfirm('确定要删除此备忘记录吗？', '删除备忘')) return;
                     try {
                         const res = await fetch(`/api/memos/items/${id}`, { method: 'DELETE' });
                         if (res.ok) loadMemoItems(currentMemoTagId);
