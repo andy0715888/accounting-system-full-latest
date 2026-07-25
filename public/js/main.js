@@ -3591,7 +3591,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function openIncomeModal(recordId) {
         state.incomeRecordId = recordId;
         try {
-            const savedAmount = localStorage.getItem('incomeLastAmount_' + state.userId);
+            const savedAmount = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
             incomeAmountInput.value = savedAmount || '';
         } catch(e) { incomeAmountInput.value = ''; }
         incomeRemarkInput.value = '';
@@ -3723,7 +3723,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 remark: incomeRemarkInput.value.trim()
             });
             try {
-                localStorage.setItem('incomeLastAmount_' + state.userId, String(amount));
+                localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, String(amount));
             } catch(e) {}
             incomeRemarkInput.value = '';
             await loadIncomeRecords(state.incomeRecordId);
@@ -3738,7 +3738,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function openExpenseModal(recordId) {
         state.expenseRecordId = recordId;
         try {
-            const savedAmount = localStorage.getItem('expenseLastAmount_' + state.userId);
+            const savedAmount = localStorage.getItem('expenseLastAmount_' + state.userId + '_' + recordId);
             expenseAmountInput.value = savedAmount || '';
         } catch(e) { expenseAmountInput.value = ''; }
         expenseRemarkInput.value = '';
@@ -3870,7 +3870,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 remark: expenseRemarkInput.value.trim()
             });
             try {
-                localStorage.setItem('expenseLastAmount_' + state.userId, String(amount));
+                localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, String(amount));
             } catch(e) {}
             expenseRemarkInput.value = '';
             await loadExpenseRecords(state.expenseRecordId);
@@ -5044,7 +5044,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     addIncomeBtn.addEventListener('click', addIncomeRecord);
     incomeAmountInput.addEventListener('input', () => {
-        try { localStorage.setItem('incomeLastAmount_' + state.userId, incomeAmountInput.value); } catch(e) {}
+        try { localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, incomeAmountInput.value); } catch(e) {}
     });
     incomeAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addIncomeRecord();
@@ -5053,7 +5053,7 @@ document.addEventListener('DOMContentLoaded', function() {
     closeExpenseModal.addEventListener('click', () => expenseModal.classList.remove('show'));
     addExpenseBtn.addEventListener('click', addExpenseRecord);
     expenseAmountInput.addEventListener('input', () => {
-        try { localStorage.setItem('expenseLastAmount_' + state.userId, expenseAmountInput.value); } catch(e) {}
+        try { localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, expenseAmountInput.value); } catch(e) {}
     });
     expenseAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addExpenseRecord();
@@ -5290,13 +5290,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateData[key] = state.copiedServerData[key] || '';
             });
 
-            // Clear expense on source row
+            // Clear expense on source row (both top config and host expense details)
             const sourceId = state.copiedServerRecordId;
             if (sourceId) {
                 const sourceRecord = state.records.find(r => r.id === sourceId);
                 if (sourceRecord) {
                     const sourceData = { ...sourceRecord.data, expense: '0' };
                     await API.put('/records/' + sourceId, { data: sourceData });
+                    try { await API.delete('/host-expense/all/' + sourceId); } catch(e) {}
                 }
             }
 
@@ -6028,6 +6029,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     handleSftpUpload(msg.data);
                 } else if (msg.type === 'sftp_delete') {
                     handleSftpDelete(msg.data);
+                } else if (msg.type === 'sftp_download') {
+                    handleSftpDownload(msg.data);
                 } else if (msg.type === 'sftp_error') {
                     handleSftpError(msg.data);
                 } else if (msg.type === 'monitor_data') {
@@ -6374,15 +6377,16 @@ document.addEventListener('DOMContentLoaded', function() {
             item.oncontextmenu = (e) => {
                 e.preventDefault();
                 const name = item.dataset.name;
+                const isDir = item.dataset.dir === '1';
                 const fullPath = fileManagerState.currentPath.endsWith('/')
                     ? fileManagerState.currentPath + name
                     : fileManagerState.currentPath + '/' + name;
-                showFmContextMenu(e.clientX, e.clientY, fullPath);
+                showFmContextMenu(e.clientX, e.clientY, fullPath, isDir);
             };
         });
     }
 
-    function showFmContextMenu(x, y, filePath) {
+    function showFmContextMenu(x, y, filePath, isDir) {
         const overlay = fileManagerState.overlay;
         if (!overlay) return;
         hideFmContextMenu();
@@ -6390,8 +6394,10 @@ document.addEventListener('DOMContentLoaded', function() {
         menu.className = 'fm-context-menu';
         menu.style.left = x + 'px';
         menu.style.top = y + 'px';
+        const downloadItem = !isDir ? '<div class="fm-context-item" data-action="download-file">⬇️ 下载文件</div>' : '';
         menu.innerHTML = `
             <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            ${downloadItem}
             <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
         `;
         document.body.appendChild(menu);
@@ -6408,6 +6414,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(() => { statusEl.textContent = ''; }, 2000);
             }
         };
+
+        if (!isDir) {
+            menu.querySelector('[data-action="download-file"]').onclick = () => {
+                hideFmContextMenu();
+                if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+                const overlay = fileManagerState.overlay;
+                if (overlay) {
+                    const statusEl = overlay.querySelector('#fmStatus');
+                    statusEl.style.color = '#409eff';
+                    statusEl.textContent = '⏳ 正在下载...';
+                }
+                getActiveWs().send(JSON.stringify({ type: 'sftp_download', path: filePath }));
+            };
+        }
 
         menu.querySelector('[data-action="delete-file"]').onclick = () => {
             hideFmContextMenu();
@@ -6709,6 +6729,41 @@ document.addEventListener('DOMContentLoaded', function() {
         overlay.querySelector('#fmStatus').style.color = '#67c23a';
         overlay.querySelector('#fmStatus').textContent = '✅ 删除成功';
         loadFileList(fileManagerState.currentPath);
+    }
+
+    function handleSftpDownload(data) {
+        const overlay = fileManagerState.overlay;
+        if (!data || !data.content) {
+            if (overlay) {
+                overlay.querySelector('#fmStatus').style.color = '#f56c6c';
+                overlay.querySelector('#fmStatus').textContent = '❌ 下载失败';
+            }
+            return;
+        }
+        try {
+            const binary = atob(data.content);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            const blob = new Blob([bytes]);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = data.name || 'download';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            if (overlay) {
+                overlay.querySelector('#fmStatus').style.color = '#67c23a';
+                overlay.querySelector('#fmStatus').textContent = '✅ 下载成功';
+                setTimeout(() => { overlay.querySelector('#fmStatus').textContent = ''; }, 2000);
+            }
+        } catch (e) {
+            if (overlay) {
+                overlay.querySelector('#fmStatus').style.color = '#f56c6c';
+                overlay.querySelector('#fmStatus').textContent = '❌ 下载失败: ' + e.message;
+            }
+        }
     }
 
     function formatFileSize(bytes) {

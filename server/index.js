@@ -741,6 +741,27 @@ function startHttp() {
                             }
                         });
                     });
+                } else if (msg.type === 'sftp_download') {
+                    const path = sanitizeSftpPath(msg.path, false);
+                    if (!path) { sendSftpError('文件路径不能为空或非法'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        sftpConn.readFile(path, (err2, data) => {
+                            if (err2) { sendSftpError('读取文件失败: ' + err2.message); return; }
+                            const fileName = path.split('/').pop() || 'download';
+                            logAudit(sessionUser.userId, 'sftp_download', `${path} (${data.length} bytes)`);
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'sftp_download',
+                                    data: {
+                                        path,
+                                        name: fileName,
+                                        content: data.toString('base64')
+                                    }
+                                }));
+                            }
+                        });
+                    });
                 }
             } catch (err) {
                 console.error('WebSocket 消息处理错误:', err);

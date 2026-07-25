@@ -154,6 +154,22 @@ router.delete('/latest/:recordId', requireAuth, async (req, res) => {
     }
 });
 
+// 清空某 record 下所有主机支出明细（剪切服务器时调用）
+router.delete('/all/:recordId', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const recordId = parseInt(req.params.recordId);
+        const rec = await queryOne('SELECT id FROM records WHERE id = ? AND user_id = ?', [recordId, userId]);
+        if (!rec) return res.status(404).json({ error: '记录不存在' });
+        await execute('DELETE FROM host_expense_details WHERE record_id = ? AND user_id = ?', [recordId, userId]);
+        logAudit(userId, 'host_expense_clear_all', `record=${recordId}`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('清空主机支出明细错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 // 同步首笔明细日期到 host_purchase（改 host_purchase 时调用）
 router.post('/sync-first-date/:recordId', requireAuth, async (req, res) => {
     try {
