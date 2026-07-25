@@ -3590,6 +3590,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- 收入管理弹窗 ---
     async function openIncomeModal(recordId) {
         state.incomeRecordId = recordId;
+        state.incomeRecords = [];
+        incomeTotalDisplay.textContent = '0';
+        renderIncomeList();
         try {
             const savedAmount = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
             incomeAmountInput.value = savedAmount || '';
@@ -3737,6 +3740,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- 支出管理弹窗 ---
     async function openExpenseModal(recordId) {
         state.expenseRecordId = recordId;
+        state.expenseRecords = [];
+        expenseTotalDisplay.textContent = '0';
+        renderExpenseList();
         try {
             const savedAmount = localStorage.getItem('expenseLastAmount_' + state.userId + '_' + recordId);
             expenseAmountInput.value = savedAmount || '';
@@ -3885,6 +3891,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // 当前编辑的 record 引用缓存在 state.hostExpenseRecordId
     async function openHostExpenseModal(recordId) {
         state.hostExpenseRecordId = recordId;
+        state.hostExpenseDetails = [];
+        renderHostExpenseList();
+        updateHostExpenseTotalDisplay();
         const record = state.records.find(r => r.id === recordId);
         if (!record) return;
 
@@ -5290,14 +5299,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateData[key] = state.copiedServerData[key] || '';
             });
 
-            // Clear expense on source row (both top config and host expense details)
+            // Move host expense details from source to target, then clear source expense
             const sourceId = state.copiedServerRecordId;
             if (sourceId) {
                 const sourceRecord = state.records.find(r => r.id === sourceId);
                 if (sourceRecord) {
                     const sourceData = { ...sourceRecord.data, expense: '0' };
+                    try { await API.post('/host-expense/move', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
                     await API.put('/records/' + sourceId, { data: sourceData });
-                    try { await API.delete('/host-expense/all/' + sourceId); } catch(e) {}
                 }
             }
 

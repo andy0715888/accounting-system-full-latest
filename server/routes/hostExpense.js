@@ -170,6 +170,27 @@ router.delete('/all/:recordId', requireAuth, async (req, res) => {
     }
 });
 
+// 移动某 record 下所有主机支出明细到另一条 record（剪切服务器时调用）
+router.post('/move', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { from_record_id, to_record_id } = req.body;
+        if (!from_record_id || !to_record_id) return res.status(400).json({ error: '缺少参数' });
+        const fromRec = await queryOne('SELECT id FROM records WHERE id = ? AND user_id = ?', [from_record_id, userId]);
+        const toRec = await queryOne('SELECT id FROM records WHERE id = ? AND user_id = ?', [to_record_id, userId]);
+        if (!fromRec || !toRec) return res.status(404).json({ error: '记录不存在' });
+        await execute(
+            'UPDATE host_expense_details SET record_id = ? WHERE record_id = ? AND user_id = ?',
+            [to_record_id, from_record_id, userId]
+        );
+        logAudit(userId, 'host_expense_move', `from=${from_record_id} to=${to_record_id}`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('移动主机支出明细错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 // 同步首笔明细日期到 host_purchase（改 host_purchase 时调用）
 router.post('/sync-first-date/:recordId', requireAuth, async (req, res) => {
     try {
