@@ -3483,7 +3483,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const condition_value = cfValueInput.value.trim();
         const text_color = cfColorInput.value;
         const is_bold = cfBoldCheck.checked;
-        if (!condition_value) { setStatus('⚠️ 请输入条件值'); return; }
+        const cfStatus = document.getElementById('cfStatus');
+        if (!condition_value) { if (cfStatus) { cfStatus.textContent = '⚠️ 请输入条件值'; cfStatus.style.color = '#f56c6c'; setTimeout(() => cfStatus.textContent = '', 1500); } return; }
 
         try {
             await API.post('/conditional-formats', {
@@ -3494,8 +3495,12 @@ document.addEventListener('DOMContentLoaded', function() {
             await loadConditionalFormats(state.currentTabId);
             renderCfList();
             renderTable(false);
-            setStatus('✅ 条件格式添加成功');
-        } catch (err) { setStatus('❌ 添加失败: ' + err.message); }
+            if (cfStatus) {
+                cfStatus.textContent = '✅ 条件格式添加成功';
+                cfStatus.style.color = '#67c23a';
+                setTimeout(() => cfStatus.textContent = '', 1500);
+            }
+        } catch (err) { if (cfStatus) { cfStatus.textContent = '❌ 添加失败: ' + err.message; cfStatus.style.color = '#f56c6c'; } }
     }
 
     async function moveCfItem(id, direction) {
@@ -3566,7 +3571,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     localStorage.setItem('focusHighlightColor_' + state.userId, color);
                 } catch(e) {}
                 applyTableHighlightStyle();
-                setStatus('✅ 高亮色已保存');
+                const cfStatus = document.getElementById('cfStatus');
+                if (cfStatus) {
+                    cfStatus.textContent = '✅ 高亮色已保存';
+                    cfStatus.style.color = '#67c23a';
+                    setTimeout(() => cfStatus.textContent = '', 1500);
+                }
             });
         }
     }
@@ -3810,6 +3820,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await API.put('/expense/' + id, { amount });
                     await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
+                    expenseStatus.style.color = '#67c23a';
                     setTimeout(() => expenseStatus.textContent = '', 1200);
                 } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
             };
@@ -3828,6 +3839,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await API.put('/expense/' + id, { expense_date: date });
                     await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
+                    expenseStatus.style.color = '#67c23a';
                     setTimeout(() => expenseStatus.textContent = '', 1200);
                 } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
             });
@@ -3841,6 +3853,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await API.put('/expense/' + id, { remark });
                     await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
+                    expenseStatus.style.color = '#67c23a';
                     setTimeout(() => expenseStatus.textContent = '', 1200);
                 } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
             });
