@@ -70,7 +70,7 @@
                         <button class="tool-btn" id="refreshBtn">🔄 刷新</button>
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="manageColumnsBtn">📋 列管理</button>
-                        <button class="tool-btn" id="conditionalFormatBtn">🎨 条件管理</button>
+                        <button class="tool-btn" id="conditionalFormatBtn">🎨 视觉管理</button>
                         <button class="tool-btn" id="incomeExpenseStatsBtn">📊 收支统计</button>
                     </div>
                     <div class="toolbar-right">
@@ -325,34 +325,60 @@
     </div>
 
     <div class="modal-overlay" id="conditionalFormatModal">
-        <div class="modal">
+        <div class="modal" style="width:720px;">
             <div class="modal-header">
-                <h2>🎨 条件管理 - <span id="cfModalTabName"></span></h2>
+                <h2>🎨 视觉管理 - <span id="cfModalTabName"></span></h2>
                 <button class="modal-close" id="closeConditionalFormatModal">✕</button>
             </div>
             <div class="modal-body">
-                <div class="cf-add-form">
-                    <div class="cf-form-row">
-                        <select id="cfColSelect"></select>
-                        <select id="cfConditionSelect">
-                            <option value="contains">包含</option>
-                            <option value="equals">等于</option>
-                            <option value="not_equals">不等于</option>
-                            <option value="greater_than">大于</option>
-                            <option value="less_than">小于</option>
-                            <option value="starts_with">开头是</option>
-                            <option value="ends_with">结尾是</option>
-                        </select>
-                        <input type="text" id="cfValueInput" placeholder="条件值" />
-                        <input type="color" id="cfColorInput" value="#dc143c" style="width:40px;height:30px;padding:2px;cursor:pointer;" />
-                        <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
-                            <input type="checkbox" id="cfBoldCheck" /> 加粗
-                        </label>
-                        <button class="tool-btn primary" id="cfAddBtn">添加</button>
+                <div class="cf-tabs">
+                    <button class="cf-tab active" data-tab="conditional">条件管理</button>
+                    <button class="cf-tab" data-tab="highlight">高亮管理</button>
+                </div>
+                <div class="cf-tab-panel" data-panel="conditional">
+                    <div class="cf-add-form">
+                        <div class="cf-form-row">
+                            <select id="cfColSelect"></select>
+                            <select id="cfConditionSelect">
+                                <option value="contains">包含</option>
+                                <option value="equals">等于</option>
+                                <option value="not_equals">不等于</option>
+                                <option value="greater_than">大于</option>
+                                <option value="less_than">小于</option>
+                                <option value="starts_with">开头是</option>
+                                <option value="ends_with">结尾是</option>
+                            </select>
+                            <input type="text" id="cfValueInput" placeholder="条件值" />
+                            <input type="color" id="cfColorInput" value="#dc143c" style="width:40px;height:30px;padding:2px;cursor:pointer;" />
+                            <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+                                <input type="checkbox" id="cfBoldCheck" /> 加粗
+                            </label>
+                            <button class="tool-btn primary" id="cfAddBtn">添加</button>
+                        </div>
+                    </div>
+                    <div class="cf-list" id="cfList"></div>
+                    <p style="font-size:12px;color:#999;margin-top:8px;">💡 条件从上到下依次匹配，先匹配到的先生效。</p>
+                </div>
+                <div class="cf-tab-panel" data-panel="highlight" style="display:none;">
+                    <div style="padding:20px 0;">
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                            <label style="font-size:14px;font-weight:500;min-width:100px;">焦点行高亮色:</label>
+                            <input type="color" id="highlightColorInput" value="#fff3cd" style="width:60px;height:36px;padding:0;border:1px solid #dcdfe6;cursor:pointer;border-radius:4px;" />
+                            <span id="highlightColorPreview" style="padding:4px 12px;border-radius:4px;font-size:13px;background:#fff3cd;">预览效果</span>
+                            <button class="tool-btn primary" id="saveHighlightBtn">保存</button>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <span style="font-size:13px;color:#666;">预设颜色:</span>
+                            <button class="preset-color-btn" data-color="#fff3cd" style="background:#fff3cd;"></button>
+                            <button class="preset-color-btn" data-color="#d4edda" style="background:#d4edda;"></button>
+                            <button class="preset-color-btn" data-color="#d1ecf1" style="background:#d1ecf1;"></button>
+                            <button class="preset-color-btn" data-color="#f8d7da" style="background:#f8d7da;"></button>
+                            <button class="preset-color-btn" data-color="#e2e3e5" style="background:#e2e3e5;"></button>
+                            <button class="preset-color-btn" data-color="#ffeeba" style="background:#ffeeba;"></button>
+                        </div>
+                        <p style="font-size:12px;color:#999;margin-top:16px;">💡 选择输入框时，该输入框所在行会高亮显示，方便定位当前编辑位置。</p>
                     </div>
                 </div>
-                <div class="cf-list" id="cfList"></div>
-                <p style="font-size:12px;color:#999;margin-top:8px;">💡 条件从上到下依次匹配，先匹配到的先生效。</p>
             </div>
         </div>
     </div>

@@ -56,7 +56,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // 待保存记录追踪
         pendingSaves: new Set(),
         // 撤销栈
-        undoStack: []
+        undoStack: [],
+        // 焦点行高亮色
+        focusHighlightColor: '#fff3cd'
     };
 
     // DOM 引用
@@ -3411,6 +3413,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!state.currentTabId) { setStatus('⚠️ 请先选择标签'); return; }
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         cfModalTabName.textContent = tab ? tab.name : '';
+        // 默认显示条件管理标签页
+        $$('.cf-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'conditional'));
+        $$('.cf-tab-panel').forEach(p => {
+            p.style.display = p.dataset.panel === 'conditional' ? 'block' : 'none';
+        });
+        // 初始化高亮色输入框
+        const hlInput = document.getElementById('highlightColorInput');
+        const hlPreview = document.getElementById('highlightColorPreview');
+        if (hlInput) hlInput.value = state.focusHighlightColor;
+        if (hlPreview) hlPreview.style.background = state.focusHighlightColor;
         renderCfColSelect();
         renderCfList();
         conditionalFormatModal.classList.add('show');
@@ -3514,6 +3526,64 @@ document.addEventListener('DOMContentLoaded', function() {
             renderTable(false);
             setStatus('✅ 已删除');
         } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+    }
+
+    // --- 视觉管理 - 标签页切换 ---
+    function initVisualTabs() {
+        $$('.cf-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                $$('.cf-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const target = tab.dataset.tab;
+                $$('.cf-tab-panel').forEach(panel => {
+                    panel.style.display = panel.dataset.panel === target ? 'block' : 'none';
+                });
+            });
+        });
+
+        const highlightInput = document.getElementById('highlightColorInput');
+        const highlightPreview = document.getElementById('highlightColorPreview');
+        if (highlightInput) {
+            highlightInput.addEventListener('input', () => {
+                if (highlightPreview) highlightPreview.style.background = highlightInput.value;
+            });
+        }
+
+        $$('.preset-color-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const color = btn.dataset.color;
+                if (highlightInput) highlightInput.value = color;
+                if (highlightPreview) highlightPreview.style.background = color;
+            });
+        });
+
+        const saveBtn = document.getElementById('saveHighlightBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                const color = document.getElementById('highlightColorInput').value;
+                state.focusHighlightColor = color;
+                try {
+                    localStorage.setItem('focusHighlightColor_' + state.userId, color);
+                } catch(e) {}
+                applyTableHighlightStyle();
+                setStatus('✅ 高亮色已保存');
+            });
+        }
+    }
+
+    function applyTableHighlightStyle() {
+        let styleEl = document.getElementById('tableHighlightStyle');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'tableHighlightStyle';
+            document.head.appendChild(styleEl);
+        }
+        const color = state.focusHighlightColor;
+        styleEl.textContent = `
+            #dataTable tbody tr.focus-highlight > td {
+                background-color: ${color} !important;
+            }
+        `;
     }
 
     // --- 统计 ---
@@ -3667,7 +3737,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- 支出管理弹窗 ---
     async function openExpenseModal(recordId) {
         state.expenseRecordId = recordId;
-        expenseAmountInput.value = '';
+        try {
+            const savedAmount = localStorage.getItem('expenseLastAmount_' + state.userId);
+            expenseAmountInput.value = savedAmount || '';
+        } catch(e) { expenseAmountInput.value = ''; }
         expenseRemarkInput.value = '';
         expenseDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         expenseStatus.textContent = '';
@@ -3796,7 +3869,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 expense_date: date,
                 remark: expenseRemarkInput.value.trim()
             });
-            expenseAmountInput.value = '';
+            try {
+                localStorage.setItem('expenseLastAmount_' + state.userId, String(amount));
+            } catch(e) {}
             expenseRemarkInput.value = '';
             await loadExpenseRecords(state.expenseRecordId);
             await loadRecords(state.currentTabId);
@@ -4968,12 +5043,18 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Escape') providerModal.classList.remove('show');
     });
     addIncomeBtn.addEventListener('click', addIncomeRecord);
+    incomeAmountInput.addEventListener('input', () => {
+        try { localStorage.setItem('incomeLastAmount_' + state.userId, incomeAmountInput.value); } catch(e) {}
+    });
     incomeAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addIncomeRecord();
     });
 
     closeExpenseModal.addEventListener('click', () => expenseModal.classList.remove('show'));
     addExpenseBtn.addEventListener('click', addExpenseRecord);
+    expenseAmountInput.addEventListener('input', () => {
+        try { localStorage.setItem('expenseLastAmount_' + state.userId, expenseAmountInput.value); } catch(e) {}
+    });
     expenseAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addExpenseRecord();
     });
@@ -5461,6 +5542,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (savedFilters) state.tabFilters = JSON.parse(savedFilters);
                 const savedHidden = localStorage.getItem('statsHidden_' + auth.user.id);
                 if (savedHidden !== null) state.statsHidden = savedHidden === '1';
+                const savedHighlight = localStorage.getItem('focusHighlightColor_' + auth.user.id);
+                if (savedHighlight) state.focusHighlightColor = savedHighlight;
             } catch(e) {}
             if (state.tabs.length === 0) await createDefaultTab();
             else {
@@ -5475,7 +5558,34 @@ document.addEventListener('DOMContentLoaded', function() {
             const tab = state.tabs.find(t => t.id === state.currentTabId);
             if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
             loadSettings();
+            applyTableHighlightStyle();
+            initVisualTabs();
             startHeartbeat();
+
+            // 行焦点高亮事件委托：绑定一次，不依赖 renderTable 重新绑定
+            (function bindRowFocusHighlight() {
+                let currentHighlightRow = null;
+
+                function clearHighlight() {
+                    if (currentHighlightRow) {
+                        currentHighlightRow.classList.remove('focus-highlight');
+                        currentHighlightRow = null;
+                    }
+                }
+
+                function setHighlight(e) {
+                    const input = e.target.closest('.cell-input, .select-cell, .address-select, .provider-search-input, .months-input, .date-text-input, .expense-input, .password-input');
+                    if (!input) return;
+                    const tr = input.closest('tr');
+                    if (!tr) return;
+                    clearHighlight();
+                    tr.classList.add('focus-highlight');
+                    currentHighlightRow = tr;
+                }
+
+                document.addEventListener('focusin', setHighlight);
+                document.addEventListener('focusout', clearHighlight);
+            })();
 
             // open-link 事件委托：绑定一次，不依赖 renderTable 重新绑定
             document.addEventListener('click', function(e) {
@@ -7624,7 +7734,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (res.ok) loadMemoItems(currentMemoTagId);
                     } catch (err) { console.error('删除备忘失败:', err); }
                 } else if (action === 'copy') {
-                    const text = (item.title ? item.title + '\n' : '') + (item.content || '');
+                    const text = item.content || '';
                     try {
                         await navigator.clipboard.writeText(text);
                         setStatus('✅ 已复制到剪贴板');
