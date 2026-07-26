@@ -3076,6 +3076,28 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    async function buildIncomePriceMap(tabId) {
+        let allIncomeRecords = [];
+        try {
+            allIncomeRecords = await API.get('/income/by-tab/' + tabId);
+        } catch(e) { allIncomeRecords = []; }
+        const incomeMap = {};
+        allIncomeRecords.forEach(r => {
+            if (!incomeMap[r.record_id]) incomeMap[r.record_id] = [];
+            incomeMap[r.record_id].push(r);
+        });
+        return (recordId) => {
+            const list = incomeMap[recordId] || [];
+            if (list.length === 0) return 0;
+            const sorted = [...list].sort((a, b) => {
+                const da = new Date(a.income_date || 0).getTime();
+                const db = new Date(b.income_date || 0).getTime();
+                return db - da;
+            });
+            return sorted[0].amount || 0;
+        };
+    }
+
     async function exportBill(format) {
         format = format || 'excel';
         const records = state.records;
@@ -3089,26 +3111,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const now = new Date();
             const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
 
-            let allIncomeRecords = [];
-            try {
-                allIncomeRecords = await API.get('/income');
-            } catch(e) { allIncomeRecords = []; }
-            const incomeMap = {};
-            allIncomeRecords.forEach(r => {
-                if (!incomeMap[r.record_id]) incomeMap[r.record_id] = [];
-                incomeMap[r.record_id].push(r);
-            });
-
-            function getBillPrice(recordId) {
-                const list = incomeMap[recordId] || [];
-                if (list.length === 0) return 0;
-                const sorted = [...list].sort((a, b) => {
-                    const da = new Date(a.income_date || 0).getTime();
-                    const db = new Date(b.income_date || 0).getTime();
-                    return db - da;
-                });
-                return sorted[0].amount || 0;
-            }
+            const getBillPrice = await buildIncomePriceMap(state.currentTabId);
 
             function addOneMonth(dateStr) {
                 if (!dateStr) return '';
@@ -3130,21 +3133,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const headers = billFields.map(f => f.name);
             let totalAmount = 0;
             const dataRows = records
-                .map(r => {
+                .map((r, idx) => {
                     const price = Math.round(getBillPrice(r.id));
-                    return { record: r, price };
-                })
-                .filter(x => x.price > 0)
-                .map((x, idx) => {
-                    const r = x.record;
-                    totalAmount += x.price;
+                    totalAmount += price;
                     return [
                         idx + 1,
                         r.data.ip_info || '',
                         formatDisplayDate(r.data.client_purchase),
                         addOneMonth(r.data.client_expire),
                         r.data.client_name || '',
-                        x.price
+                        price
                     ];
                 });
 
@@ -3298,23 +3296,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-        try {
-            if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
-                await navigator.clipboard.write([
-                    new ClipboardItem({ 'image/png': blob })
-                ]);
-            } else {
-                throw new Error('clipboard not available');
-            }
-        } catch (e) {
-            const link = document.createElement('a');
-            link.download = `账单_${new Date().toISOString().slice(0,10)}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+        if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+            await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': blob })
+            ]);
+        } else {
+            throw new Error('当前浏览器不支持剪贴板图片复制，请使用 HTTPS 协议访问');
         }
     }
 
-    async function exportClientInfoAsImage(clientRecords, exportFields) {
+    async function exportClientInfoAsImage(clientRecords, exportFields, getPriceFn) {
         const headers = exportFields.map(f => f.name);
         const rows = clientRecords.map(r => {
             return exportFields.map(f => {
@@ -3324,6 +3315,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (f.key === 'client_purchase' || f.key === 'client_expire') {
                     return formatDisplayDate(r.data[f.key]);
+                }
+                if (f.key === 'price' && getPriceFn) {
+                    return Math.round(getPriceFn(r.id));
                 }
                 return r.data[f.key] ?? '';
             });
@@ -3335,9 +3329,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const headerHeight = 40;
         const rowHeight = 30;
         const colPadding = 15;
+        ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
 
         const colWidths = exportFields.map((f, idx) => {
+            ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, sans-serif';
             let maxWidth = ctx.measureText(f.name).width + colPadding * 2;
+            ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
             rows.forEach(row => {
                 const w = ctx.measureText(String(row[idx])).width + colPadding * 2;
                 maxWidth = Math.max(maxWidth, w);
@@ -3376,9 +3373,6 @@ document.addEventListener('DOMContentLoaded', function() {
             row.forEach((cell, colIdx) => {
                 const colKey = exportFields[colIdx].key;
                 const cellText = String(cell);
-                const textWidth = ctx.measureText(cellText).width;
-                const cellX = x + colWidths[colIdx] / 2 - textWidth / 2;
-                const cellY = y + rowHeight / 2 + 4;
                 if (colKey === 'client_remaining') {
                     const days = computeDaysRemaining(clientRecords[rowIdx].data.client_expire);
                     if (days <= 3) {
@@ -3395,6 +3389,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
                     ctx.fillStyle = '#333';
                 }
+                const textWidth = ctx.measureText(cellText).width;
+                const cellX = x + colWidths[colIdx] / 2 - textWidth / 2;
+                const cellY = y + rowHeight / 2 + 4;
                 ctx.fillText(cellText, cellX, cellY);
                 ctx.strokeRect(x, y, colWidths[colIdx], rowHeight);
                 x += colWidths[colIdx];
@@ -3402,19 +3399,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-        try {
-            if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
-                await navigator.clipboard.write([
-                    new ClipboardItem({ 'image/png': blob })
-                ]);
-            } else {
-                throw new Error('clipboard not available');
-            }
-        } catch (e) {
-            const link = document.createElement('a');
-            link.download = `导出图片_${new Date().toISOString().slice(0,10)}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+        if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+            await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': blob })
+            ]);
+        } else {
+            throw new Error('当前浏览器不支持剪贴板图片复制，请使用 HTTPS 协议访问');
         }
     }
 
@@ -5352,7 +5342,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 { key: 'client_expire', name: '客户到期时间' },
                 { key: 'client_remaining', name: '客户剩余天数' },
                 { key: 'client_name', name: '客户名' },
-                { key: 'unit_price', name: '单价备注' }
+                { key: 'price', name: '单价' }
             ];
             if (tabType === 'info') {
                 const format = document.querySelector('input[name="exportInfoFormat"]:checked');
@@ -5363,6 +5353,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
                 try {
+                    const getPrice = await buildIncomePriceMap(state.currentTabId);
                     if (fmt === 'excel') {
                         exportInfoStatus.textContent = '🔄 导出中...';
                         if (typeof XLSX === 'undefined') await loadXLSX();
@@ -5376,8 +5367,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 if (f.key === 'client_purchase' || f.key === 'client_expire') {
                                     return formatDisplayDate(r.data[f.key]);
                                 }
-                                if (f.key === 'unit_price') {
-                                    return r.data.unit_price || '';
+                                if (f.key === 'price') {
+                                    return Math.round(getPrice(r.id));
                                 }
                                 return r.data[f.key] ?? '';
                             });
@@ -5398,7 +5389,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         setTimeout(() => { exportInfoModal.classList.remove('show'); exportInfoStatus.textContent = ''; }, 1500);
                     } else {
                         exportInfoStatus.textContent = '🔄 生成图片中...';
-                        await exportClientInfoAsImage(clientRecords, infoExportFields);
+                        await exportClientInfoAsImage(clientRecords, infoExportFields, getPrice);
                         exportInfoStatus.textContent = '✅ 图片已复制到剪贴板';
                         setTimeout(() => { exportInfoModal.classList.remove('show'); exportInfoStatus.textContent = ''; }, 1500);
                     }
@@ -6516,6 +6507,41 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
+    function disconnectOnly(connId) {
+        const conn = sshConnections.find(c => c.id === connId);
+        if (!conn) return;
+        if (conn.ws) {
+            try { conn.ws.close(); } catch(e) {}
+        }
+        if (conn.clientPing) clearInterval(conn.clientPing);
+        stopMonitor(connId);
+        updateTabStatus(connId, 'disconnected');
+        if (activeConnId === connId) {
+            const title = document.querySelector('.terminal-title');
+            const input = document.getElementById('terminalInput');
+            const sendBtn = document.getElementById('sendCmdBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const fileManagerBtn = document.getElementById('fileManagerBtn');
+            const terminal = document.getElementById('terminalContainer');
+            title.textContent = `${conn.host.name} - 已断开`;
+            if (terminal) {
+                const out = document.getElementById('terminalOutput');
+                if (out) {
+                    const span = document.createElement('span');
+                    span.style.color = '#e6a23c';
+                    span.textContent = '\n[连接已断开]\n';
+                    out.appendChild(span);
+                    out.scrollTop = out.scrollHeight;
+                }
+            }
+            input.disabled = true;
+            sendBtn.disabled = true;
+            disconnectBtn.style.display = 'inline-block';
+            disconnectBtn.textContent = '发起连接';
+            fileManagerBtn.style.display = 'inline-block';
+        }
+    }
+
     function getActiveConn() {
         return sshConnections.find(c => c.id === activeConnId);
     }
@@ -7611,7 +7637,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const ws = conn.ws;
             const isOpen = ws && ws.readyState === WebSocket.OPEN;
             if (isOpen) {
-                closeConnection(activeConnId);
+                disconnectOnly(activeConnId);
             } else {
                 const host = conn.host;
                 closeConnection(activeConnId, true);
