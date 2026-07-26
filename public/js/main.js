@@ -3297,10 +3297,21 @@ document.addEventListener('DOMContentLoaded', function() {
             if (i < colWidths.length) lineX += colWidths[i];
         }
 
-        const link = document.createElement('a');
-        link.download = `账单_${new Date().toISOString().slice(0,10)}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        try {
+            if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+            } else {
+                throw new Error('clipboard not available');
+            }
+        } catch (e) {
+            const link = document.createElement('a');
+            link.download = `账单_${new Date().toISOString().slice(0,10)}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
     }
 
     async function exportClientInfoAsImage(clientRecords, exportFields) {
@@ -3391,9 +3402,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-        await navigator.clipboard.write([
-            new ClipboardItem({ 'image/png': blob })
-        ]);
+        try {
+            if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+            } else {
+                throw new Error('clipboard not available');
+            }
+        } catch (e) {
+            const link = document.createElement('a');
+            link.download = `导出图片_${new Date().toISOString().slice(0,10)}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
     }
 
     function showImportModal() { importModal.classList.add('show'); importFileInput.value = ''; importStatus.textContent = ''; }
@@ -5324,29 +5346,64 @@ document.addEventListener('DOMContentLoaded', function() {
         exportInfoConfirm.addEventListener('click', async () => {
             const activeTab = exportInfoModal.querySelector('.export-info-tab.active');
             const tabType = activeTab ? activeTab.dataset.tab : 'info';
+            const infoExportFields = [
+                { key: 'ip_info', name: 'IP信息' },
+                { key: 'client_purchase', name: '客户购买时间' },
+                { key: 'client_expire', name: '客户到期时间' },
+                { key: 'client_remaining', name: '客户剩余天数' },
+                { key: 'client_name', name: '客户名' },
+                { key: 'unit_price', name: '单价备注' }
+            ];
             if (tabType === 'info') {
                 const format = document.querySelector('input[name="exportInfoFormat"]:checked');
                 const fmt = format ? format.value : 'excel';
-                if (fmt === 'excel') {
-                    exportInfoModal.classList.remove('show');
-                    showExportClientInfoModal();
-                } else {
-                    try {
-                        exportInfoStatus.textContent = '🔄 生成图片中...';
-                        const exportFields = [
-                            { key: 'ip_info', name: 'IP信息' },
-                            { key: 'client_purchase', name: '客户购买时间' },
-                            { key: 'client_expire', name: '客户到期时间' },
-                            { key: 'client_name', name: '客户名' },
-                            { key: 'income_total', name: '单价/元' }
-                        ];
-                        const clientRecords = state.records || [];
-                        await exportClientInfoAsImage(clientRecords, exportFields);
-                        exportInfoStatus.textContent = '✅ 图片导出成功';
+                const clientRecords = state.records || [];
+                if (clientRecords.length === 0) {
+                    exportInfoStatus.textContent = '⚠️ 没有客户数据';
+                    return;
+                }
+                try {
+                    if (fmt === 'excel') {
+                        exportInfoStatus.textContent = '🔄 导出中...';
+                        if (typeof XLSX === 'undefined') await loadXLSX();
+                        const headers = infoExportFields.map(f => f.name);
+                        const rows = clientRecords.map(r => {
+                            return infoExportFields.map(f => {
+                                if (f.key === 'client_remaining') {
+                                    const days = computeDaysRemaining(r.data.client_expire);
+                                    return days !== '' ? days + ' 天' : '';
+                                }
+                                if (f.key === 'client_purchase' || f.key === 'client_expire') {
+                                    return formatDisplayDate(r.data[f.key]);
+                                }
+                                if (f.key === 'unit_price') {
+                                    return r.data.unit_price || '';
+                                }
+                                return r.data[f.key] ?? '';
+                            });
+                        });
+                        const wsData = [headers, ...rows];
+                        const ws = XLSX.utils.aoa_to_sheet(wsData);
+                        const colWidths = infoExportFields.map((f, i) => {
+                            let maxW = headers[i].length * 14;
+                            rows.forEach(r => { maxW = Math.max(maxW, String(r[i]).length * 14); });
+                            return { wch: Math.min(Math.max(Math.round(maxW / 7), 10), 30) };
+                        });
+                        ws['!cols'] = colWidths;
+                        const wb = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(wb, ws, '客户信息');
+                        const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                        downloadFile(buf, `客户信息_${new Date().toISOString().slice(0,10)}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                        exportInfoStatus.textContent = '✅ 导出成功';
                         setTimeout(() => { exportInfoModal.classList.remove('show'); exportInfoStatus.textContent = ''; }, 1500);
-                    } catch (err) {
-                        exportInfoStatus.textContent = '❌ 导出失败: ' + err.message;
+                    } else {
+                        exportInfoStatus.textContent = '🔄 生成图片中...';
+                        await exportClientInfoAsImage(clientRecords, infoExportFields);
+                        exportInfoStatus.textContent = '✅ 图片已复制到剪贴板';
+                        setTimeout(() => { exportInfoModal.classList.remove('show'); exportInfoStatus.textContent = ''; }, 1500);
                     }
+                } catch (err) {
+                    exportInfoStatus.textContent = '❌ 导出失败: ' + err.message;
                 }
             } else {
                 const format = document.querySelector('input[name="exportBillFormat"]:checked');
