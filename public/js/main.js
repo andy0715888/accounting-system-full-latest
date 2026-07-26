@@ -80,7 +80,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const importBtn = $('#importBtn');
     const exportBtn = $('#exportBtn');
     const exportInfoBtn = $('#exportInfoBtn');
-    const exportInfoMenu = $('#exportInfoMenu');
+    const exportInfoModal = $('#exportInfoModal');
+    const closeExportInfoModal = $('#closeExportInfoModal');
+    const exportInfoExcelBtn = $('#exportInfoExcelBtn');
+    const exportInfoImageBtn = $('#exportInfoImageBtn');
+    const exportBillExcelBtn = $('#exportBillExcelBtn');
+    const exportBillImageBtn = $('#exportBillImageBtn');
     const exportClientInfoModal = $('#exportClientInfoModal');
     const closeExportClientInfoModal = $('#closeExportClientInfoModal');
     const exportClientConfirm = $('#exportClientConfirm');
@@ -3072,7 +3077,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function exportBill() {
+    async function exportBill(format) {
+        format = format || 'excel';
         const records = state.records;
         if (!records || records.length === 0) {
             setStatus('⚠️ 没有可导出的数据');
@@ -3080,10 +3086,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         try {
             setStatus('🔄 生成账单中...');
-            if (typeof XLSX === 'undefined') await loadXLSX();
 
             const now = new Date();
             const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+
+            let allIncomeRecords = [];
+            try {
+                allIncomeRecords = await API.get('/income');
+            } catch(e) { allIncomeRecords = []; }
+            const incomeMap = {};
+            allIncomeRecords.forEach(r => {
+                if (!incomeMap[r.record_id]) incomeMap[r.record_id] = [];
+                incomeMap[r.record_id].push(r);
+            });
+
+            function getBillPrice(recordId) {
+                const list = incomeMap[recordId] || [];
+                if (list.length === 0) return 0;
+                const sorted = [...list].sort((a, b) => {
+                    const da = new Date(a.income_date || 0).getTime();
+                    const db = new Date(b.income_date || 0).getTime();
+                    return db - da;
+                });
+                return sorted[0].amount || 0;
+            }
+
+            function addOneMonth(dateStr) {
+                if (!dateStr) return '';
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime())) return dateStr;
+                d.setMonth(d.getMonth() + 1);
+                return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+            }
 
             const billFields = [
                 { key: 'seq', name: '序号' },
@@ -3097,19 +3131,31 @@ document.addEventListener('DOMContentLoaded', function() {
             const headers = billFields.map(f => f.name);
             let totalAmount = 0;
             const dataRows = records
-                .filter(r => (r._incomeTotal || 0) > 0)
-                .map((r, idx) => {
-                    const price = Math.round(r._incomeTotal || 0);
-                    totalAmount += price;
+                .map(r => {
+                    const price = Math.round(getBillPrice(r.id));
+                    return { record: r, price };
+                })
+                .filter(x => x.price > 0)
+                .map((x, idx) => {
+                    const r = x.record;
+                    totalAmount += x.price;
                     return [
                         idx + 1,
                         r.data.ip_info || '',
                         formatDisplayDate(r.data.client_purchase),
-                        formatDisplayDate(r.data.client_expire),
+                        addOneMonth(r.data.client_expire),
                         r.data.client_name || '',
-                        price
+                        x.price
                     ];
                 });
+
+            if (format === 'image') {
+                await exportBillAsImage(headers, dataRows, totalAmount, dateStr);
+                setStatus('✅ 账单图片导出成功');
+                return;
+            }
+
+            if (typeof XLSX === 'undefined') await loadXLSX();
 
             const wsData = [
                 [],
@@ -3166,6 +3212,96 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) {
             setStatus('❌ 导出失败: ' + err.message);
         }
+    }
+
+    async function exportBillAsImage(headers, dataRows, totalAmount, dateStr) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const colWidths = [60, 220, 160, 160, 140, 100];
+        const rowHeight = 36;
+        const padding = 40;
+        const titleHeight = 60;
+        const headerHeight = 44;
+        const totalHeight = 44;
+        const dateHeight = 36;
+        const tableWidth = colWidths.reduce((s, w) => s + w, 0);
+        const totalRows = dataRows.length;
+        canvas.width = tableWidth + padding * 2;
+        canvas.height = padding * 2 + titleHeight + headerHeight + totalRows * rowHeight + totalHeight + dateHeight + 20;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#303133';
+        ctx.font = 'bold 20px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('JX网络工作室新开/续费账单', canvas.width / 2, padding + titleHeight / 2);
+
+        const tableTop = padding + titleHeight + 10;
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(padding, tableTop, tableWidth, headerHeight);
+        ctx.fillStyle = '#303133';
+        ctx.font = 'bold 13px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        let x = padding;
+        headers.forEach((h, i) => {
+            ctx.fillText(h, x + colWidths[i] / 2, tableTop + headerHeight / 2);
+            x += colWidths[i];
+        });
+
+        ctx.font = '13px "Microsoft YaHei", sans-serif';
+        dataRows.forEach((row, ri) => {
+            const y = tableTop + headerHeight + ri * rowHeight;
+            if (ri % 2 === 1) {
+                ctx.fillStyle = '#fafafa';
+                ctx.fillRect(padding, y, tableWidth, rowHeight);
+            }
+            ctx.fillStyle = '#606266';
+            ctx.textAlign = 'center';
+            let xPos = padding;
+            row.forEach((cell, ci) => {
+                ctx.fillText(String(cell || ''), xPos + colWidths[ci] / 2, y + rowHeight / 2);
+                xPos += colWidths[ci];
+            });
+        });
+
+        const totalY = tableTop + headerHeight + totalRows * rowHeight;
+        ctx.fillStyle = '#303133';
+        ctx.font = 'bold 14px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('总计', padding + tableWidth - colWidths[5] - 10, totalY + totalHeight / 2);
+        ctx.textAlign = 'center';
+        ctx.fillText(String(totalAmount), padding + tableWidth - colWidths[5] / 2, totalY + totalHeight / 2);
+
+        ctx.font = '12px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#909399';
+        ctx.textAlign = 'right';
+        ctx.fillText(`账单时间：${dateStr}`, padding + tableWidth - 10, totalY + totalHeight + dateHeight / 2 + 5);
+
+        ctx.strokeStyle = '#ebeef5';
+        ctx.lineWidth = 1;
+        let lineY = tableTop;
+        for (let i = 0; i <= totalRows + 1; i++) {
+            ctx.beginPath();
+            ctx.moveTo(padding, lineY);
+            ctx.lineTo(padding + tableWidth, lineY);
+            ctx.stroke();
+            lineY += (i === 0 ? headerHeight : rowHeight);
+        }
+        let lineX = padding;
+        for (let i = 0; i <= colWidths.length; i++) {
+            ctx.beginPath();
+            ctx.moveTo(lineX, tableTop);
+            ctx.lineTo(lineX, tableTop + headerHeight + totalRows * rowHeight);
+            ctx.stroke();
+            if (i < colWidths.length) lineX += colWidths[i];
+        }
+
+        const link = document.createElement('a');
+        link.download = `账单_${new Date().toISOString().slice(0,10)}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
     }
 
     async function exportClientInfoAsImage(clientRecords, exportFields) {
@@ -3698,6 +3834,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- 统计 ---
     // --- 收入管理弹窗 ---
+    function setIncomeStatus(text, color) {
+        const el = document.getElementById('incomeStatus');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = color || '#67c23a';
+        el.style.display = 'block';
+        el.style.opacity = '1';
+        el.style.visibility = 'visible';
+        if (text) {
+            clearTimeout(setIncomeStatus._t);
+            setIncomeStatus._t = setTimeout(() => {
+                const e = document.getElementById('incomeStatus');
+                if (e && (e.textContent === '已保存' || e.textContent === '添加成功' || e.textContent === '已删除')) e.textContent = '';
+            }, 1500);
+        }
+    }
+
     async function openIncomeModal(recordId) {
         state.incomeRecordId = recordId;
         state.incomeRecords = [];
@@ -3709,8 +3862,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch(e) { incomeAmountInput.value = ''; }
         incomeRemarkInput.value = '';
         incomeDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
-        incomeStatus.textContent = '';
-        incomeStatus.style.color = '#67c23a';
+        setIncomeStatus('');
         incomeModal.classList.add('show');
         await loadIncomeRecords(recordId);
     }
@@ -3722,7 +3874,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const total = state.incomeRecords.reduce((s, r) => s + (r.amount || 0), 0);
             incomeTotalDisplay.textContent = Math.round(total);
             renderIncomeList();
-        } catch (err) { incomeStatus.textContent = '加载失败: ' + err.message; }
+        } catch (err) { setIncomeStatus('加载失败: ' + err.message, '#f56c6c'); }
     }
 
     function renderIncomeList() {
@@ -3769,15 +3921,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const amount = parseFloat(this.value);
-                if (isNaN(amount) || amount <= 0) { incomeStatus.textContent = '金额无效'; incomeStatus.style.color = '#f56c6c'; return; }
+                if (isNaN(amount) || amount <= 0) { setIncomeStatus('金额无效', '#f56c6c'); return; }
                 try {
                     await API.put('/income/' + id, { amount });
-                    incomeStatus.textContent = '已保存';
-                    incomeStatus.style.color = '#67c23a';
+                    setIncomeStatus('已保存');
                     this._origValue = this.value;
-                    setTimeout(() => { if (incomeStatus.textContent === '已保存') incomeStatus.textContent = ''; }, 1500);
                     await loadIncomeRecords(state.incomeRecordId);
-                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; incomeStatus.style.color = '#f56c6c'; }
+                } catch (err) { setIncomeStatus('保存失败: ' + err.message, '#f56c6c'); }
             };
             inp.addEventListener('blur', saveFn);
             inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
@@ -3793,12 +3943,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!date) return;
                 try {
                     await API.put('/income/' + id, { income_date: date });
-                    incomeStatus.textContent = '已保存';
-                    incomeStatus.style.color = '#67c23a';
+                    setIncomeStatus('已保存');
                     this._origValue = this.value;
-                    setTimeout(() => { if (incomeStatus.textContent === '已保存') incomeStatus.textContent = ''; }, 1500);
                     await loadIncomeRecords(state.incomeRecordId);
-                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; incomeStatus.style.color = '#f56c6c'; }
+                } catch (err) { setIncomeStatus('保存失败: ' + err.message, '#f56c6c'); }
             };
             inp.addEventListener('blur', saveFn);
             inp.addEventListener('change', saveFn);
@@ -3813,12 +3961,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 const remark = this.value;
                 try {
                     await API.put('/income/' + id, { remark });
-                    incomeStatus.textContent = '已保存';
-                    incomeStatus.style.color = '#67c23a';
+                    setIncomeStatus('已保存');
                     this._origValue = this.value;
-                    setTimeout(() => { if (incomeStatus.textContent === '已保存') incomeStatus.textContent = ''; }, 1500);
                     await loadIncomeRecords(state.incomeRecordId);
-                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; incomeStatus.style.color = '#f56c6c'; }
+                } catch (err) { setIncomeStatus('保存失败: ' + err.message, '#f56c6c'); }
             };
             inp.addEventListener('blur', saveFn);
             inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
@@ -3833,10 +3979,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     await loadIncomeRecords(state.incomeRecordId);
                     await loadRecords(state.currentTabId);
                     renderTable(false);
-                    incomeStatus.textContent = '已删除';
-                    incomeStatus.style.color = '#67c23a';
-                    setTimeout(() => incomeStatus.textContent = '', 1200);
-                } catch (err) { incomeStatus.textContent = '删除失败: ' + err.message; }
+                    setIncomeStatus('已删除');
+                } catch (err) { setIncomeStatus('删除失败: ' + err.message, '#f56c6c'); }
             });
         });
     }
@@ -3844,8 +3988,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function addIncomeRecord() {
         const amount = parseFloat(incomeAmountInput.value);
         const date = incomeDateInput.value;
-        if (!amount || amount <= 0) { incomeStatus.textContent = '请输入有效金额'; return; }
-        if (!date) { incomeStatus.textContent = '请选择日期'; return; }
+        if (!amount || amount <= 0) { setIncomeStatus('请输入有效金额', '#f56c6c'); return; }
+        if (!date) { setIncomeStatus('请选择日期', '#f56c6c'); return; }
         try {
             await API.post('/income', {
                 record_id: state.incomeRecordId,
@@ -3861,9 +4005,8 @@ document.addEventListener('DOMContentLoaded', function() {
             await loadIncomeRecords(state.incomeRecordId);
             await loadRecords(state.currentTabId);
             renderTable(false);
-            incomeStatus.textContent = '添加成功';
-            setTimeout(() => incomeStatus.textContent = '', 1500);
-        } catch (err) { incomeStatus.textContent = '添加失败: ' + err.message; }
+            setIncomeStatus('添加成功');
+        } catch (err) { setIncomeStatus('添加失败: ' + err.message, '#f56c6c'); }
     }
 
     // --- 支出管理弹窗 ---
@@ -5151,23 +5294,59 @@ document.addEventListener('DOMContentLoaded', function() {
     deleteRowsBtn.addEventListener('click', deleteSelected);
     exportBtn.addEventListener('click', exportData);
     if (exportInfoBtn) {
-        exportInfoBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            exportInfoMenu.classList.toggle('show');
+        exportInfoBtn.addEventListener('click', () => {
+            exportInfoModal.classList.add('show');
         });
-        document.addEventListener('click', () => {
-            if (exportInfoMenu) exportInfoMenu.classList.remove('show');
+    }
+    if (closeExportInfoModal) {
+        closeExportInfoModal.addEventListener('click', () => {
+            exportInfoModal.classList.remove('show');
         });
-        exportInfoMenu.querySelectorAll('.dropdown-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const type = item.dataset.type;
-                exportInfoMenu.classList.remove('show');
-                if (type === 'info') {
-                    showExportClientInfoModal();
-                } else if (type === 'bill') {
-                    exportBill();
-                }
-            });
+    }
+    exportInfoModal.querySelectorAll('.export-info-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            exportInfoModal.querySelectorAll('.export-info-tab').forEach(t => t.classList.remove('active'));
+            exportInfoModal.querySelectorAll('.export-info-panel').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            const panel = exportInfoModal.querySelector(`.export-info-panel[data-panel="${tab.dataset.tab}"]`);
+            if (panel) panel.classList.add('active');
+        });
+    });
+    if (exportInfoExcelBtn) {
+        exportInfoExcelBtn.addEventListener('click', () => {
+            exportInfoModal.classList.remove('show');
+            showExportClientInfoModal();
+        });
+    }
+    if (exportInfoImageBtn) {
+        exportInfoImageBtn.addEventListener('click', async () => {
+            exportInfoModal.classList.remove('show');
+            try {
+                const exportFields = [
+                    { key: 'ip_info', name: 'IP信息' },
+                    { key: 'client_purchase', name: '客户购买时间' },
+                    { key: 'client_expire', name: '客户到期时间' },
+                    { key: 'client_name', name: '客户名' },
+                    { key: 'income_total', name: '单价/元' }
+                ];
+                const clientRecords = state.records || [];
+                await exportClientInfoAsImage(clientRecords, exportFields);
+                setStatus('✅ 实时信息图片导出成功');
+            } catch (err) {
+                setStatus('❌ 导出失败: ' + err.message);
+            }
+        });
+    }
+    if (exportBillExcelBtn) {
+        exportBillExcelBtn.addEventListener('click', () => {
+            exportInfoModal.classList.remove('show');
+            exportBill('excel');
+        });
+    }
+    if (exportBillImageBtn) {
+        exportBillImageBtn.addEventListener('click', () => {
+            exportInfoModal.classList.remove('show');
+            exportBill('image');
         });
     }
     closeExportClientInfoModal.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
