@@ -1611,6 +1611,37 @@ body {
     line-height: 18px;
 }
 
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: #fff;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    z-index: 100;
+    min-width: 120px;
+    padding: 4px 0;
+}
+.dropdown-menu.show { display: block; }
+.dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: #606266;
+}
+.dropdown-item:hover { background: #f5f7fa; color: #409eff; }
+
 /* 收入列在表格中的样式 - 只读显示，可点击 */
 .fee-summary-cell {
     cursor: pointer;
@@ -3135,6 +3166,10 @@ tr.client-row.cut-pending {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 16px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    padding: 4px;
 }
 
 .memo-card {

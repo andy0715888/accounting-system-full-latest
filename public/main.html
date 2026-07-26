@@ -65,7 +65,13 @@
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="importBtn">📥 导入</button>
                         <button class="tool-btn" id="exportBtn">📤 导出</button>
-                        <button class="tool-btn" id="exportClientInfoBtn">📋 导出客户信息</button>
+                        <div class="dropdown">
+                            <button class="tool-btn" id="exportInfoBtn">📋 导出信息 ▾</button>
+                            <div class="dropdown-menu" id="exportInfoMenu">
+                                <button class="dropdown-item" data-type="info">信息</button>
+                                <button class="dropdown-item" data-type="bill">账单</button>
+                            </div>
+                        </div>
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="refreshBtn">🔄 刷新</button>
                         <span class="tool-divider"></span>
@@ -218,8 +224,8 @@
                         <h3 id="memoCurrentTagName" style="margin:0;color:#303133;">请选择标签</h3>
                     </div>
                     <div class="toolbar-right">
-                        <button class="tool-btn" id="manageMemoItemsBtn">⚙️ 管理备忘</button>
                         <button class="tool-btn primary" id="addMemoItemBtn" disabled>➕ 添加备忘</button>
+                        <button class="tool-btn" id="manageMemoItemsBtn">⚙️ 管理备忘</button>
                     </div>
                 </div>
                 <div class="memos-list" id="memosList">
@@ -685,7 +691,7 @@
                     <strong id="incomeTotalDisplay">0.00</strong>
                 </div>
                 <div class="income-add-form">
-                    <input type="number" id="incomeAmountInput" placeholder="金额" step="0.01" />
+                    <input type="number" id="incomeAmountInput" placeholder="单价" step="0.01" />
                     <input type="date" id="incomeDateInput" />
                     <input type="text" id="incomeRemarkInput" placeholder="备注" />
                     <button class="tool-btn primary" id="addIncomeBtn">添加收入</button>

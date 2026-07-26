@@ -79,7 +79,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const manageRowsBtn = $('#manageRowsBtn');
     const importBtn = $('#importBtn');
     const exportBtn = $('#exportBtn');
-    const exportClientInfoBtn = $('#exportClientInfoBtn');
+    const exportInfoBtn = $('#exportInfoBtn');
+    const exportInfoMenu = $('#exportInfoMenu');
     const exportClientInfoModal = $('#exportClientInfoModal');
     const closeExportClientInfoModal = $('#closeExportClientInfoModal');
     const exportClientConfirm = $('#exportClientConfirm');
@@ -3011,7 +3012,7 @@ document.addEventListener('DOMContentLoaded', function() {
             { key: 'client_expire', name: '客户到期时间' },
             { key: 'client_remaining', name: '客户剩余天数' },
             { key: 'client_name', name: '客户名' },
-            { key: 'unit_price', name: '单价备注' }
+            { key: 'income_total', name: '单价/元' }
         ];
 
         try {
@@ -3027,6 +3028,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         if (f.key === 'client_purchase' || f.key === 'client_expire') {
                             return formatDisplayDate(r.data[f.key]);
+                        }
+                        if (f.key === 'income_total') {
+                            return Math.round(r._incomeTotal || 0);
                         }
                         return r.data[f.key] ?? '';
                     });
@@ -3065,6 +3069,102 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (err) {
             exportClientStatus.textContent = '❌ 导出失败: ' + err.message;
+        }
+    }
+
+    async function exportBill() {
+        const records = state.records;
+        if (!records || records.length === 0) {
+            setStatus('⚠️ 没有可导出的数据');
+            return;
+        }
+        try {
+            setStatus('🔄 生成账单中...');
+            if (typeof XLSX === 'undefined') await loadXLSX();
+
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+
+            const billFields = [
+                { key: 'seq', name: '序号' },
+                { key: 'ip_info', name: 'IP信息' },
+                { key: 'client_purchase', name: '客户购买时间' },
+                { key: 'client_expire', name: '客户到期时间' },
+                { key: 'client_name', name: '客户名' },
+                { key: 'price', name: '单价/元' }
+            ];
+
+            const headers = billFields.map(f => f.name);
+            let totalAmount = 0;
+            const dataRows = records
+                .filter(r => (r._incomeTotal || 0) > 0)
+                .map((r, idx) => {
+                    const price = Math.round(r._incomeTotal || 0);
+                    totalAmount += price;
+                    return [
+                        idx + 1,
+                        r.data.ip_info || '',
+                        formatDisplayDate(r.data.client_purchase),
+                        formatDisplayDate(r.data.client_expire),
+                        r.data.client_name || '',
+                        price
+                    ];
+                });
+
+            const wsData = [
+                [],
+                ['JX网络工作室新开/续费账单'],
+                [],
+                headers,
+                ...dataRows,
+                [],
+                ['', '', '', '', '总计', totalAmount],
+                ['', '', '', '', `账单时间：${dateStr}`, '']
+            ];
+
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+            ws['!merges'] = [
+                { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
+                { s: { r: dataRows.length + 4, c: 0 }, e: { r: dataRows.length + 4, c: 4 } }
+            ];
+
+            const colWidths = [
+                { wch: 6 },
+                { wch: 18 },
+                { wch: 16 },
+                { wch: 16 },
+                { wch: 16 },
+                { wch: 12 }
+            ];
+            ws['!cols'] = colWidths;
+
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let R = range.s.r; R <= range.e.r; ++R) {
+                for (let C = range.s.c; C <= range.e.c; ++C) {
+                    const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                    if (!ws[cellAddress]) continue;
+                    const cell = ws[cellAddress];
+                    if (!cell.s) cell.s = {};
+                    cell.s.alignment = { horizontal: 'center', vertical: 'center' };
+                    if (R === 1) {
+                        cell.s.font = { bold: true, size: 16 };
+                    } else if (R === 3) {
+                        cell.s.font = { bold: true };
+                        cell.s.fill = { fgColor: { rgb: 'F0F0F0' } };
+                    } else if (R === dataRows.length + 4) {
+                        cell.s.font = { bold: true };
+                    }
+                }
+            }
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '账单');
+            const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+            downloadFile(buf, `账单_${now.toISOString().slice(0,10)}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            setStatus('✅ 账单导出成功');
+        } catch (err) {
+            setStatus('❌ 导出失败: ' + err.message);
         }
     }
 
@@ -3610,6 +3710,7 @@ document.addEventListener('DOMContentLoaded', function() {
         incomeRemarkInput.value = '';
         incomeDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         incomeStatus.textContent = '';
+        incomeStatus.style.color = '#67c23a';
         incomeModal.classList.add('show');
         await loadIncomeRecords(recordId);
     }
@@ -3644,7 +3745,7 @@ document.addEventListener('DOMContentLoaded', function() {
         incomeList.innerHTML = `
             <div class="income-list-header">
                 <span class="col-id">#ID</span>
-                <span class="col-amount ${amountCls}" data-sort-field="amount">金额</span>
+                <span class="col-amount ${amountCls}" data-sort-field="amount">单价</span>
                 <span class="col-date ${dateCls}" data-sort-field="date">日期</span>
                 <span class="col-remark">备注</span>
                 <span class="col-action">操作</span>
@@ -4638,8 +4739,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const months = Object.values(monthMap).sort((a, b) => a.label.localeCompare(b.label));
             const years = Object.values(yearMap).sort((a, b) => a.label.localeCompare(b.label));
-            const tabs = Object.values(tabMap).sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
-            const providers = Object.values(providerMap).sort((a, b) => Math.abs(b.net) - Math.abs(a.net)).slice(0, 8);
+            const tabs = Object.values(tabMap).sort((a, b) => b.net - a.net);
+            const providers = Object.values(providerMap).sort((a, b) => b.net - a.net).slice(0, 8);
 
             // 过滤掉未来的年份和月份（只显示当前年月及之前）
             const now = new Date();
@@ -5049,7 +5150,26 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     deleteRowsBtn.addEventListener('click', deleteSelected);
     exportBtn.addEventListener('click', exportData);
-    exportClientInfoBtn.addEventListener('click', showExportClientInfoModal);
+    if (exportInfoBtn) {
+        exportInfoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            exportInfoMenu.classList.toggle('show');
+        });
+        document.addEventListener('click', () => {
+            if (exportInfoMenu) exportInfoMenu.classList.remove('show');
+        });
+        exportInfoMenu.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const type = item.dataset.type;
+                exportInfoMenu.classList.remove('show');
+                if (type === 'info') {
+                    showExportClientInfoModal();
+                } else if (type === 'bill') {
+                    exportBill();
+                }
+            });
+        });
+    }
     closeExportClientInfoModal.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
     exportClientConfirm.addEventListener('click', exportClientInfo);
     exportClientCancel.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
