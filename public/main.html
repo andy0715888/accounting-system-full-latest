@@ -732,22 +732,25 @@
                 </div>
                 <div class="export-info-content">
                     <div class="export-info-panel active" data-panel="info">
-                        <h3 style="margin:0 0 12px;font-size:14px;color:#606266;">导出实时信息</h3>
-                        <p style="margin:0 0 16px;font-size:13px;color:#909399;">导出当前筛选条件下的所有数据</p>
-                        <div style="display:flex;gap:12px;">
-                            <button class="tool-btn primary" id="exportInfoExcelBtn" style="flex:1;">📊 导出 Excel</button>
-                            <button class="tool-btn" id="exportInfoImageBtn" style="flex:1;">🖼️ 导出图片</button>
+                        <p class="import-desc">导出筛选后的客户信息（IP信息、客户购买时间、客户到期时间、客户剩余天数、客户名、单价备注）</p>
+                        <div class="add-row-options">
+                            <label><input type="radio" name="exportInfoFormat" value="excel" checked> 📊 导出为 Excel 文件</label>
+                            <label><input type="radio" name="exportInfoFormat" value="image"> 🖼️ 复制为图片到剪贴板</label>
                         </div>
                     </div>
                     <div class="export-info-panel" data-panel="bill">
-                        <h3 style="margin:0 0 12px;font-size:14px;color:#606266;">导出续费账单</h3>
-                        <p style="margin:0 0 16px;font-size:13px;color:#909399;">到期时间自动加一个月，带标题、序号、总计</p>
-                        <div style="display:flex;gap:12px;">
-                            <button class="tool-btn primary" id="exportBillExcelBtn" style="flex:1;">📊 导出 Excel</button>
-                            <button class="tool-btn" id="exportBillImageBtn" style="flex:1;">🖼️ 导出图片</button>
+                        <p class="import-desc">导出续费账单（到期时间自动加一个月，带标题、序号、总计）</p>
+                        <div class="add-row-options">
+                            <label><input type="radio" name="exportBillFormat" value="excel" checked> 📊 导出为 Excel 文件</label>
+                            <label><input type="radio" name="exportBillFormat" value="image"> 🖼️ 复制为图片到剪贴板</label>
                         </div>
                     </div>
                 </div>
+                <div class="import-actions">
+                    <button class="tool-btn primary" id="exportInfoConfirm">确定</button>
+                    <button class="tool-btn" id="exportInfoCancel">取消</button>
+                </div>
+                <div id="exportInfoStatus"></div>
             </div>
         </div>
     </div>

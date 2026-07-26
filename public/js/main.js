@@ -82,10 +82,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const exportInfoBtn = $('#exportInfoBtn');
     const exportInfoModal = $('#exportInfoModal');
     const closeExportInfoModal = $('#closeExportInfoModal');
-    const exportInfoExcelBtn = $('#exportInfoExcelBtn');
-    const exportInfoImageBtn = $('#exportInfoImageBtn');
-    const exportBillExcelBtn = $('#exportBillExcelBtn');
-    const exportBillImageBtn = $('#exportBillImageBtn');
+    const exportInfoConfirm = $('#exportInfoConfirm');
+    const exportInfoCancel = $('#exportInfoCancel');
+    const exportInfoStatus = $('#exportInfoStatus');
     const exportClientInfoModal = $('#exportClientInfoModal');
     const closeExportClientInfoModal = $('#closeExportClientInfoModal');
     const exportClientConfirm = $('#exportClientConfirm');
@@ -3918,7 +3917,6 @@ document.addEventListener('DOMContentLoaded', function() {
             inp._origValue = inp.value;
             inp.addEventListener('focus', function() { this._origValue = this.value; });
             const saveFn = async function() {
-                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const amount = parseFloat(this.value);
                 if (isNaN(amount) || amount <= 0) { setIncomeStatus('金额无效', '#f56c6c'); return; }
@@ -3937,7 +3935,6 @@ document.addEventListener('DOMContentLoaded', function() {
             inp._origValue = inp.value;
             inp.addEventListener('focus', function() { this._origValue = this.value; });
             const saveFn = async function() {
-                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const date = this.value;
                 if (!date) return;
@@ -3956,7 +3953,6 @@ document.addEventListener('DOMContentLoaded', function() {
             inp._origValue = inp.value;
             inp.addEventListener('focus', function() { this._origValue = this.value; });
             const saveFn = async function() {
-                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const remark = this.value;
                 try {
@@ -4010,6 +4006,23 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- 支出管理弹窗 ---
+    function setExpenseStatus(text, color) {
+        const el = document.getElementById('expenseStatus');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = color || '#67c23a';
+        el.style.display = 'block';
+        el.style.opacity = '1';
+        el.style.visibility = 'visible';
+        if (text) {
+            clearTimeout(setExpenseStatus._t);
+            setExpenseStatus._t = setTimeout(() => {
+                const e = document.getElementById('expenseStatus');
+                if (e && (e.textContent === '已保存' || e.textContent === '添加成功' || e.textContent === '已删除')) e.textContent = '';
+            }, 1500);
+        }
+    }
+
     async function openExpenseModal(recordId) {
         state.expenseRecordId = recordId;
         state.expenseRecords = [];
@@ -4021,7 +4034,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch(e) { expenseAmountInput.value = ''; }
         expenseRemarkInput.value = '';
         expenseDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
-        expenseStatus.textContent = '';
+        setExpenseStatus('');
         expenseModal.classList.add('show');
         await loadExpenseRecords(recordId);
     }
@@ -4033,7 +4046,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const total = state.expenseRecords.reduce((s, r) => s + (r.amount || 0), 0);
             expenseTotalDisplay.textContent = Math.round(total);
             renderExpenseList();
-        } catch (err) { expenseStatus.textContent = '加载失败: ' + err.message; }
+        } catch (err) { setExpenseStatus('加载失败: ' + err.message, '#f56c6c'); }
     }
 
     function renderExpenseList() {
@@ -4077,18 +4090,15 @@ document.addEventListener('DOMContentLoaded', function() {
             inp._origValue = inp.value;
             inp.addEventListener('focus', function() { this._origValue = this.value; });
             const saveFn = async function() {
-                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const amount = parseFloat(this.value);
-                if (isNaN(amount) || amount < 0) { expenseStatus.textContent = '金额无效'; expenseStatus.style.color = '#f56c6c'; return; }
+                if (isNaN(amount) || amount < 0) { setExpenseStatus('金额无效', '#f56c6c'); return; }
                 try {
                     await API.put('/expense/' + id, { amount });
-                    expenseStatus.textContent = '已保存';
-                    expenseStatus.style.color = '#67c23a';
+                    setExpenseStatus('已保存');
                     this._origValue = this.value;
-                    setTimeout(() => { if (expenseStatus.textContent === '已保存') expenseStatus.textContent = ''; }, 1500);
                     await loadExpenseRecords(state.expenseRecordId);
-                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; expenseStatus.style.color = '#f56c6c'; }
+                } catch (err) { setExpenseStatus('保存失败: ' + err.message, '#f56c6c'); }
             };
             inp.addEventListener('blur', saveFn);
             inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
@@ -4098,18 +4108,15 @@ document.addEventListener('DOMContentLoaded', function() {
             inp._origValue = inp.value;
             inp.addEventListener('focus', function() { this._origValue = this.value; });
             const saveFn = async function() {
-                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const date = this.value;
                 if (!date) return;
                 try {
                     await API.put('/expense/' + id, { expense_date: date });
-                    expenseStatus.textContent = '已保存';
-                    expenseStatus.style.color = '#67c23a';
+                    setExpenseStatus('已保存');
                     this._origValue = this.value;
-                    setTimeout(() => { if (expenseStatus.textContent === '已保存') expenseStatus.textContent = ''; }, 1500);
                     await loadExpenseRecords(state.expenseRecordId);
-                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; expenseStatus.style.color = '#f56c6c'; }
+                } catch (err) { setExpenseStatus('保存失败: ' + err.message, '#f56c6c'); }
             };
             inp.addEventListener('blur', saveFn);
             inp.addEventListener('change', saveFn);
@@ -4119,17 +4126,14 @@ document.addEventListener('DOMContentLoaded', function() {
             inp._origValue = inp.value;
             inp.addEventListener('focus', function() { this._origValue = this.value; });
             const saveFn = async function() {
-                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const remark = this.value;
                 try {
                     await API.put('/expense/' + id, { remark });
-                    expenseStatus.textContent = '已保存';
-                    expenseStatus.style.color = '#67c23a';
+                    setExpenseStatus('已保存');
                     this._origValue = this.value;
-                    setTimeout(() => { if (expenseStatus.textContent === '已保存') expenseStatus.textContent = ''; }, 1500);
                     await loadExpenseRecords(state.expenseRecordId);
-                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; expenseStatus.style.color = '#f56c6c'; }
+                } catch (err) { setExpenseStatus('保存失败: ' + err.message, '#f56c6c'); }
             };
             inp.addEventListener('blur', saveFn);
             inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
@@ -4144,9 +4148,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     await loadExpenseRecords(state.expenseRecordId);
                     await loadRecords(state.currentTabId);
                     renderTable(false);
-                    expenseStatus.textContent = '已删除';
-                    setTimeout(() => expenseStatus.textContent = '', 1500);
-                } catch (err) { expenseStatus.textContent = '删除失败: ' + err.message; }
+                    setExpenseStatus('已删除');
+                } catch (err) { setExpenseStatus('删除失败: ' + err.message, '#f56c6c'); }
             });
         });
     }
@@ -4154,8 +4157,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function addExpenseRecord() {
         const amount = parseFloat(expenseAmountInput.value);
         const date = expenseDateInput.value;
-        if (!amount || amount <= 0) { expenseStatus.textContent = '请输入有效金额'; return; }
-        if (!date) { expenseStatus.textContent = '请选择日期'; return; }
+        if (!amount || amount <= 0) { setExpenseStatus('请输入有效金额', '#f56c6c'); return; }
+        if (!date) { setExpenseStatus('请选择日期', '#f56c6c'); return; }
         try {
             await API.post('/expense', {
                 record_id: state.expenseRecordId,
@@ -4171,9 +4174,8 @@ document.addEventListener('DOMContentLoaded', function() {
             await loadExpenseRecords(state.expenseRecordId);
             await loadRecords(state.currentTabId);
             renderTable(false);
-            expenseStatus.textContent = '添加成功';
-            setTimeout(() => expenseStatus.textContent = '', 1500);
-        } catch (err) { expenseStatus.textContent = '添加失败: ' + err.message; }
+            setExpenseStatus('添加成功');
+        } catch (err) { setExpenseStatus('添加失败: ' + err.message, '#f56c6c'); }
     }
 
     // --- 主机支出明细弹窗（独享/共享标签） ---
@@ -5295,11 +5297,17 @@ document.addEventListener('DOMContentLoaded', function() {
     exportBtn.addEventListener('click', exportData);
     if (exportInfoBtn) {
         exportInfoBtn.addEventListener('click', () => {
+            exportInfoStatus.textContent = '';
             exportInfoModal.classList.add('show');
         });
     }
     if (closeExportInfoModal) {
         closeExportInfoModal.addEventListener('click', () => {
+            exportInfoModal.classList.remove('show');
+        });
+    }
+    if (exportInfoCancel) {
+        exportInfoCancel.addEventListener('click', () => {
             exportInfoModal.classList.remove('show');
         });
     }
@@ -5312,41 +5320,46 @@ document.addEventListener('DOMContentLoaded', function() {
             if (panel) panel.classList.add('active');
         });
     });
-    if (exportInfoExcelBtn) {
-        exportInfoExcelBtn.addEventListener('click', () => {
-            exportInfoModal.classList.remove('show');
-            showExportClientInfoModal();
-        });
-    }
-    if (exportInfoImageBtn) {
-        exportInfoImageBtn.addEventListener('click', async () => {
-            exportInfoModal.classList.remove('show');
-            try {
-                const exportFields = [
-                    { key: 'ip_info', name: 'IP信息' },
-                    { key: 'client_purchase', name: '客户购买时间' },
-                    { key: 'client_expire', name: '客户到期时间' },
-                    { key: 'client_name', name: '客户名' },
-                    { key: 'income_total', name: '单价/元' }
-                ];
-                const clientRecords = state.records || [];
-                await exportClientInfoAsImage(clientRecords, exportFields);
-                setStatus('✅ 实时信息图片导出成功');
-            } catch (err) {
-                setStatus('❌ 导出失败: ' + err.message);
+    if (exportInfoConfirm) {
+        exportInfoConfirm.addEventListener('click', async () => {
+            const activeTab = exportInfoModal.querySelector('.export-info-tab.active');
+            const tabType = activeTab ? activeTab.dataset.tab : 'info';
+            if (tabType === 'info') {
+                const format = document.querySelector('input[name="exportInfoFormat"]:checked');
+                const fmt = format ? format.value : 'excel';
+                if (fmt === 'excel') {
+                    exportInfoModal.classList.remove('show');
+                    showExportClientInfoModal();
+                } else {
+                    try {
+                        exportInfoStatus.textContent = '🔄 生成图片中...';
+                        const exportFields = [
+                            { key: 'ip_info', name: 'IP信息' },
+                            { key: 'client_purchase', name: '客户购买时间' },
+                            { key: 'client_expire', name: '客户到期时间' },
+                            { key: 'client_name', name: '客户名' },
+                            { key: 'income_total', name: '单价/元' }
+                        ];
+                        const clientRecords = state.records || [];
+                        await exportClientInfoAsImage(clientRecords, exportFields);
+                        exportInfoStatus.textContent = '✅ 图片导出成功';
+                        setTimeout(() => { exportInfoModal.classList.remove('show'); exportInfoStatus.textContent = ''; }, 1500);
+                    } catch (err) {
+                        exportInfoStatus.textContent = '❌ 导出失败: ' + err.message;
+                    }
+                }
+            } else {
+                const format = document.querySelector('input[name="exportBillFormat"]:checked');
+                const fmt = format ? format.value : 'excel';
+                try {
+                    exportInfoStatus.textContent = '🔄 生成账单中...';
+                    await exportBill(fmt);
+                    exportInfoStatus.textContent = '✅ 账单导出成功';
+                    setTimeout(() => { exportInfoModal.classList.remove('show'); exportInfoStatus.textContent = ''; }, 1500);
+                } catch (err) {
+                    exportInfoStatus.textContent = '❌ 导出失败: ' + err.message;
+                }
             }
-        });
-    }
-    if (exportBillExcelBtn) {
-        exportBillExcelBtn.addEventListener('click', () => {
-            exportInfoModal.classList.remove('show');
-            exportBill('excel');
-        });
-    }
-    if (exportBillImageBtn) {
-        exportBillImageBtn.addEventListener('click', () => {
-            exportInfoModal.classList.remove('show');
-            exportBill('image');
         });
     }
     closeExportClientInfoModal.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
@@ -6358,6 +6371,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         input.disabled = false;
                         sendBtn.disabled = false;
                         disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.textContent = '断开连接';
                         fileManagerBtn.style.display = 'inline-block';
                         appendTerminalOutput(msg.data + '\n');
                     } else {
@@ -6382,8 +6396,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         title.textContent = `${host.name} - 已断开`;
                         input.disabled = true;
                         sendBtn.disabled = true;
-                        disconnectBtn.style.display = 'none';
-                        fileManagerBtn.style.display = 'none';
+                        disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.textContent = '发起连接';
+                        fileManagerBtn.style.display = 'inline-block';
                         appendTerminalOutput('\n' + msg.data + '\n', 'warning');
                     } else {
                         conn.terminalContent += '\n' + msg.data + '\n';
@@ -6419,8 +6434,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 title.textContent = '连接失败';
                 input.disabled = true;
                 sendBtn.disabled = true;
-                disconnectBtn.style.display = 'none';
-                fileManagerBtn.style.display = 'none';
+                disconnectBtn.style.display = 'inline-block';
+                disconnectBtn.textContent = '发起连接';
+                fileManagerBtn.style.display = 'inline-block';
             }
             updateTabStatus(connId, 'error');
             clearInterval(clientPing);
@@ -6434,8 +6450,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 title.textContent = `${host.name} - 连接已关闭`;
                 input.disabled = true;
                 sendBtn.disabled = true;
-                disconnectBtn.style.display = 'none';
-                fileManagerBtn.style.display = 'none';
+                disconnectBtn.style.display = 'inline-block';
+                disconnectBtn.textContent = '发起连接';
+                fileManagerBtn.style.display = 'inline-block';
                 appendTerminalOutput('\n[连接已关闭]\n', 'warning');
             }
             updateTabStatus(connId, 'closed');
@@ -6530,8 +6547,9 @@ document.addEventListener('DOMContentLoaded', function() {
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
             input.disabled = true;
             sendBtn.disabled = true;
-            disconnectBtn.style.display = 'none';
-            fileManagerBtn.style.display = 'none';
+            disconnectBtn.style.display = 'inline-block';
+            disconnectBtn.textContent = '发起连接';
+            fileManagerBtn.style.display = 'inline-block';
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
                 const span = document.createElement('span');
@@ -6550,7 +6568,7 @@ document.addEventListener('DOMContentLoaded', function() {
         renderSshTabs();
     }
 
-    function closeConnection(connId) {
+    function closeConnection(connId, silent) {
         const idx = sshConnections.findIndex(c => c.id === connId);
         if (idx < 0) return;
         const conn = sshConnections[idx];
@@ -6560,6 +6578,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (conn.clientPing) clearInterval(conn.clientPing);
         stopMonitor(connId);
         sshConnections.splice(idx, 1);
+
+        if (silent) return;
 
         if (activeConnId === connId) {
             if (sshConnections.length > 0) {
@@ -7528,12 +7548,52 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
         disconnectBtn.onclick = () => {
-            if (activeConnId) {
+            if (!activeConnId) return;
+            const conn = getActiveConn();
+            if (!conn) return;
+            const ws = conn.ws;
+            const isOpen = ws && ws.readyState === WebSocket.OPEN;
+            if (isOpen) {
                 closeConnection(activeConnId);
+            } else {
+                const host = conn.host;
+                closeConnection(activeConnId, true);
+                connectSSH(host);
             }
         };
-        fileManagerBtn.onclick = () => {
-            openFileManager();
+        fileManagerBtn.onclick = async () => {
+            if (!activeConnId) return;
+            const conn = getActiveConn();
+            if (!conn) return;
+            const ws = conn.ws;
+            const isOpen = ws && ws.readyState === WebSocket.OPEN;
+            if (!isOpen) {
+                const host = conn.host;
+                closeConnection(activeConnId, true);
+                const newConnId = await new Promise((resolve) => {
+                    const origLen = sshConnections.length;
+                    connectSSH(host);
+                    const checkInterval = setInterval(() => {
+                        if (sshConnections.length > origLen) {
+                            clearInterval(checkInterval);
+                            resolve(sshConnections[sshConnections.length - 1].id);
+                        }
+                    }, 100);
+                    setTimeout(() => { clearInterval(checkInterval); resolve(null); }, 10000);
+                });
+                if (newConnId) {
+                    const waitConnected = setInterval(() => {
+                        const nc = sshConnections.find(c => c.id === newConnId);
+                        if (nc && nc.ws && nc.ws.readyState === WebSocket.OPEN) {
+                            clearInterval(waitConnected);
+                            openFileManager();
+                        }
+                    }, 200);
+                    setTimeout(() => clearInterval(waitConnected), 15000);
+                }
+            } else {
+                openFileManager();
+            }
         };
 
         const terminalBgColor = document.getElementById('terminalBgColor');

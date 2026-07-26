@@ -3193,6 +3193,7 @@ tr.client-row.cut-pending {
 .memos-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-auto-rows: minmax(140px, auto);
     gap: 16px;
     overflow-y: auto;
     flex: 1;
