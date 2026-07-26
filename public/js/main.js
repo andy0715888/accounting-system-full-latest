@@ -3662,47 +3662,65 @@ document.addEventListener('DOMContentLoaded', function() {
         `).join('');
 
         incomeList.querySelectorAll('.income-amount-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const amount = parseFloat(this.value);
-                if (isNaN(amount) || amount <= 0) { incomeStatus.textContent = '金额无效'; return; }
+                if (isNaN(amount) || amount <= 0) { incomeStatus.textContent = '金额无效'; incomeStatus.style.color = '#f56c6c'; return; }
                 try {
                     await API.put('/income/' + id, { amount });
-                    await loadIncomeRecords(state.incomeRecordId);
                     incomeStatus.textContent = '已保存';
                     incomeStatus.style.color = '#67c23a';
-                    setTimeout(() => incomeStatus.textContent = '', 1200);
-                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (incomeStatus.textContent === '已保存') incomeStatus.textContent = ''; }, 1500);
+                    await loadIncomeRecords(state.incomeRecordId);
+                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; incomeStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
         });
 
         incomeList.querySelectorAll('.income-date-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const date = this.value;
                 if (!date) return;
                 try {
                     await API.put('/income/' + id, { income_date: date });
-                    await loadIncomeRecords(state.incomeRecordId);
                     incomeStatus.textContent = '已保存';
                     incomeStatus.style.color = '#67c23a';
-                    setTimeout(() => incomeStatus.textContent = '', 1200);
-                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (incomeStatus.textContent === '已保存') incomeStatus.textContent = ''; }, 1500);
+                    await loadIncomeRecords(state.incomeRecordId);
+                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; incomeStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('change', saveFn);
         });
 
         incomeList.querySelectorAll('.income-remark-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const remark = this.value;
                 try {
                     await API.put('/income/' + id, { remark });
-                    await loadIncomeRecords(state.incomeRecordId);
                     incomeStatus.textContent = '已保存';
                     incomeStatus.style.color = '#67c23a';
-                    setTimeout(() => incomeStatus.textContent = '', 1200);
-                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (incomeStatus.textContent === '已保存') incomeStatus.textContent = ''; }, 1500);
+                    await loadIncomeRecords(state.incomeRecordId);
+                } catch (err) { incomeStatus.textContent = '保存失败: ' + err.message; incomeStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
         });
 
         incomeList.querySelectorAll('.income-item-delete').forEach(btn => {
@@ -3812,51 +3830,65 @@ document.addEventListener('DOMContentLoaded', function() {
         `).join('');
 
         expenseList.querySelectorAll('.expense-amount-input').forEach(inp => {
-            const saveAmount = async function() {
-                const id = parseInt(inp.dataset.id);
-                const amount = parseFloat(inp.value);
-                if (isNaN(amount) || amount < 0) { expenseStatus.textContent = '金额无效'; return; }
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
+                const id = parseInt(this.dataset.id);
+                const amount = parseFloat(this.value);
+                if (isNaN(amount) || amount < 0) { expenseStatus.textContent = '金额无效'; expenseStatus.style.color = '#f56c6c'; return; }
                 try {
                     await API.put('/expense/' + id, { amount });
-                    await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
                     expenseStatus.style.color = '#67c23a';
-                    setTimeout(() => expenseStatus.textContent = '', 1200);
-                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
+                    this._origValue = this.value;
+                    setTimeout(() => { if (expenseStatus.textContent === '已保存') expenseStatus.textContent = ''; }, 1500);
+                    await loadExpenseRecords(state.expenseRecordId);
+                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; expenseStatus.style.color = '#f56c6c'; }
             };
-            inp.addEventListener('change', saveAmount);
-            inp.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
-            });
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
         });
 
         expenseList.querySelectorAll('.expense-date-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const date = this.value;
                 if (!date) return;
                 try {
                     await API.put('/expense/' + id, { expense_date: date });
-                    await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
                     expenseStatus.style.color = '#67c23a';
-                    setTimeout(() => expenseStatus.textContent = '', 1200);
-                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (expenseStatus.textContent === '已保存') expenseStatus.textContent = ''; }, 1500);
+                    await loadExpenseRecords(state.expenseRecordId);
+                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; expenseStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('change', saveFn);
         });
 
         expenseList.querySelectorAll('.expense-remark-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const remark = this.value;
                 try {
                     await API.put('/expense/' + id, { remark });
-                    await loadExpenseRecords(state.expenseRecordId);
                     expenseStatus.textContent = '已保存';
                     expenseStatus.style.color = '#67c23a';
-                    setTimeout(() => expenseStatus.textContent = '', 1200);
-                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (expenseStatus.textContent === '已保存') expenseStatus.textContent = ''; }, 1500);
+                    await loadExpenseRecords(state.expenseRecordId);
+                } catch (err) { expenseStatus.textContent = '保存失败: ' + err.message; expenseStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
         });
 
         expenseList.querySelectorAll('.income-item-delete').forEach(btn => {
@@ -3984,10 +4016,13 @@ document.addEventListener('DOMContentLoaded', function() {
         `).join('');
 
         hostExpenseList.querySelectorAll('.host-expense-price-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const price = parseFloat(this.value);
-                if (isNaN(price) || price < 0) { hostExpenseStatus.textContent = '单价无效'; return; }
+                if (isNaN(price) || price < 0) { hostExpenseStatus.textContent = '单价无效'; hostExpenseStatus.style.color = '#f56c6c'; return; }
                 try {
                     await API.put('/host-expense/' + id, { unit_price: price });
                     const d = (state.hostExpenseDetails || []).find(x => x.id === id);
@@ -3995,12 +4030,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateHostExpenseTotalDisplay();
                     hostExpenseStatus.textContent = '已保存';
                     hostExpenseStatus.style.color = '#67c23a';
-                    setTimeout(() => hostExpenseStatus.textContent = '', 1200);
-                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (hostExpenseStatus.textContent === '已保存') hostExpenseStatus.textContent = ''; }, 1500);
+                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; hostExpenseStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
         });
         hostExpenseList.querySelectorAll('.host-expense-date-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const date = this.value;
                 if (!date) return;
@@ -4010,12 +4051,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (d) d.expense_date = date;
                     hostExpenseStatus.textContent = '已保存';
                     hostExpenseStatus.style.color = '#67c23a';
-                    setTimeout(() => hostExpenseStatus.textContent = '', 1200);
-                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (hostExpenseStatus.textContent === '已保存') hostExpenseStatus.textContent = ''; }, 1500);
+                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; hostExpenseStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('change', saveFn);
         });
         hostExpenseList.querySelectorAll('.host-expense-remark-input').forEach(inp => {
-            inp.addEventListener('change', async function() {
+            inp._origValue = inp.value;
+            inp.addEventListener('focus', function() { this._origValue = this.value; });
+            const saveFn = async function() {
+                if (this.value === this._origValue) return;
                 const id = parseInt(this.dataset.id);
                 const remark = this.value;
                 try {
@@ -4024,9 +4071,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (d) d.remark = remark;
                     hostExpenseStatus.textContent = '已保存';
                     hostExpenseStatus.style.color = '#67c23a';
-                    setTimeout(() => hostExpenseStatus.textContent = '', 1200);
-                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; }
-            });
+                    this._origValue = this.value;
+                    setTimeout(() => { if (hostExpenseStatus.textContent === '已保存') hostExpenseStatus.textContent = ''; }, 1500);
+                } catch (err) { hostExpenseStatus.textContent = '保存失败: ' + err.message; hostExpenseStatus.style.color = '#f56c6c'; }
+            };
+            inp.addEventListener('blur', saveFn);
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
         });
         hostExpenseList.querySelectorAll('.host-expense-delete').forEach(btn => {
             btn.addEventListener('click', async function() {
@@ -4568,6 +4618,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     yearMap[year].income += mb.income;
                     yearMap[year].expense += mb.expense;
                     yearMap[year].net += (mb.income - mb.expense);
+                    yearMap[year].count += 1;
                 });
 
                 const tabName = record.tabName || '未命名标签';
@@ -7440,6 +7491,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentMemoTagId = null;
     let memoTagManageMode = false;
     let selectedMemoTags = new Set();
+    let memoItemManageMode = false;
+    let selectedMemoItems = new Set();
+    let memoDragSrcId = null;
 
     async function loadMemoTags() {
         try {
@@ -7662,18 +7716,29 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderMemoItems() {
         const list = document.getElementById('memosList');
         if (!list) return;
+        list.classList.toggle('manage-mode', memoItemManageMode);
+
         if (!memoItems.length) {
             list.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">暂无备忘记录，点击右上角"添加备忘"创建</div>';
             return;
         }
-        list.innerHTML = memoItems.map(m => `
-            <div class="memo-card ${m.is_visible ? '' : 'memo-hidden'}" data-id="${m.id}">
+        list.innerHTML = memoItems.map(m => {
+            const w = Math.min(3, Math.max(1, parseInt(m.width_units) || 1));
+            const h = Math.min(3, Math.max(1, parseInt(m.height_units) || 1));
+            const sizeCls = `w-${w} h-${h}`;
+            const checked = selectedMemoItems.has(m.id) ? 'checked' : '';
+            const checkbox = memoItemManageMode
+                ? `<input type="checkbox" class="memo-card-checkbox" data-id="${m.id}" ${checked} />`
+                : '';
+            const draggable = memoItemManageMode ? 'draggable="true"' : '';
+            return `
+            <div class="memo-card ${m.is_visible ? '' : 'memo-hidden'} ${sizeCls}" data-id="${m.id}" ${draggable}>
+                ${checkbox}
                 <div class="memo-card-header">
                     <div class="memo-card-title">${escapeHtml(m.title || '（无标题）')}</div>
                     <div class="memo-card-actions">
                         <button class="memo-action-btn" data-action="copy" data-id="${m.id}" title="复制">📋</button>
                         <button class="memo-action-btn" data-action="edit" data-id="${m.id}" title="编辑">✏️</button>
-                        <button class="memo-action-btn" data-action="delete" data-id="${m.id}" title="删除">🗑️</button>
                     </div>
                 </div>
                 <div class="memo-card-body">${escapeHtml(m.content || '').replace(/\n/g, '<br>') || '<span style="color:#c0c4cc;">（无内容）</span>'}</div>
@@ -7682,7 +7747,88 @@ document.addEventListener('DOMContentLoaded', function() {
                     ${m.is_visible ? '<span style="color:#67c23a;">● 显示中</span>' : '<span style="color:#909399;">○ 已隐藏</span>'}
                 </div>
             </div>
-        `).join('');
+        `}).join('');
+
+        if (memoItemManageMode) {
+            initMemoItemDragDrop();
+        }
+
+        list.querySelectorAll('.memo-card-checkbox').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const id = parseInt(cb.dataset.id);
+                if (cb.checked) selectedMemoItems.add(id);
+                else selectedMemoItems.delete(id);
+                updateManageMemoBtn();
+            });
+        });
+    }
+
+    function updateManageMemoBtn() {
+        const btn = document.getElementById('manageMemoItemsBtn');
+        if (!btn) return;
+        if (!memoItemManageMode) {
+            btn.textContent = '⚙️ 管理备忘';
+            btn.classList.remove('danger');
+        } else if (selectedMemoItems.size > 0) {
+            btn.textContent = `🗑️ 删除信息 (${selectedMemoItems.size})`;
+            btn.classList.add('danger');
+        } else {
+            btn.textContent = '✅ 完成管理';
+            btn.classList.remove('danger');
+        }
+    }
+
+    function initMemoItemDragDrop() {
+        const list = document.getElementById('memosList');
+        if (!list) return;
+
+        list.querySelectorAll('.memo-card').forEach(card => {
+            card.addEventListener('dragstart', (e) => {
+                memoDragSrcId = parseInt(card.dataset.id);
+                card.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            card.addEventListener('dragend', () => {
+                card.classList.remove('dragging');
+                list.querySelectorAll('.memo-card').forEach(c => c.classList.remove('drag-over'));
+            });
+            card.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            });
+            card.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                const id = parseInt(card.dataset.id);
+                if (id !== memoDragSrcId) card.classList.add('drag-over');
+            });
+            card.addEventListener('dragleave', () => {
+                card.classList.remove('drag-over');
+            });
+            card.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                const targetId = parseInt(card.dataset.id);
+                card.classList.remove('drag-over');
+                if (!memoDragSrcId || memoDragSrcId === targetId) return;
+
+                const srcIdx = memoItems.findIndex(m => m.id === memoDragSrcId);
+                const tgtIdx = memoItems.findIndex(m => m.id === targetId);
+                if (srcIdx < 0 || tgtIdx < 0) return;
+
+                const [removed] = memoItems.splice(srcIdx, 1);
+                memoItems.splice(tgtIdx, 0, removed);
+
+                const itemIds = memoItems.map(m => m.id);
+                try {
+                    await fetch('/api/memos/items/reorder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ itemIds })
+                    });
+                } catch (err) { console.error('排序失败:', err); }
+                renderMemoItems();
+                memoDragSrcId = null;
+            });
+        });
     }
 
     function formatDateTime(str) {
@@ -7694,6 +7840,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function showMemoItemModal(item = null) {
         const isEdit = !!item;
+        const w = Math.min(3, Math.max(1, parseInt(item?.width_units) || 1));
+        const h = Math.min(3, Math.max(1, parseInt(item?.height_units) || 1));
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
         overlay.innerHTML = `
@@ -7705,6 +7853,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="modal-body">
                     <div class="input-group"><label>标题</label><input type="text" id="memoTitleInput" value="${isEdit ? escapeAttr(item.title || '') : ''}" placeholder="请输入标题" /></div>
                     <div class="input-group"><label>内容</label><textarea id="memoContentInput" rows="8" placeholder="请输入内容...">${isEdit ? escapeHtml(item.content || '') : ''}</textarea></div>
+                    <div class="input-group" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                        <div class="memo-size-select">
+                            <label>水平大小:</label>
+                            <select id="memoWidthSelect">
+                                <option value="1" ${w === 1 ? 'selected' : ''}>1 格</option>
+                                <option value="2" ${w === 2 ? 'selected' : ''}>2 格</option>
+                                <option value="3" ${w === 3 ? 'selected' : ''}>3 格</option>
+                            </select>
+                        </div>
+                        <div class="memo-size-select">
+                            <label>垂直大小:</label>
+                            <select id="memoHeightSelect">
+                                <option value="1" ${h === 1 ? 'selected' : ''}>1 格</option>
+                                <option value="2" ${h === 2 ? 'selected' : ''}>2 格</option>
+                                <option value="3" ${h === 3 ? 'selected' : ''}>3 格</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="input-group" style="display:flex;align-items:center;gap:8px;">
                         <label style="margin:0;">是否显示</label>
                         <input type="checkbox" id="memoVisibleInput" ${isEdit ? (item.is_visible ? 'checked' : '') : 'checked'} />
@@ -7723,19 +7889,21 @@ document.addEventListener('DOMContentLoaded', function() {
             const title = overlay.querySelector('#memoTitleInput').value.trim();
             const content = overlay.querySelector('#memoContentInput').value;
             const is_visible = overlay.querySelector('#memoVisibleInput').checked;
+            const width_units = parseInt(overlay.querySelector('#memoWidthSelect').value) || 1;
+            const height_units = parseInt(overlay.querySelector('#memoHeightSelect').value) || 1;
             try {
                 let res;
                 if (isEdit) {
                     res = await fetch(`/api/memos/items/${item.id}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ title, content, is_visible })
+                        body: JSON.stringify({ title, content, is_visible, width_units, height_units })
                     });
                 } else {
                     res = await fetch(`/api/memos/tags/${currentMemoTagId}/items`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ title, content, is_visible })
+                        body: JSON.stringify({ title, content, is_visible, width_units, height_units })
                     });
                 }
                 if (res.ok) {
@@ -7793,6 +7961,39 @@ document.addEventListener('DOMContentLoaded', function() {
             };
         }
 
+        const manageItemsBtn = document.getElementById('manageMemoItemsBtn');
+        if (manageItemsBtn) {
+            manageItemsBtn.onclick = async () => {
+                if (!memoItemManageMode) {
+                    memoItemManageMode = true;
+                    selectedMemoItems.clear();
+                    updateManageMemoBtn();
+                    renderMemoItems();
+                } else if (selectedMemoItems.size > 0) {
+                    if (!await showConfirm(`确定删除选中的 ${selectedMemoItems.size} 条备忘记录吗？`, '删除备忘')) return;
+                    try {
+                        const ids = Array.from(selectedMemoItems);
+                        const res = await fetch('/api/memos/items/batch', {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ids })
+                        });
+                        if (res.ok) {
+                            memoItemManageMode = false;
+                            selectedMemoItems.clear();
+                            updateManageMemoBtn();
+                            loadMemoItems(currentMemoTagId);
+                        }
+                    } catch (err) { console.error('删除备忘失败:', err); }
+                } else {
+                    memoItemManageMode = false;
+                    selectedMemoItems.clear();
+                    updateManageMemoBtn();
+                    renderMemoItems();
+                }
+            };
+        }
+
         const memosList = document.getElementById('memosList');
         if (memosList) {
             memosList.addEventListener('click', async (e) => {
@@ -7804,12 +8005,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!item) return;
                 if (action === 'edit') {
                     showMemoItemModal(item);
-                } else if (action === 'delete') {
-                    if (!await showConfirm('确定要删除此备忘记录吗？', '删除备忘')) return;
-                    try {
-                        const res = await fetch(`/api/memos/items/${id}`, { method: 'DELETE' });
-                        if (res.ok) loadMemoItems(currentMemoTagId);
-                    } catch (err) { console.error('删除备忘失败:', err); }
                 } else if (action === 'copy') {
                     const text = item.content || '';
                     try {

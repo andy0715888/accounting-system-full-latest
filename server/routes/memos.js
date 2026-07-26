@@ -117,17 +117,19 @@ router.post('/tags/:tagId/items', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const tagId = req.params.tagId;
-        const { title, content, is_visible } = req.body;
+        const { title, content, is_visible, width_units, height_units } = req.body;
 
         const tag = await queryOne('SELECT id FROM memo_tags WHERE id = ? AND user_id = ?', [tagId, userId]);
         if (!tag) return res.status(404).json({ error: '标签不存在' });
 
         const maxResult = await queryOne('SELECT MAX(memo_order) as max_order FROM memos WHERE user_id = ? AND tag_id = ?', [userId, tagId]);
         const nextOrder = (maxResult && maxResult.max_order !== null) ? maxResult.max_order + 1 : 0;
+        const w = Math.min(3, Math.max(1, parseInt(width_units) || 1));
+        const h = Math.min(3, Math.max(1, parseInt(height_units) || 1));
 
         const result = await execute(
-            'INSERT INTO memos (user_id, tag_id, title, content, is_visible, memo_order) VALUES (?, ?, ?, ?, ?, ?)',
-            [userId, tagId, title || '', content || '', is_visible !== undefined ? (is_visible ? 1 : 0) : 1, nextOrder]
+            'INSERT INTO memos (user_id, tag_id, title, content, is_visible, memo_order, width_units, height_units) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [userId, tagId, title || '', content || '', is_visible !== undefined ? (is_visible ? 1 : 0) : 1, nextOrder, w, h]
         );
         const item = await queryOne('SELECT * FROM memos WHERE id = ?', [result.lastID]);
         res.json({ success: true, item });
@@ -141,7 +143,7 @@ router.put('/items/:id', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const itemId = req.params.id;
-        const { title, content, is_visible } = req.body;
+        const { title, content, is_visible, width_units, height_units } = req.body;
 
         const existing = await queryOne('SELECT id FROM memos WHERE id = ? AND user_id = ?', [itemId, userId]);
         if (!existing) return res.status(404).json({ error: '记录不存在' });
@@ -151,6 +153,8 @@ router.put('/items/:id', requireAuth, async (req, res) => {
         if (title !== undefined) { fields.push('title = ?'); params.push(title); }
         if (content !== undefined) { fields.push('content = ?'); params.push(content); }
         if (is_visible !== undefined) { fields.push('is_visible = ?'); params.push(is_visible ? 1 : 0); }
+        if (width_units !== undefined) { fields.push('width_units = ?'); params.push(Math.min(3, Math.max(1, parseInt(width_units) || 1))); }
+        if (height_units !== undefined) { fields.push('height_units = ?'); params.push(Math.min(3, Math.max(1, parseInt(height_units) || 1))); }
         fields.push('updated_at = CURRENT_TIMESTAMP');
         params.push(itemId);
 
@@ -159,6 +163,21 @@ router.put('/items/:id', requireAuth, async (req, res) => {
         res.json({ success: true, item });
     } catch (err) {
         console.error('更新备忘记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.delete('/items/batch', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { ids } = req.body;
+        if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: '参数错误' });
+
+        const placeholders = ids.map(() => '?').join(',');
+        await execute(`DELETE FROM memos WHERE id IN (${placeholders}) AND user_id = ?`, [...ids, userId]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('批量删除备忘记录错误:', err);
         res.status(500).json({ error: '服务器错误' });
     }
 });

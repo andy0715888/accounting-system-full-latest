@@ -203,11 +203,16 @@ function createTables() {
             content TEXT NOT NULL DEFAULT '',
             is_visible INTEGER DEFAULT 1,
             memo_order INTEGER DEFAULT 0,
+            width_units INTEGER DEFAULT 1,
+            height_units INTEGER DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (tag_id) REFERENCES memo_tags(id) ON DELETE CASCADE
         )`);
+
+        db.run(`ALTER TABLE memos ADD COLUMN width_units INTEGER DEFAULT 1`, () => {});
+        db.run(`ALTER TABLE memos ADD COLUMN height_units INTEGER DEFAULT 1`, () => {});
 
         createDefaultAdmin();
         // 默认关闭注册功能（INSERT OR IGNORE 不更新已有记录，所以额外用 UPDATE 确保）
