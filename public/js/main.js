@@ -109,6 +109,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const cfColorInput = $('#cfColorInput');
     const cfBoldCheck = $('#cfBoldCheck');
     const cfAddBtn = $('#cfAddBtn');
+    const cfCancelEditBtn = $('#cfCancelEditBtn');
     const cfList = $('#cfList');
     const addressSuffixBtn = $('#addressSuffixBtn');
     const providerManageBtn = $('#providerManageBtn');
@@ -2046,9 +2047,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (e.key === 'Delete' || e.key === 'Backspace') {
                     var ds = window._dragSelect;
-                    if (ds && ds.startRowId !== null && ds.endRowId !== null && ds.colKey && ds.startRowId !== ds.endRowId) {
+                    if (ds && ds.startRowId !== null && ds.endRowId !== null && ds.colKey) {
+                        if (ds.startRowId === ds.endRowId) return;
                         var ae = document.activeElement;
-                        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+                        if (ae && ae.tagName === 'INPUT' && ae.classList.contains('date-text-input')) return;
                         e.preventDefault();
                         doMultiDelete(ds);
                     }
@@ -3825,6 +3827,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="cf-item-preview" style="${style.join('')}">预览文字</span>
                     </div>
                     <div class="cf-item-actions">
+                        <button class="cf-btn cf-edit" data-id="${fmt.id}" title="编辑">✎</button>
                         <button class="cf-btn cf-up" data-id="${fmt.id}" title="上移">↑</button>
                         <button class="cf-btn cf-down" data-id="${fmt.id}" title="下移">↓</button>
                         <button class="cf-btn cf-delete" data-id="${fmt.id}" title="删除">🗑️</button>
@@ -3833,9 +3836,32 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
         });
         cfList.innerHTML = html;
+        $$('.cf-btn.cf-edit').forEach(btn => btn.addEventListener('click', () => editCfItem(parseInt(btn.dataset.id))));
         $$('.cf-btn.cf-up').forEach(btn => btn.addEventListener('click', () => moveCfItem(parseInt(btn.dataset.id), -1)));
         $$('.cf-btn.cf-down').forEach(btn => btn.addEventListener('click', () => moveCfItem(parseInt(btn.dataset.id), 1)));
         $$('.cf-btn.cf-delete').forEach(btn => btn.addEventListener('click', () => deleteCfItem(parseInt(btn.dataset.id))));
+    }
+
+    function editCfItem(id) {
+        const fmt = (state.conditionalFormats || []).find(f => f.id === id);
+        if (!fmt) return;
+        state.editingCfId = id;
+        cfColSelect.value = fmt.col_key;
+        cfConditionSelect.value = fmt.condition_type;
+        cfValueInput.value = fmt.condition_value || '';
+        cfColorInput.value = fmt.text_color || '#dc143c';
+        cfBoldCheck.checked = !!fmt.is_bold;
+        cfAddBtn.textContent = '保存';
+        cfCancelEditBtn.style.display = 'inline-block';
+    }
+
+    function cancelCfEdit() {
+        state.editingCfId = null;
+        cfValueInput.value = '';
+        cfColorInput.value = '#dc143c';
+        cfBoldCheck.checked = false;
+        cfAddBtn.textContent = '添加';
+        cfCancelEditBtn.style.display = 'none';
     }
 
     async function addConditionalFormat() {
@@ -3848,20 +3874,35 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!condition_value) { if (cfStatus) { cfStatus.textContent = '⚠️ 请输入条件值'; cfStatus.style.color = '#f56c6c'; setTimeout(() => cfStatus.textContent = '', 1500); } return; }
 
         try {
-            await API.post('/conditional-formats', {
-                tab_id: state.currentTabId,
-                col_key, condition_type, condition_value, text_color, is_bold
-            });
-            cfValueInput.value = '';
-            await loadConditionalFormats(state.currentTabId);
-            renderCfList();
-            renderTable(false);
-            if (cfStatus) {
-                cfStatus.textContent = '✅ 条件格式添加成功';
-                cfStatus.style.color = '#67c23a';
-                setTimeout(() => cfStatus.textContent = '', 1500);
+            if (state.editingCfId) {
+                await API.put('/conditional-formats/' + state.editingCfId, {
+                    col_key, condition_type, condition_value, text_color, is_bold
+                });
+                cancelCfEdit();
+                await loadConditionalFormats(state.currentTabId);
+                renderCfList();
+                renderTable(false);
+                if (cfStatus) {
+                    cfStatus.textContent = '✅ 条件格式更新成功';
+                    cfStatus.style.color = '#67c23a';
+                    setTimeout(() => cfStatus.textContent = '', 1500);
+                }
+            } else {
+                await API.post('/conditional-formats', {
+                    tab_id: state.currentTabId,
+                    col_key, condition_type, condition_value, text_color, is_bold
+                });
+                cfValueInput.value = '';
+                await loadConditionalFormats(state.currentTabId);
+                renderCfList();
+                renderTable(false);
+                if (cfStatus) {
+                    cfStatus.textContent = '✅ 条件格式添加成功';
+                    cfStatus.style.color = '#67c23a';
+                    setTimeout(() => cfStatus.textContent = '', 1500);
+                }
             }
-        } catch (err) { if (cfStatus) { cfStatus.textContent = '❌ 添加失败: ' + err.message; cfStatus.style.color = '#f56c6c'; } }
+        } catch (err) { if (cfStatus) { cfStatus.textContent = '❌ 操作失败: ' + err.message; cfStatus.style.color = '#f56c6c'; } }
     }
 
     async function moveCfItem(id, direction) {
@@ -4318,7 +4359,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const rawExpense = record.data.expense || '';
         hostExpenseUnitPriceInput.value = parseExpenseUnitPrice(rawExpense);
         hostExpenseExtraInput.value = parseExpenseExtra(rawExpense);
-        hostExpenseRemarkInput.value = record.data.remark || '';
+        hostExpenseRemarkInput.value = record.data.host_expense_remark || '';
         hostExpenseStatus.textContent = '';
         hostExpenseModal.classList.add('show');
         await loadHostExpenseDetails(recordId);
@@ -4490,7 +4531,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const remark = hostExpenseRemarkInput.value;
         const newStr = buildExpenseString(unitPrice, extra);
         record.data.expense = newStr;
-        record.data.remark = remark;
+        record.data.host_expense_remark = remark;
         record._updated = true;
         try {
             await saveRecord(record);
@@ -5562,6 +5603,7 @@ document.addEventListener('DOMContentLoaded', function() {
     incomeExpenseStatsBtn.addEventListener('click', openIncomeExpenseStats);
     closeIncomeExpenseStatsModal.addEventListener('click', () => incomeExpenseStatsModal.classList.remove('show'));
     cfAddBtn.addEventListener('click', addConditionalFormat);
+    cfCancelEditBtn.addEventListener('click', cancelCfEdit);
     cfValueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addConditionalFormat(); });
     logoutBtn.addEventListener('click', async function() {
         if (!await showConfirm('确定退出吗？')) return;

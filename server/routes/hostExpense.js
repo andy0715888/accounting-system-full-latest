@@ -108,7 +108,7 @@ router.put('/record-config/:recordId', requireAuth, async (req, res) => {
         const data = JSON.parse(rec.data || '{}');
         if (unit_price !== undefined) data.unit_price = unit_price;
         if (extra !== undefined) data.extra = extra;
-        if (remark !== undefined) data.remark = remark;
+        if (remark !== undefined) data.host_expense_remark = remark;
         await execute('UPDATE records SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?', [JSON.stringify(data), recordId, userId]);
         res.json({ success: true });
     } catch (err) {
