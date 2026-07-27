@@ -2044,6 +2044,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     clearDragHighlight();
                     window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
                 }
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    var ds = window._dragSelect;
+                    if (ds && ds.startRowId !== null && ds.endRowId !== null && ds.colKey && ds.startRowId !== ds.endRowId) {
+                        var ae = document.activeElement;
+                        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+                        e.preventDefault();
+                        doMultiDelete(ds);
+                    }
+                }
             });
         }
 
@@ -2680,6 +2689,104 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    function doMultiDelete(ds) {
+        const startId = ds.startRowId;
+        const endId = ds.endRowId;
+        const colKey = ds.colKey;
+        if (startId === null || endId === null || !colKey) return;
+        const minId = Math.min(startId, endId);
+        const maxId = Math.max(startId, endId);
+
+        const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'client_expire');
+
+        const targetRowIds = [];
+        if (colKey === 'password') {
+            $$('.password-cell').forEach(cell => {
+                if (cell.dataset.col !== colKey) return;
+                const rowId = parseInt(cell.dataset.id);
+                if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+            });
+        } else if (isDateCol) {
+            $$('.date-cell').forEach(cell => {
+                if (cell.dataset.col !== colKey) return;
+                const rowId = parseInt(cell.dataset.id);
+                if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+            });
+        } else {
+            getTextInputCellsAll().forEach(input => {
+                if (input.dataset.col !== colKey) return;
+                const rowId = parseInt(input.dataset.id);
+                if (rowId >= minId && rowId <= maxId) targetRowIds.push(rowId);
+            });
+        }
+        targetRowIds.sort((a, b) => a - b);
+        if (targetRowIds.length === 0) return;
+
+        const undoData = [];
+        targetRowIds.forEach(rowId => {
+            const record = state.records.find(r => r.id === rowId);
+            if (record) {
+                undoData.push({
+                    recordId: rowId,
+                    colKey: colKey,
+                    oldValue: record.data[colKey]
+                });
+            }
+        });
+        state.undoStack.push({ type: 'multi_paste', data: undoData });
+
+        let changed = 0;
+        targetRowIds.forEach(rowId => {
+            const record = state.records.find(r => r.id === rowId);
+            if (!record) return;
+            const col = state.columns.find(c => c.col_key === colKey);
+            if (!col) return;
+            if (colKey === 'expense' || colKey === 'fee' || colKey === 'host_expire' || col.col_type === 'days_remaining' || colKey === 'is_expired') return;
+
+            if (record.data[colKey] === '' || record.data[colKey] === null || record.data[colKey] === undefined) return;
+            record.data[colKey] = '';
+            record._updated = true;
+
+            if (colKey === 'password') {
+                const cell = document.querySelector(`.password-cell[data-id="${rowId}"][data-col="password"]`);
+                if (cell) {
+                    const input = cell.querySelector('.password-input');
+                    const mask = cell.querySelector('.password-mask');
+                    if (input) input.value = '';
+                    if (mask) {
+                        mask.textContent = '✎ 点击设置';
+                        mask.classList.add('password-empty');
+                    }
+                }
+            } else if (isDateCol) {
+                const cell = document.querySelector(`.date-cell[data-id="${rowId}"][data-col="${colKey}"]`);
+                if (cell) {
+                    const input = cell.querySelector('.date-text-input');
+                    const hiddenInput = cell.querySelector('.date-picker-hidden');
+                    if (input) input.value = '';
+                    if (hiddenInput) hiddenInput.value = '';
+                    cell.classList.add('date-empty');
+                }
+            } else {
+                const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
+                if (input) input.value = '';
+            }
+
+            if (colKey === 'ip_address') record.data.ip_info = '';
+            saveRecord(record);
+            changed++;
+        });
+
+        if (changed > 0) {
+            setStatus('已删除 ' + changed + ' 条数据');
+            $$('.cell-input.drag-selected, .password-cell.drag-selected, .date-cell.drag-selected').forEach(el => el.classList.remove('drag-selected'));
+            window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
+            if (colKey === 'ip_address' || colKey === 'months' || colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'address' || isDateCol) {
+                renderTable(false);
+            }
+        }
+    }
+
     function handleDateTextChange(input) {
         const colKey = input.dataset.col;
         const id = parseInt(input.dataset.id);
@@ -3087,6 +3194,10 @@ document.addEventListener('DOMContentLoaded', function() {
             incomeMap[r.record_id].push(r);
         });
         return (recordId) => {
+            try {
+                const saved = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
+                if (saved && !isNaN(parseFloat(saved))) return parseFloat(saved);
+            } catch(e) {}
             const list = incomeMap[recordId] || [];
             if (list.length === 0) return 0;
             const sorted = [...list].sort((a, b) => {
@@ -3138,7 +3249,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     totalAmount += price;
                     return [
                         idx + 1,
-                        r.data.ip_info || '',
+                        r.data.ip_info || r.data.ip_address || '',
                         formatDisplayDate(r.data.client_purchase),
                         addOneMonth(r.data.client_expire),
                         r.data.client_name || '',
@@ -3318,6 +3429,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (f.key === 'price' && getPriceFn) {
                     return Math.round(getPriceFn(r.id));
+                }
+                if (f.key === 'ip_info') {
+                    return r.data.ip_info || r.data.ip_address || '';
                 }
                 return r.data[f.key] ?? '';
             });
@@ -5369,6 +5483,9 @@ document.addEventListener('DOMContentLoaded', function() {
                                 }
                                 if (f.key === 'price') {
                                     return Math.round(getPrice(r.id));
+                                }
+                                if (f.key === 'ip_info') {
+                                    return r.data.ip_info || r.data.ip_address || '';
                                 }
                                 return r.data[f.key] ?? '';
                             });
