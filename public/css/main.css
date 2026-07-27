@@ -23,7 +23,22 @@ body {
     z-index: 10;
 }
 .nav-logo { font-size:18px; font-weight:600; }
-.nav-left { flex: 1; }
+.nav-left { flex: 1; display:flex; align-items:center; gap:20px; }
+.server-status {
+    display:flex; align-items:center; gap:12px;
+    font-size:12px; color:#c5c7d0;
+    background: rgba(255,255,255,0.06);
+    padding:4px 10px;
+    border-radius:16px;
+}
+.ss-item { display:flex; align-items:center; gap:4px; }
+.ss-icon { opacity:0.8; }
+.ss-value {
+    font-weight:600; color:#fff;
+    min-width:32px; display:inline-block;
+}
+.ss-value.warn { color:#f5a623; }
+.ss-value.danger { color:#f56c6c; }
 .nav-center { flex: 0 0 auto; text-align:center; }
 .nav-user { font-size:14px; opacity:0.85; }
 .nav-right { flex: 1; display:flex; align-items:center; gap:16px; justify-content: flex-end; }

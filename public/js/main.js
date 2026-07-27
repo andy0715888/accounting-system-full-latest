@@ -253,6 +253,32 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(updateClock, 10000);
     updateClock();
 
+    async function updateServerStatus() {
+        const ssCpu = $('#ssCpu');
+        const ssMem = $('#ssMem');
+        const ssDisk = $('#ssDisk');
+        if (!ssCpu) return;
+        try {
+            const data = await API.get('/server-status');
+            if (ssCpu) {
+                ssCpu.textContent = data.cpu + '%';
+                ssCpu.className = 'ss-value' + (data.cpu >= 80 ? ' danger' : data.cpu >= 60 ? ' warn' : '');
+            }
+            if (ssMem && data.memory) {
+                ssMem.textContent = data.memory.percent + '%';
+                ssMem.title = data.memory.usedGB + ' / ' + data.memory.totalGB + ' GB';
+                ssMem.className = 'ss-value' + (data.memory.percent >= 80 ? ' danger' : data.memory.percent >= 60 ? ' warn' : '');
+            }
+            if (ssDisk && data.disk) {
+                ssDisk.textContent = data.disk.percent + '%';
+                ssDisk.title = data.disk.usedGB + ' / ' + data.disk.totalGB + ' GB';
+                ssDisk.className = 'ss-value' + (data.disk.percent >= 80 ? ' danger' : data.disk.percent >= 60 ? ' warn' : '');
+            }
+        } catch (e) {}
+    }
+    setInterval(updateServerStatus, 3000);
+    updateServerStatus();
+
     function setStatus(msg) { statusText.textContent = msg; }
     function parseDate(str) {
         if (!str) return '';
@@ -789,6 +815,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
     const contextMenu = $('#contextMenu');
+    const ctxInsertMultiAbove = $('#ctxInsertMultiAbove');
     const ctxInsertAbove = $('#ctxInsertAbove');
     const ctxAddClient = $('#ctxAddClient');
     const ctxCopyClient = $('#ctxCopyClient');
@@ -797,6 +824,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const ctxPasteServer = $('#ctxPasteServer');
     const ctxDeleteRecord = $('#ctxDeleteRecord');
     const ctxBatchPaste = $('#ctxBatchPaste');
+    const insertMultiRowModal = $('#insertMultiRowModal');
+    const closeInsertMultiRowModal = $('#closeInsertMultiRowModal');
+    const insertMultiRowCount = $('#insertMultiRowCount');
+    const confirmInsertMultiRowBtn = $('#confirmInsertMultiRowBtn');
+    const cancelInsertMultiRowBtn = $('#cancelInsertMultiRowBtn');
 
     async function loadRecords(tabId) {
         await flushPendingSaves();
@@ -5749,7 +5781,8 @@ document.addEventListener('DOMContentLoaded', function() {
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
-        // 独享标签：在上方插入一行
+        // 独享标签：在上方插入一行/多行
+        ctxInsertMultiAbove.style.display = isDedicated ? 'block' : 'none';
         ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
         // 共享标签菜单项
         ctxAddClient.style.display = (isShared && recordType === 'server') ? 'block' : 'none';
@@ -5808,6 +5841,68 @@ document.addEventListener('DOMContentLoaded', function() {
             updateTabCache(state.currentTabId);
             renderTable(false);
             setStatus('插入成功');
+        } catch (err) { setStatus('插入失败: ' + err.message); }
+    });
+
+    ctxInsertMultiAbove.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.currentTabId) return;
+        insertMultiRowCount.value = 2;
+        insertMultiRowModal.classList.add('show');
+        setTimeout(() => insertMultiRowCount.focus(), 50);
+    });
+
+    function closeInsertMultiRow() {
+        insertMultiRowModal.classList.remove('show');
+    }
+    if (closeInsertMultiRowModal) closeInsertMultiRowModal.addEventListener('click', closeInsertMultiRow);
+    if (cancelInsertMultiRowBtn) cancelInsertMultiRowBtn.addEventListener('click', closeInsertMultiRow);
+    insertMultiRowModal && insertMultiRowModal.addEventListener('click', (e) => { if (e.target === insertMultiRowModal) closeInsertMultiRow(); });
+
+    if (insertMultiRowCount) {
+        insertMultiRowCount.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') confirmInsertMultiRowBtn && confirmInsertMultiRowBtn.click();
+        });
+    }
+
+    if (confirmInsertMultiRowBtn) confirmInsertMultiRowBtn.addEventListener('click', async () => {
+        let count = parseInt(insertMultiRowCount.value);
+        if (isNaN(count) || count < 1) count = 1;
+        if (count > 50) count = 50;
+        closeInsertMultiRow();
+        if (!contextTargetId || !state.currentTabId) return;
+        const targetRec = state.records.find(r => r.id === contextTargetId);
+        if (!targetRec) return;
+        try {
+            setStatus('插入 ' + count + ' 行中...');
+            const sortOrder = targetRec.sort_order || 0;
+            const now = new Date();
+            const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            const nextMonth = getNextMonth(now);
+            const nextMonthStr = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
+            for (let i = 0; i < count; i++) {
+                const data = {};
+                state.columns.forEach(col => { data[col.col_key] = ''; });
+                data.host_purchase = today;
+                data.months = 1;
+                data.host_expire = calcHostExpire(today, 1);
+                data.client_purchase = today;
+                data.client_expire = nextMonthStr;
+                data.expense = '0';
+                data.fee = '';
+                data.address = 'IP地址';
+                await API.post('/records', {
+                    tab_id: state.currentTabId,
+                    data,
+                    record_type: 'server',
+                    sort_order: sortOrder
+                });
+                state.total++;
+            }
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('已插入 ' + count + ' 行');
         } catch (err) { setStatus('插入失败: ' + err.message); }
     });
 

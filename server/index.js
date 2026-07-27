@@ -208,6 +208,76 @@ app.use('/api/host-expense', hostExpenseRoutes);
 app.use('/api/memos', memoRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+let _lastCpuTotal = 0;
+let _lastCpuIdle = 0;
+
+function getCpuUsage() {
+    try {
+        const data = fs.readFileSync('/proc/stat', 'utf8');
+        const line = data.split('\n')[0];
+        const parts = line.split(/\s+/).slice(1).map(Number);
+        const idle = parts[3] + (parts[4] || 0);
+        const total = parts.reduce((a, b) => a + b, 0);
+        const diffTotal = total - _lastCpuTotal;
+        const diffIdle = idle - _lastCpuIdle;
+        _lastCpuTotal = total;
+        _lastCpuIdle = idle;
+        if (diffTotal <= 0) return 0;
+        return Math.min(100, Math.round(((diffTotal - diffIdle) / diffTotal) * 100));
+    } catch (e) {
+        return 0;
+    }
+}
+
+function getMemUsage() {
+    try {
+        const data = fs.readFileSync('/proc/meminfo', 'utf8');
+        const lines = data.split('\n');
+        let total = 0, available = 0;
+        for (const line of lines) {
+            if (line.startsWith('MemTotal:')) total = parseInt(line.split(/\s+/)[1]);
+            if (line.startsWith('MemAvailable:')) available = parseInt(line.split(/\s+/)[1]);
+        }
+        if (total <= 0) return { percent: 0, usedGB: 0, totalGB: 0 };
+        const used = total - available;
+        return {
+            percent: Math.round((used / total) * 100),
+            usedGB: +(used / 1024 / 1024).toFixed(1),
+            totalGB: +(total / 1024 / 1024).toFixed(1)
+        };
+    } catch (e) {
+        return { percent: 0, usedGB: 0, totalGB: 0 };
+    }
+}
+
+function getDiskUsage() {
+    try {
+        const { execSync } = require('child_process');
+        const out = execSync('df -B1 / | tail -1', { encoding: 'utf8' });
+        const parts = out.trim().split(/\s+/);
+        const total = parseInt(parts[1]);
+        const free = parseInt(parts[3]);
+        if (total <= 0) return { percent: 0, usedGB: 0, totalGB: 0 };
+        const used = total - free;
+        return {
+            percent: Math.round((used / total) * 100),
+            usedGB: +(used / 1024 / 1024 / 1024).toFixed(1),
+            totalGB: +(total / 1024 / 1024 / 1024).toFixed(1)
+        };
+    } catch (e) {
+        return { percent: 0, usedGB: 0, totalGB: 0 };
+    }
+}
+
+app.get('/api/server-status', (req, res) => {
+    res.json({
+        cpu: getCpuUsage(),
+        memory: getMemUsage(),
+        disk: getDiskUsage()
+    });
+});
+
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, '../public/login.html')));
 app.get('/main', (req, res) => res.sendFile(path.join(__dirname, '../public/main.html')));
