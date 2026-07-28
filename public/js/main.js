@@ -347,12 +347,39 @@ document.addEventListener('DOMContentLoaded', function() {
     function escapeAttr(value) { return escapeHtml(value); }
     function cssUrl(url) { return String(url ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
 
+    let _modalCounter = 0;
+    function showModal(html, id) {
+        const modalId = id || ('modal-' + (++_modalCounter));
+        if (document.getElementById(modalId)) {
+            document.getElementById(modalId).remove();
+        }
+        const overlay = document.createElement('div');
+        overlay.id = modalId;
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+        const box = document.createElement('div');
+        box.className = 'modal-box';
+        box.style.cssText = 'background:#fff;border-radius:8px;min-width:320px;max-width:90vw;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.2);';
+        box.innerHTML = html;
+        overlay.appendChild(box);
+        overlay.onclick = (e) => { if (e.target === overlay) closeModal(modalId); };
+        document.body.appendChild(overlay);
+        return modalId;
+    }
+    function closeModal(id) {
+        if (!id) {
+            document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
+            return;
+        }
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    }
+
     function showConfirm(message, title) {
         return new Promise((resolve) => {
             confirmModalTitle.textContent = title || '确认';
             confirmModalMessage.textContent = message;
             confirmModal.classList.add('show');
-
             const yesHandler = () => { close(); resolve(true); };
             const noHandler = () => { close(); resolve(false); };
             const keyHandler = (e) => {
@@ -1516,6 +1543,7 @@ document.addEventListener('DOMContentLoaded', function() {
             panel.innerHTML = `
                 <div class="filter-input-wrap">
                     <input type="text" placeholder="搜索..." class="filter-search" data-col="${escapeAttr(colKey)}" />
+                    <button class="filter-search-clear" data-col="${escapeAttr(colKey)}" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#909399;font-size:14px;padding:0 4px;">✕</button>
                 </div>
                 <div class="filter-options"></div>
                 <div class="filter-summary">已选 0 / 0</div>
@@ -1702,9 +1730,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 saveTabFiltersToStorage();
                 const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
                 if (panel) panel.classList.remove('show');
-                state.page = 1;
-                loadRecords(state.currentTabId).then(() => renderTable(false));
+                const tw = $('#tableWrapper');
+                const savedScrollTop = tw ? tw.scrollTop : 0;
+                loadRecords(state.currentTabId).then(() => {
+                    renderTable(false);
+                    if (tw) tw.scrollTop = savedScrollTop;
+                });
                 return;
+            }
+        });
+
+        document.body.addEventListener('click', function(e) {
+            if (e.target.classList.contains('filter-search-clear')) {
+                e.stopPropagation();
+                const panel = e.target.closest('.col-dropdown-panel');
+                if (!panel) return;
+                const search = panel.querySelector('.filter-search');
+                if (search) {
+                    search.value = '';
+                    search.dispatchEvent(new Event('input', { bubbles: true }));
+                    search.focus();
+                }
             }
         });
 
@@ -1727,6 +1773,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!panel) return;
                 const colKey = panel.dataset.col;
                 const searchText = e.target.value.trim();
+
+                const clearBtn = panel.querySelector('.filter-search-clear');
+                if (clearBtn) clearBtn.style.display = searchText ? 'block' : 'none';
 
                 // 保存当前勾选状态
                 const checkedValues = new Set();
@@ -8305,11 +8354,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             if (e.key === 'Enter') {
-                const cmd = terminalInput.value.trim();
-                if (cmd) {
-                    sendCommand(cmd);
-                    terminalInput.value = '';
+                e.preventDefault();
+                const cmd = terminalInput.value;
+                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
+                    getActiveWs().send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
                 }
+                terminalInput.value = '';
             }
         });
         sendCmdBtn.onclick = () => {

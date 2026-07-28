@@ -212,12 +212,14 @@
                             <div class="cmd-tab-content" data-cmd-tab-content="files" style="display:none;">
                                 <div class="file-manager-panel" id="fileManagerPanel">
                                     <div class="fm-header">
-                                        <span class="fm-path" id="fmPath">/</span>
                                         <div class="fm-actions">
+                                            <button class="tool-btn sm" id="fmRefreshBtn" title="刷新">🔄 刷新</button>
+                                            <button class="tool-btn sm" id="fmUpBtn" title="上级目录">⬆️ 上级目录</button>
                                             <button class="tool-btn sm" id="fmUploadBtn" title="上传文件" style="background:#67c23a;color:#fff;">📤 上传</button>
-                                            <button class="tool-btn sm" id="fmUpBtn" title="上级目录">⬆️</button>
-                                            <button class="tool-btn sm" id="fmRefreshBtn" title="刷新">🔄</button>
                                         </div>
+                                    </div>
+                                    <div class="fm-path-row">
+                                        <span class="fm-path" id="fmPath">/</span>
                                     </div>
                                     <div class="fm-status" id="fmStatus" style="padding:4px 10px;font-size:12px;min-height:20px;"></div>
                                     <div class="fm-list" id="fmList">

@@ -334,10 +334,10 @@ body {
     overflow-y: auto;
 }
 .col-dropdown-panel.show { display: block; }
-.filter-input-wrap { margin-bottom:6px; }
+.filter-input-wrap { margin-bottom:6px; position: relative; }
 .filter-input-wrap input {
     width: 100%;
-    padding: 4px 8px;
+    padding: 4px 24px 4px 8px;
     border: 1px solid #dcdfe6;
     border-radius: 4px;
     font-size: 13px;
@@ -2515,6 +2515,11 @@ tr.client-row.cut-pending {
     border-bottom: 1px solid #e4e7ed;
     gap: 8px;
 }
+.fm-path-row {
+    padding: 6px 10px;
+    border-bottom: 1px solid #e4e7ed;
+    background: #fff;
+}
 .fm-path {
     font-size: 12px;
     color: #303133;
@@ -2527,6 +2532,7 @@ tr.client-row.cut-pending {
 .fm-actions {
     display: flex;
     gap: 4px;
+    width: 100%;
 }
 .fm-list {
     padding: 4px 0;

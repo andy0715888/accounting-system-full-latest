@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
-const SYSTEM_FILES_DIR = path.join(__dirname, '../../acct/accounting-system');
+const SYSTEM_FILES_DIR = path.join(__dirname, '../../acct/accounting-system/system-uploads');
 
 function ensureDir() {
     if (!fs.existsSync(SYSTEM_FILES_DIR)) {
