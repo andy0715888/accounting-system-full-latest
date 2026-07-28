@@ -1935,7 +1935,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
 
-                _dragStartPos = { x: e.clientX, y: e.clientY, colKey: colKey, rowId: rowId };
+                _dragStartPos = { x: e.clientX, y: e.clientY, colKey: colKey, rowId: rowId, inputEl: info.cell };
                 window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: rowId, lastClickCol: colKey };
                 clearDragHighlight();
             });
@@ -1945,7 +1945,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (_dragStartPos && !ds.active) {
                     var dx = e.clientX - _dragStartPos.x;
                     var dy = e.clientY - _dragStartPos.y;
-                    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+                    if (Math.abs(dy) > DRAG_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
                         ds.active = true;
                         ds.colKey = _dragStartPos.colKey;
                         ds.startRowId = _dragStartPos.rowId;
@@ -6730,7 +6730,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         sendBtn.disabled = false;
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.textContent = '断开连接';
-                        fileManagerBtn.style.display = 'inline-block';
+                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
                         appendTerminalOutput(msg.data + '\n');
                     } else {
                         conn.terminalContent = msg.data + '\n';
@@ -6756,7 +6756,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         sendBtn.disabled = true;
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.textContent = '发起连接';
-                        fileManagerBtn.style.display = 'inline-block';
+                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
                         appendTerminalOutput('\n' + msg.data + '\n', 'warning');
                     } else {
                         conn.terminalContent += '\n' + msg.data + '\n';
@@ -6798,7 +6798,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 sendBtn.disabled = true;
                 disconnectBtn.style.display = 'inline-block';
                 disconnectBtn.textContent = '发起连接';
-                fileManagerBtn.style.display = 'inline-block';
+                if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
             }
             updateTabStatus(connId, 'error');
             clearInterval(clientPing);
@@ -6814,7 +6814,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 sendBtn.disabled = true;
                 disconnectBtn.style.display = 'inline-block';
                 disconnectBtn.textContent = '发起连接';
-                fileManagerBtn.style.display = 'inline-block';
+                if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
                 appendTerminalOutput('\n[连接已关闭]\n', 'warning');
             }
             updateTabStatus(connId, 'closed');
@@ -6852,7 +6852,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'inline-block';
             disconnectBtn.textContent = '发起连接';
-            fileManagerBtn.style.display = 'inline-block';
+            if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
         }
     }
 
@@ -6921,7 +6921,7 @@ document.addEventListener('DOMContentLoaded', function() {
             input.disabled = false;
             sendBtn.disabled = false;
             disconnectBtn.style.display = 'inline-block';
-            fileManagerBtn.style.display = 'inline-block';
+            if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
                 const span = document.createElement('span');
@@ -6938,7 +6938,7 @@ document.addEventListener('DOMContentLoaded', function() {
             input.disabled = true;
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
-            fileManagerBtn.style.display = 'none';
+            if (fileManagerBtn) fileManagerBtn.style.display = "none";
         } else {
             title.textContent = `${host.name} - 已断开`;
             terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
@@ -6946,7 +6946,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'inline-block';
             disconnectBtn.textContent = '发起连接';
-            fileManagerBtn.style.display = 'inline-block';
+            if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
             if (conn.terminalContent) {
                 const output = document.getElementById('terminalOutput');
                 const span = document.createElement('span');
@@ -7001,7 +7001,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.disabled = true;
                 sendBtn.disabled = true;
                 disconnectBtn.style.display = 'none';
-                fileManagerBtn.style.display = 'none';
+                if (fileManagerBtn) fileManagerBtn.style.display = "none";
             }
         } else {
             renderSshTabs();
@@ -8049,7 +8049,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 connectSSH(host);
             }
         };
-        fileManagerBtn.onclick = async () => {
+        if (fileManagerBtn) fileManagerBtn.onclick = async () => {
             if (!activeConnId) return;
             const conn = getActiveConn();
             if (!conn) return;
