@@ -1668,7 +1668,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         positionFilterPanel(panel, colKey);
                         panel.classList.add('show');
                         const search = panel.querySelector('.filter-search');
-                        if (search) setTimeout(() => search.focus(), 0);
+                        if (search) {
+                            setTimeout(() => search.focus(), 0);
+                            if (search.value.trim()) {
+                                search.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                        }
                     });
                 }
                 return;
