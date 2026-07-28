@@ -2826,6 +2826,7 @@ tr.client-row.cut-pending {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: pointer;
 }
 
 .cmd-actions {

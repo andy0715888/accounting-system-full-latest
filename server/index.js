@@ -27,6 +27,7 @@ const hostRoutes = require('./routes/hosts');
 const commandRoutes = require('./routes/commands');
 const hostExpenseRoutes = require('./routes/hostExpense');
 const memoRoutes = require('./routes/memos');
+const systemFileRoutes = require('./routes/systemFiles');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -206,6 +207,7 @@ app.use('/api/hosts', hostRoutes);
 app.use('/api/commands', commandRoutes);
 app.use('/api/host-expense', hostExpenseRoutes);
 app.use('/api/memos', memoRoutes);
+app.use('/api/system-files', systemFileRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

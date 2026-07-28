@@ -7159,7 +7159,251 @@ document.addEventListener('DOMContentLoaded', function() {
                     loadFileListPanel(newPath);
                 }
             };
+            item.oncontextmenu = (e) => {
+                e.preventDefault();
+                const name = item.dataset.name;
+                const isDir = item.dataset.dir === '1';
+                const fullPath = fileManagerState.currentPath.endsWith('/')
+                    ? fileManagerState.currentPath + name
+                    : fileManagerState.currentPath + '/' + name;
+                showPanelContextMenu(e.clientX, e.clientY, fullPath, isDir);
+            };
         });
+    }
+
+    function setFmPanelStatus(msg, color) {
+        const statusEl = document.getElementById('fmStatus');
+        if (statusEl) {
+            statusEl.style.color = color || '#909399';
+            statusEl.textContent = msg;
+        }
+    }
+
+    function uploadFileToPanel(file) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+        setFmPanelStatus(`上传中: ${file.name}...`, '#909399');
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result.split(',')[1];
+            const filePath = fileManagerState.currentPath.endsWith('/')
+                ? fileManagerState.currentPath + file.name
+                : fileManagerState.currentPath + '/' + file.name;
+            getActiveWs().send(JSON.stringify({
+                type: 'sftp_upload',
+                path: filePath,
+                content: base64
+            }));
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function showUploadMenu(anchorBtn) {
+        hideUploadMenu();
+        const menu = document.createElement('div');
+        menu.className = 'fm-context-menu';
+        menu.style.position = 'fixed';
+        menu.style.zIndex = '10000';
+        menu.style.minWidth = '140px';
+        const rect = anchorBtn.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = (rect.bottom + 2) + 'px';
+        menu.innerHTML = `
+            <div class="fm-context-item" data-action="local-upload">💻 本地上传</div>
+            <div class="fm-context-item" data-action="system-upload">📦 系统上传</div>
+        `;
+        document.body.appendChild(menu);
+        fileManagerState.uploadMenu = menu;
+
+        menu.querySelector('[data-action="local-upload"]').onclick = () => {
+            hideUploadMenu();
+            document.getElementById('fmFileInput').click();
+        };
+        menu.querySelector('[data-action="system-upload"]').onclick = () => {
+            hideUploadMenu();
+            openSystemUploadDialog();
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', hideUploadMenu, { once: true });
+        }, 0);
+    }
+
+    function hideUploadMenu() {
+        if (fileManagerState.uploadMenu) {
+            fileManagerState.uploadMenu.remove();
+            fileManagerState.uploadMenu = null;
+        }
+    }
+
+    function openSystemUploadDialog() {
+        // 先获取系统文件列表（通过后端API），在对话框中展示让用户选择
+        fetch('/api/system-files/list')
+            .then(res => res.json())
+            .then(data => {
+                if (!data.files || data.files.length === 0) {
+                    showSystemFileUploadPrompt();
+                    return;
+                }
+                showSystemFilePicker(data.files);
+            })
+            .catch(() => {
+                showSystemFileUploadPrompt();
+            });
+    }
+
+    function showSystemFileUploadPrompt() {
+        const html = `
+            <div style="padding:16px;">
+                <h3 style="margin:0 0 12px;font-size:14px;">📦 系统上传</h3>
+                <p style="color:#909399;font-size:12px;margin:0 0 12px;">暂无系统文件。请先将文件放入系统目录。</p>
+                <input type="file" id="sysUploadInput" style="margin-bottom:12px;">
+                <div style="text-align:right;">
+                    <button class="tool-btn" onclick="closeModal('systemUploadModal')">关闭</button>
+                </div>
+            </div>
+        `;
+        showModal(html, 'systemUploadModal');
+        const input = document.getElementById('sysUploadInput');
+        if (input) input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+            setFmPanelStatus(`上传到系统: ${file.name}...`, '#909399');
+            fetch('/api/system-files/upload', { method: 'POST', body: fd })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        setFmPanelStatus('❌ ' + data.error, '#f56c6c');
+                    } else {
+                        setFmPanelStatus('✅ 已上传到系统文件区', '#67c23a');
+                        closeModal('systemUploadModal');
+                        openSystemUploadDialog();
+                    }
+                })
+                .catch(err => setFmPanelStatus('❌ ' + err.message, '#f56c6c'));
+        };
+    }
+
+    function showSystemFilePicker(files) {
+        const listHtml = files.map(f => `
+            <div class="fm-item" data-name="${escapeHtml(f.name)}" data-size="${f.size || 0}">
+                <span class="fm-item-icon">📄</span>
+                <span class="fm-item-name">${escapeHtml(f.name)}</span>
+                <span class="fm-item-size">${formatFileSize(f.size || 0)}</span>
+            </div>
+        `).join('');
+        const html = `
+            <div style="padding:16px;min-width:360px;">
+                <h3 style="margin:0 0 12px;font-size:14px;">📦 选择系统文件上传到主机</h3>
+                <div style="max-height:300px;overflow-y:auto;border:1px solid #e4e7ed;border-radius:6px;">
+                    ${listHtml || '<div style="text-align:center;color:#999;padding:30px;">暂无文件</div>'}
+                </div>
+                <div style="margin-top:12px;text-align:right;display:flex;justify-content:space-between;">
+                    <button class="tool-btn sm" onclick="document.getElementById('sysAddFileInput').click()">➕ 添加系统文件</button>
+                    <div>
+                        <button class="tool-btn" onclick="closeModal('systemFilePickerModal')">取消</button>
+                    </div>
+                </div>
+                <input type="file" id="sysAddFileInput" style="display:none;">
+            </div>
+        `;
+        showModal(html, 'systemFilePickerModal');
+
+        document.querySelectorAll('#systemFilePickerModal .fm-item').forEach(item => {
+            item.style.cursor = 'pointer';
+            item.onclick = () => {
+                const name = item.dataset.name;
+                uploadSystemFileToHost(name);
+                closeModal('systemFilePickerModal');
+            };
+        });
+
+        const addInput = document.getElementById('sysAddFileInput');
+        if (addInput) addInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+            fetch('/api/system-files/upload', { method: 'POST', body: fd })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) setStatus('❌ ' + data.error);
+                    else { closeModal('systemFilePickerModal'); openSystemUploadDialog(); }
+                })
+                .catch(err => setStatus('❌ ' + err.message));
+        };
+    }
+
+    function uploadSystemFileToHost(filename) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+        setFmPanelStatus(`上传中: ${filename}...`, '#909399');
+        fetch(`/api/system-files/download/${encodeURIComponent(filename)}`)
+            .then(res => res.arrayBuffer())
+            .then(buf => {
+                let binary = '';
+                const bytes = new Uint8Array(buf);
+                for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                const base64 = btoa(binary);
+                const filePath = fileManagerState.currentPath.endsWith('/')
+                    ? fileManagerState.currentPath + filename
+                    : fileManagerState.currentPath + '/' + filename;
+                getActiveWs().send(JSON.stringify({
+                    type: 'sftp_upload',
+                    path: filePath,
+                    content: base64
+                }));
+            })
+            .catch(err => setFmPanelStatus('❌ ' + err.message, '#f56c6c'));
+    }
+
+    function deleteFilePanel(filePath) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+        showConfirm(`确定要删除文件 "${filePath}" 吗？此操作不可撤销。`, '删除文件').then(async (confirmed) => {
+            if (!confirmed) return;
+            setFmPanelStatus('删除中...', '#909399');
+            getActiveWs().send(JSON.stringify({ type: 'sftp_delete', path: filePath }));
+        });
+    }
+
+    function showPanelContextMenu(x, y, filePath, isDir) {
+        hideFmContextMenu();
+        const menu = document.createElement('div');
+        menu.className = 'fm-context-menu';
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        const downloadItem = !isDir ? '<div class="fm-context-item" data-action="download-file">⬇️ 下载文件</div>' : '';
+        menu.innerHTML = `
+            <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            ${downloadItem}
+            <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
+        `;
+        document.body.appendChild(menu);
+        fileManagerState.contextMenu = menu;
+
+        menu.querySelector('[data-action="copy-path"]').onclick = () => {
+            copyToClipboard(filePath);
+            hideFmContextMenu();
+            setFmPanelStatus('✅ 路径已复制到剪贴板', '#67c23a');
+        };
+
+        if (!isDir) {
+            menu.querySelector('[data-action="download-file"]').onclick = () => {
+                hideFmContextMenu();
+                if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+                setFmPanelStatus('⏳ 正在下载...', '#409eff');
+                getActiveWs().send(JSON.stringify({ type: 'sftp_download', path: filePath }));
+            };
+        }
+
+        menu.querySelector('[data-action="delete-file"]').onclick = () => {
+            hideFmContextMenu();
+            deleteFilePanel(filePath);
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', hideFmContextMenu, { once: true });
+        }, 0);
     }
 
     function loadFileList(path) {
@@ -7398,17 +7642,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleSftpUpload(data) {
         const overlay = fileManagerState.overlay;
-        if (!overlay) return;
-        overlay.querySelector('#fmStatus').style.color = '#67c23a';
-        overlay.querySelector('#fmStatus').textContent = '✅ 上传成功';
-        loadFileList(fileManagerState.currentPath);
+        if (overlay) {
+            overlay.querySelector('#fmStatus').style.color = '#67c23a';
+            overlay.querySelector('#fmStatus').textContent = '✅ 上传成功';
+            loadFileList(fileManagerState.currentPath);
+        }
+        const filesTab = document.querySelector('[data-cmd-tab="files"]');
+        if (filesTab && filesTab.classList.contains('active')) {
+            setFmPanelStatus('✅ 上传成功', '#67c23a');
+            loadFileListPanel(fileManagerState.currentPath);
+        }
     }
 
     function handleSftpError(msg) {
         const overlay = fileManagerState.overlay;
-        if (!overlay) return;
-        overlay.querySelector('#fmStatus').style.color = '#f56c6c';
-        overlay.querySelector('#fmStatus').textContent = '❌ ' + msg;
+        if (overlay) {
+            overlay.querySelector('#fmStatus').style.color = '#f56c6c';
+            overlay.querySelector('#fmStatus').textContent = '❌ ' + msg;
+        }
+        const filesTab = document.querySelector('[data-cmd-tab="files"]');
+        if (filesTab && filesTab.classList.contains('active')) {
+            setFmPanelStatus('❌ ' + msg, '#f56c6c');
+        }
     }
 
     let monitorTimers = {};
@@ -7573,19 +7828,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleSftpDelete(data) {
         const overlay = fileManagerState.overlay;
-        if (!overlay) return;
-        overlay.querySelector('#fmStatus').style.color = '#67c23a';
-        overlay.querySelector('#fmStatus').textContent = '✅ 删除成功';
-        loadFileList(fileManagerState.currentPath);
+        if (overlay) {
+            overlay.querySelector('#fmStatus').style.color = '#67c23a';
+            overlay.querySelector('#fmStatus').textContent = '✅ 删除成功';
+            loadFileList(fileManagerState.currentPath);
+        }
+        const filesTab = document.querySelector('[data-cmd-tab="files"]');
+        if (filesTab && filesTab.classList.contains('active')) {
+            setFmPanelStatus('✅ 删除成功', '#67c23a');
+            loadFileListPanel(fileManagerState.currentPath);
+        }
     }
 
     function handleSftpDownload(data) {
         const overlay = fileManagerState.overlay;
+        const filesTab = document.querySelector('[data-cmd-tab="files"]');
+        const isPanelActive = filesTab && filesTab.classList.contains('active');
         if (!data || !data.content) {
             if (overlay) {
                 overlay.querySelector('#fmStatus').style.color = '#f56c6c';
                 overlay.querySelector('#fmStatus').textContent = '❌ 下载失败';
             }
+            if (isPanelActive) setFmPanelStatus('❌ 下载失败', '#f56c6c');
             return;
         }
         try {
@@ -7606,11 +7870,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 overlay.querySelector('#fmStatus').textContent = '✅ 下载成功';
                 setTimeout(() => { overlay.querySelector('#fmStatus').textContent = ''; }, 2000);
             }
+            if (isPanelActive) {
+                setFmPanelStatus('✅ 下载成功', '#67c23a');
+                setTimeout(() => setFmPanelStatus('', ''), 2000);
+            }
         } catch (e) {
             if (overlay) {
                 overlay.querySelector('#fmStatus').style.color = '#f56c6c';
                 overlay.querySelector('#fmStatus').textContent = '❌ 下载失败: ' + e.message;
             }
+            if (isPanelActive) setFmPanelStatus('❌ 下载失败: ' + e.message, '#f56c6c');
         }
     }
 
@@ -7843,6 +8112,21 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         if (fmRefreshBtn) fmRefreshBtn.onclick = () => {
             if (fileManagerState.currentPath) loadFileListPanel(fileManagerState.currentPath);
+        };
+
+        const fmUploadBtn = document.getElementById('fmUploadBtn');
+        const fmFileInput = document.getElementById('fmFileInput');
+        if (fmUploadBtn) fmUploadBtn.onclick = () => {
+            if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) {
+                setStatus('⚠️ 请先连接主机');
+                return;
+            }
+            showUploadMenu(fmUploadBtn);
+        };
+        if (fmFileInput) fmFileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) uploadFileToPanel(file);
+            fmFileInput.value = '';
         };
 
         const searchInput = document.getElementById('hostSearchInput');

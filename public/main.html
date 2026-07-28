@@ -214,15 +214,18 @@
                                     <div class="fm-header">
                                         <span class="fm-path" id="fmPath">/</span>
                                         <div class="fm-actions">
+                                            <button class="tool-btn sm" id="fmUploadBtn" title="上传文件" style="background:#67c23a;color:#fff;">📤 上传</button>
                                             <button class="tool-btn sm" id="fmUpBtn" title="上级目录">⬆️</button>
                                             <button class="tool-btn sm" id="fmRefreshBtn" title="刷新">🔄</button>
                                         </div>
                                     </div>
+                                    <div class="fm-status" id="fmStatus" style="padding:4px 10px;font-size:12px;min-height:20px;"></div>
                                     <div class="fm-list" id="fmList">
                                         <div style="text-align:center;color:#999;padding:30px 0;font-size:12px;">请先连接主机</div>
                                     </div>
                                 </div>
                             </div>
+                            <input type="file" id="fmFileInput" style="display:none;">
                         </div>
                     </div>
                 </div>
