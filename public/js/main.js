@@ -1699,10 +1699,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     checkedValues = visibleCbs.filter(cb => cb.checked).map(cb => cb.value);
                 }
 
+                const hadFilter = isFilterActive(colKey);
                 if (checkedValues.length === 0) {
                     delete state.filters[colKey];
                 } else if (searchText === '' && checkedValues.length === allValues.length) {
-                    // 未搜索时全选等于不筛选
                     delete state.filters[colKey];
                 } else {
                     state.filters[colKey] = checkedValues;
@@ -1710,9 +1710,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 state.tabFilters[state.currentTabId] = { ...state.filters };
                 saveTabFiltersToStorage();
                 panel.classList.remove('show');
-                // 筛选条件变更，重新从后端加载
-                state.page = 1;
-                loadRecords(state.currentTabId).then(() => renderTable(false));
+
+                const nowClearing = hadFilter && !isFilterActive(colKey);
+                const tw = $('#tableWrapper');
+                const savedScrollTop = (tw && nowClearing) ? tw.scrollTop : 0;
+                if (!nowClearing) state.page = 1;
+                loadRecords(state.currentTabId).then(() => {
+                    renderTable(false);
+                    if (tw && nowClearing) {
+                        requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
+                    }
+                });
                 return;
             }
 
@@ -1729,12 +1737,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 state.tabFilters[state.currentTabId] = { ...state.filters };
                 saveTabFiltersToStorage();
                 const panel = document.querySelector(`.col-dropdown-panel[data-col="${colKey}"]`);
-                if (panel) panel.classList.remove('show');
+                if (panel) {
+                    panel.classList.remove('show');
+                    const searchInput = panel.querySelector('.filter-search');
+                    if (searchInput) searchInput.value = '';
+                    const clearBtn = panel.querySelector('.filter-search-clear');
+                    if (clearBtn) clearBtn.style.display = 'none';
+                }
                 const tw = $('#tableWrapper');
                 const savedScrollTop = tw ? tw.scrollTop : 0;
                 loadRecords(state.currentTabId).then(() => {
                     renderTable(false);
-                    if (tw) tw.scrollTop = savedScrollTop;
+                    if (tw) {
+                        requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
+                    }
                 });
                 return;
             }
@@ -2008,23 +2024,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 try { window.getSelection().removeAllRanges(); } catch (err) {}
                 e.preventDefault();
 
-                var el = document.elementFromPoint(e.clientX, e.clientY);
-                if (!el) return;
-                var info = getCellInfoFromTarget(el);
-                if (!info) {
-                    var tr = el.closest('tr[data-id]');
+                var elements = document.elementsFromPoint(e.clientX, e.clientY);
+                if (!elements || !elements.length) return;
+                var targetRowId = null;
+                for (var i = 0; i < elements.length; i++) {
+                    var el = elements[i];
+                    if (!el) continue;
+                    var info = getCellInfoFromTarget(el);
+                    if (info) {
+                        targetRowId = info.rowId;
+                        break;
+                    }
+                    var tr = el.closest && el.closest('tr[data-id]');
                     if (tr) {
                         var rid = parseInt(tr.dataset.id);
-                        if (!isNaN(rid) && rid !== ds.endRowId) {
-                            ds.endRowId = rid;
-                            updateDragHighlight();
+                        if (!isNaN(rid)) {
+                            targetRowId = rid;
+                            break;
                         }
                     }
-                    return;
                 }
-                if (info.colKey !== ds.colKey) return;
-                if (info.rowId !== ds.endRowId) {
-                    ds.endRowId = info.rowId;
+                if (targetRowId !== null && targetRowId !== ds.endRowId) {
+                    ds.endRowId = targetRowId;
                     updateDragHighlight();
                 }
             });

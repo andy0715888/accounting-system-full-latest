@@ -2503,7 +2503,16 @@ tr.client-row.cut-pending {
 }
 .cmd-tab-content {
     max-height: 400px;
-    overflow-y: auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.file-manager-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
 }
 
 .fm-header {
@@ -2536,8 +2545,9 @@ tr.client-row.cut-pending {
 }
 .fm-list {
     padding: 4px 0;
-    max-height: 340px;
+    flex: 1;
     overflow-y: auto;
+    min-height: 0;
 }
 .fm-item {
     display: flex;

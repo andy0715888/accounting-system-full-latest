@@ -495,7 +495,7 @@ function startHttp() {
 
         // SFTP 路径安全化：规范化路径，禁止 .. 逃逸，拒绝系统关键目录写入/删除
         // 注：用户已通过 SSH 登录目标主机，这里仅做基本防护避免误操作和明显滥用
-        const SFTP_PROTECTED_DIRS = ['/proc', '/sys', '/dev', '/boot', '/run'];
+        const SFTP_PROTECTED_DIRS = ['/proc', '/sys', '/dev'];
         function sanitizeSftpPath(rawPath, isWrite = false) {
             if (!rawPath || typeof rawPath !== 'string') return null;
             // 拒绝空字节、回车换行注入
