@@ -106,8 +106,8 @@ router.put('/record-config/:recordId', requireAuth, async (req, res) => {
         if (!rec) return res.status(404).json({ error: '记录不存在' });
 
         const data = JSON.parse(rec.data || '{}');
-        if (unit_price !== undefined) data.unit_price = unit_price;
-        if (extra !== undefined) data.extra = extra;
+        if (unit_price !== undefined) data.host_expense_unit_price = unit_price;
+        if (extra !== undefined) data.host_expense_extra = extra;
         if (remark !== undefined) data.host_expense_remark = remark;
         await execute('UPDATE records SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?', [JSON.stringify(data), recordId, userId]);
         res.json({ success: true });

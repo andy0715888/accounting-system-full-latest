@@ -1880,94 +1880,108 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
             document.head.appendChild(style);
 
-            // 使用事件委托监听 mousedown（避免 renderTable 后事件丢失）
+            var _dragStartPos = null;
+            var DRAG_THRESHOLD = 5;
+
+            function getCellInfoFromTarget(target) {
+                var cell = target.closest('.password-cell, .date-cell, .cell-input');
+                if (!cell) return null;
+                var colKey, rowId;
+                if (cell.classList.contains('password-cell') || cell.classList.contains('date-cell')) {
+                    colKey = cell.dataset.col;
+                    rowId = parseInt(cell.dataset.id);
+                } else {
+                    colKey = cell.dataset.col;
+                    rowId = parseInt(cell.dataset.id);
+                }
+                if (!colKey || isNaN(rowId)) return null;
+                return { colKey: colKey, rowId: rowId, cell: cell };
+            }
+
+            function isInputTypeSupported(input) {
+                if (!input) return false;
+                if (input.classList.contains('address-select') ||
+                    input.classList.contains('months-input') || input.classList.contains('expense-input') ||
+                    input.classList.contains('fee-input') || input.classList.contains('provider-search-input') ||
+                    input.classList.contains('date-text-input')) return false;
+                return true;
+            }
+
+            // 使用事件委托监听 mousedown
             document.addEventListener('mousedown', function(e) {
                 var ds = window._dragSelect;
-                // 日历按钮点击不启动拖选
                 if (e.target.closest('.date-picker-btn')) return;
-                // 优先判断密码单元格
-                let input = e.target.closest('.password-cell');
-                if (input) {
-                    const colKey = input.dataset.col;
-                    const rowId = parseInt(input.dataset.id);
-                    if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
-                        window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
-                        updateDragHighlight();
-                        e.preventDefault();
-                        return;
-                    }
-                    window._dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
-                    updateDragHighlight();
-                    return;
-                }
-                // 只读日期单元格不启动拖选
-                let dateCell = e.target.closest('.date-cell.date-readonly');
-                if (dateCell) return;
-                input = e.target.closest('.cell-input');
-                if (!input) {
-                    // 点击非输入区域时清除选区
+                if (e.button !== 0) return;
+
+                var info = getCellInfoFromTarget(e.target);
+                if (!info) {
                     if (ds.startRowId && !ds.active) {
                         clearDragHighlight();
                         window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: null, lastClickCol: null };
                     }
                     return;
                 }
-                // 排除非文本输入类型
-                if (input.classList.contains('address-select') ||
-                    input.classList.contains('months-input') || input.classList.contains('expense-input') ||
-                    input.classList.contains('fee-input') || input.classList.contains('provider-search-input')) return;
-                const colKey = input.dataset.col;
-                const rowId = parseInt(input.dataset.id);
-                // Shift+Click：从上次点击到当前行范围选择
+
+                if (info.cell.classList.contains('cell-input') && !isInputTypeSupported(info.cell)) return;
+                if (info.cell.classList.contains('date-readonly')) return;
+
+                var colKey = info.colKey;
+                var rowId = info.rowId;
+
                 if (e.shiftKey && ds.lastClickRowId && ds.lastClickCol === colKey) {
-                    window._dragSelect = { active: false, colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
+                    window._dragSelect = { active: false, colKey: colKey, startRowId: ds.lastClickRowId, endRowId: rowId, lastClickRowId: ds.lastClickRowId, lastClickCol: colKey };
                     updateDragHighlight();
                     e.preventDefault();
                     return;
                 }
-                window._dragSelect = { active: true, colKey, startRowId: rowId, endRowId: rowId, lastClickRowId: rowId, lastClickCol: colKey };
-                updateDragHighlight();
+
+                _dragStartPos = { x: e.clientX, y: e.clientY, colKey: colKey, rowId: rowId };
+                window._dragSelect = { active: false, colKey: null, startRowId: null, endRowId: null, lastClickRowId: rowId, lastClickCol: colKey };
+                clearDragHighlight();
             });
 
-            // mousemove 检测拖动经过的单元格
             document.addEventListener('mousemove', function(e) {
                 var ds = window._dragSelect;
-                if (!ds.active) return;
-                const el = document.elementFromPoint(e.clientX, e.clientY);
+                if (_dragStartPos && !ds.active) {
+                    var dx = e.clientX - _dragStartPos.x;
+                    var dy = e.clientY - _dragStartPos.y;
+                    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+                        ds.active = true;
+                        ds.colKey = _dragStartPos.colKey;
+                        ds.startRowId = _dragStartPos.rowId;
+                        ds.endRowId = _dragStartPos.rowId;
+                        try { window.getSelection().removeAllRanges(); } catch (err) {}
+                        updateDragHighlight();
+                    }
+                }
+
+                if (!ds.active || !ds.colKey) return;
+                try { window.getSelection().removeAllRanges(); } catch (err) {}
+                e.preventDefault();
+
+                var el = document.elementFromPoint(e.clientX, e.clientY);
                 if (!el) return;
-                // 优先检查密码单元格
-                let input = el.closest('.password-cell');
-                if (input) {
-                    if (input.dataset.col !== ds.colKey) return;
-                    const rowId = parseInt(input.dataset.id);
-                    if (rowId !== ds.endRowId) {
-                        ds.endRowId = rowId;
-                        updateDragHighlight();
+                var info = getCellInfoFromTarget(el);
+                if (!info) {
+                    var tr = el.closest('tr[data-id]');
+                    if (tr) {
+                        var rid = parseInt(tr.dataset.id);
+                        if (!isNaN(rid) && rid !== ds.endRowId) {
+                            ds.endRowId = rid;
+                            updateDragHighlight();
+                        }
                     }
                     return;
                 }
-                // 检查日期单元格（用于拖选经过时高亮整行）
-                let dateCell = el.closest('.date-cell');
-                if (dateCell && !dateCell.classList.contains('date-readonly')) {
-                    if (dateCell.dataset.col !== ds.colKey) return;
-                    const rowId = parseInt(dateCell.dataset.id);
-                    if (rowId !== ds.endRowId) {
-                        ds.endRowId = rowId;
-                        updateDragHighlight();
-                    }
-                    return;
-                }
-                input = el.closest('.cell-input');
-                if (!input) return;
-                if (input.dataset.col !== ds.colKey) return;
-                const rowId = parseInt(input.dataset.id);
-                if (rowId !== ds.endRowId) {
-                    ds.endRowId = rowId;
+                if (info.colKey !== ds.colKey) return;
+                if (info.rowId !== ds.endRowId) {
+                    ds.endRowId = info.rowId;
                     updateDragHighlight();
                 }
             });
 
             document.addEventListener('mouseup', function() {
+                _dragStartPos = null;
                 if (window._dragSelect.active) {
                     window._dragSelect.active = false;
                 }
@@ -1977,6 +1991,16 @@ document.addEventListener('DOMContentLoaded', function() {
             document.addEventListener('copy', function(e) {
                 var ds = window._dragSelect;
                 if (!ds.startRowId || !ds.endRowId || !ds.colKey) return;
+
+                // 单行且输入框内有部分文本选中时，交给浏览器默认复制（只复制选中的部分）
+                if (ds.startRowId === ds.endRowId) {
+                    var ae = document.activeElement;
+                    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) {
+                        if (typeof ae.selectionStart === 'number' && typeof ae.selectionEnd === 'number' && ae.selectionStart !== ae.selectionEnd) {
+                            return;
+                        }
+                    }
+                }
 
                 e.preventDefault();
                 e.stopPropagation();
@@ -3097,12 +3121,37 @@ document.addEventListener('DOMContentLoaded', function() {
     async function deleteSelected() {
         const ids = Array.from(state.selectedRows);
         if (ids.length === 0) { setStatus('请选择行'); return; }
-        if (!await showConfirm(`确定删除 ${ids.length} 条记录吗？`)) return;
+
+        const blocked = [];
+        const deletable = [];
+        ids.forEach(id => {
+            const r = state.records.find(x => x.id === id);
+            if (!r) return;
+            const incomeTotal = r._incomeTotal || 0;
+            const expenseTotal = r._expenseTotal || 0;
+            const hostTotal = r._hostExpenseTotal || 0;
+            if (incomeTotal > 0 || expenseTotal > 0 || hostTotal > 0) {
+                blocked.push(id);
+            } else {
+                deletable.push(id);
+            }
+        });
+
+        if (blocked.length > 0) {
+            if (deletable.length === 0) {
+                setStatus('⚠️ 选中的行均存在收入或支出记录，无法删除');
+                return;
+            }
+            if (!await showConfirm(`选中的 ${ids.length} 条记录中，有 ${blocked.length} 条存在收入/支出记录将被跳过，确定删除剩余 ${deletable.length} 条？`)) return;
+        } else {
+            if (!await showConfirm(`确定删除 ${ids.length} 条记录吗？`)) return;
+        }
+
         try {
             setStatus('删除中...');
 
             const deletedRecords = state.records
-                .filter(r => ids.includes(r.id))
+                .filter(r => deletable.includes(r.id))
                 .map(r => ({ ...r, data: { ...r.data } }));
 
             state.undoStack.push({
@@ -3110,12 +3159,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 records: deletedRecords
             });
 
-            await API.post('/records/batch-delete', { ids });
+            const result = await API.post('/records/batch-delete', { ids: deletable });
             state.selectedRows.clear();
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            setStatus(`已删除 ${ids.length} 条记录`);
+            setStatus(result?.message || `已删除 ${deletable.length} 条记录`);
         } catch (err) { setStatus('删除失败: ' + err.message); }
     }
 
@@ -4387,10 +4436,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const record = state.records.find(r => r.id === recordId);
         if (!record) return;
 
-        // 单价 / 附加 / 备注输入框：从 record.data 读取
-        const rawExpense = record.data.expense || '';
-        hostExpenseUnitPriceInput.value = parseExpenseUnitPrice(rawExpense);
-        hostExpenseExtraInput.value = parseExpenseExtra(rawExpense);
+        // 单价 / 附加 / 备注输入框：从 record.data 独立字段读取（与外面支出列分离）
+        hostExpenseUnitPriceInput.value = record.data.host_expense_unit_price ?? '';
+        hostExpenseExtraInput.value = record.data.host_expense_extra ?? '';
         hostExpenseRemarkInput.value = record.data.host_expense_remark || '';
         hostExpenseStatus.textContent = '';
         hostExpenseModal.classList.add('show');
@@ -4556,13 +4604,12 @@ document.addEventListener('DOMContentLoaded', function() {
     async function saveHostExpenseConfig(field) {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
-        const oldRaw = record.data.expense || '0';
-        const oldUnitPrice = parseExpenseUnitPrice(oldRaw);
+        const oldUnitPrice = parseFloat(record.data.host_expense_unit_price) || 0;
         const unitPrice = parseFloat(hostExpenseUnitPriceInput.value) || 0;
         const extra = parseFloat(hostExpenseExtraInput.value) || 0;
         const remark = hostExpenseRemarkInput.value;
-        const newStr = buildExpenseString(unitPrice, extra);
-        record.data.expense = newStr;
+        record.data.host_expense_unit_price = unitPrice;
+        record.data.host_expense_extra = extra;
         record.data.host_expense_remark = remark;
         record._updated = true;
         try {
@@ -6001,6 +6048,16 @@ document.addEventListener('DOMContentLoaded', function() {
     ctxDeleteRecord.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
         if (!contextTargetId) return;
+        const r = state.records.find(x => x.id === contextTargetId);
+        if (r) {
+            const incomeTotal = r._incomeTotal || 0;
+            const expenseTotal = r._expenseTotal || 0;
+            const hostTotal = r._hostExpenseTotal || 0;
+            if (incomeTotal > 0 || expenseTotal > 0 || hostTotal > 0) {
+                setStatus('⚠️ 该行存在收入或支出记录，无法删除');
+                return;
+            }
+        }
         if (!await showConfirm('确定删除此行？')) return;
         try {
             await API.delete('/records/' + contextTargetId);
@@ -6402,9 +6459,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="folder-commands" id="folder-cmds-${f.id}">
                     ${(f.commands || []).map(c => `
                         <div class="cmd-item" data-id="${c.id}">
-                            <span class="cmd-name">${escapeHtml(c.name)}</span>
+                            <span class="cmd-name" title="点击执行">${escapeHtml(c.name)}</span>
                             <div class="cmd-actions">
-                                <button class="cmd-run-btn" data-id="${c.id}" title="执行">▶️</button>
                                 <button class="cmd-edit-btn" data-id="${c.id}" title="编辑">✏️</button>
                                 <button class="cmd-delete-btn" data-id="${c.id}" title="删除">🗑️</button>
                             </div>
@@ -6710,6 +6766,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     stopMonitor(connId);
                 } else if (msg.type === 'sftp_list') {
                     handleSftpList(msg.data);
+                    const filesTab = document.querySelector('[data-cmd-tab="files"]');
+                    if (filesTab && filesTab.classList.contains('active')) {
+                        renderFileListPanel(msg.data);
+                    }
                 } else if (msg.type === 'sftp_read') {
                     handleSftpRead(msg.data);
                 } else if (msg.type === 'sftp_write') {
@@ -7041,6 +7101,65 @@ document.addEventListener('DOMContentLoaded', function() {
             fileManagerState.overlay.remove();
             fileManagerState.overlay = null;
         }
+    }
+
+    function openFileManagerPanel() {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+        fileManagerState.currentPath = '/root';
+        fileManagerState.files = [];
+        loadFileListPanel('/root');
+    }
+
+    function loadFileListPanel(path) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+        fileManagerState.currentPath = path;
+        const fmPath = document.getElementById('fmPath');
+        const fmList = document.getElementById('fmList');
+        if (fmPath) fmPath.textContent = path;
+        if (fmList) fmList.innerHTML = '<div style="text-align:center;color:#999;padding:30px 0;">加载中...</div>';
+        getActiveWs().send(JSON.stringify({ type: 'sftp_list', path }));
+    }
+
+    function renderFileListPanel(data) {
+        const fmPath = document.getElementById('fmPath');
+        const fmList = document.getElementById('fmList');
+        if (!fmList) return;
+        fileManagerState.files = data.files || [];
+        fileManagerState.currentPath = data.path;
+        if (fmPath) fmPath.textContent = data.path;
+        const files = data.files || [];
+        if (files.length === 0) {
+            fmList.innerHTML = '<div style="text-align:center;color:#999;padding:30px 0;">空目录</div>';
+            return;
+        }
+        files.sort((a, b) => {
+            if (a.isDir && !b.isDir) return -1;
+            if (!a.isDir && b.isDir) return 1;
+            return a.name.localeCompare(b.name);
+        });
+        fmList.innerHTML = files.map(f => {
+            const icon = f.isDir ? '📁' : '📄';
+            const sizeStr = f.isDir ? '' : formatFileSize(f.size);
+            return `
+                <div class="fm-item" data-name="${escapeHtml(f.name)}" data-dir="${f.isDir ? '1' : '0'}">
+                    <span class="fm-item-icon">${icon}</span>
+                    <span class="fm-item-name">${escapeHtml(f.name)}</span>
+                    <span class="fm-item-size">${sizeStr}</span>
+                </div>
+            `;
+        }).join('');
+        fmList.querySelectorAll('.fm-item').forEach(item => {
+            item.onclick = () => {
+                const name = item.dataset.name;
+                const isDir = item.dataset.dir === '1';
+                if (isDir) {
+                    const newPath = fileManagerState.currentPath.endsWith('/')
+                        ? fileManagerState.currentPath + name
+                        : fileManagerState.currentPath + '/' + name;
+                    loadFileListPanel(newPath);
+                }
+            };
+        });
     }
 
     function loadFileList(path) {
@@ -7695,6 +7814,37 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('addHostBtn').onclick = () => showAddHostModal();
         document.getElementById('addCmdFolderBtn').onclick = () => showAddFolderModal();
 
+        // 标签页切换
+        document.querySelectorAll('.cmd-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.cmdTab;
+                document.querySelectorAll('.cmd-tab').forEach(t => t.classList.toggle('active', t === tab));
+                document.querySelectorAll('[data-cmd-tab-content]').forEach(content => {
+                    content.style.display = content.dataset.cmdTabContent === tabName ? '' : 'none';
+                });
+                if (tabName === 'files' && getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
+                    if (!fileManagerState.currentPath || fileManagerState.currentPath === '/') {
+                        openFileManagerPanel();
+                    }
+                }
+            });
+        });
+
+        // 文件管理面板按钮
+        const fmUpBtn = document.getElementById('fmUpBtn');
+        const fmRefreshBtn = document.getElementById('fmRefreshBtn');
+        if (fmUpBtn) fmUpBtn.onclick = () => {
+            const p = fileManagerState.currentPath;
+            if (p === '/' || p === '' || !p) return;
+            const parts = p.split('/').filter(Boolean);
+            parts.pop();
+            const parentPath = '/' + parts.join('/');
+            loadFileListPanel(parentPath || '/');
+        };
+        if (fmRefreshBtn) fmRefreshBtn.onclick = () => {
+            if (fileManagerState.currentPath) loadFileListPanel(fileManagerState.currentPath);
+        };
+
         const searchInput = document.getElementById('hostSearchInput');
         const searchClear = document.getElementById('hostSearchClear');
         if (searchInput) {
@@ -7748,7 +7898,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const delFolderBtn = e.target.closest('.folder-delete-btn');
             const moveUpBtn = e.target.closest('.folder-move-up-btn');
             const moveDownBtn = e.target.closest('.folder-move-down-btn');
-            const runCmdBtn = e.target.closest('.cmd-run-btn');
+            const cmdName = e.target.closest('.cmd-name');
             const editCmdBtn = e.target.closest('.cmd-edit-btn');
             const delCmdBtn = e.target.closest('.cmd-delete-btn');
 
@@ -7797,8 +7947,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (res.ok) { setStatus(data.message); await loadCommandFolders(); }
                     else setStatus('❌ ' + (data.error || '删除失败'));
                 } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
-            } else if (runCmdBtn) {
-                const id = parseInt(runCmdBtn.dataset.id);
+            } else if (cmdName) {
+                const cmdItem = cmdName.closest('.cmd-item');
+                const id = cmdItem ? parseInt(cmdItem.dataset.id) : NaN;
                 let cmd = null;
                 for (const f of commandFolders) {
                     cmd = (f.commands || []).find(c => c.id === id);

@@ -405,8 +405,18 @@ router.delete('/:id', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const recordId = req.params.id;
-        const existing = await queryOne('SELECT id FROM records WHERE id = ? AND user_id = ?', [recordId, userId]);
+        const existing = await queryOne('SELECT id, tab_id FROM records WHERE id = ? AND user_id = ?', [recordId, userId]);
         if (!existing) return res.status(404).json({ error: '记录不存在' });
+
+        const incomeRow = await queryOne('SELECT SUM(amount) as total FROM income_records WHERE record_id = ? AND user_id = ?', [recordId, userId]);
+        const expenseRow = await queryOne('SELECT SUM(amount) as total FROM expense_records WHERE record_id = ? AND user_id = ?', [recordId, userId]);
+        const hostExpenseRow = await queryOne('SELECT SUM(unit_price) as total FROM host_expense_details WHERE record_id = ? AND user_id = ?', [recordId, userId]);
+        const incomeTotal = incomeRow?.total || 0;
+        const expenseTotal = expenseRow?.total || 0;
+        const hostExpenseTotal = hostExpenseRow?.total || 0;
+        if (incomeTotal > 0 || expenseTotal > 0 || hostExpenseTotal > 0) {
+            return res.status(400).json({ error: '存在收入或支出记录，无法删除' });
+        }
 
         await execute('DELETE FROM records WHERE id = ?', [recordId]);
         res.json({ success: true, message: '删除成功' });
@@ -459,11 +469,25 @@ router.post('/batch-delete', requireAuth, async (req, res) => {
         }
 
         const placeholders = ids.map(() => '?').join(',');
+        const incomeRows = await query(`SELECT record_id, SUM(amount) as total FROM income_records WHERE record_id IN (${placeholders}) AND user_id = ? GROUP BY record_id`, [...ids, userId]);
+        const expenseRows = await query(`SELECT record_id, SUM(amount) as total FROM expense_records WHERE record_id IN (${placeholders}) AND user_id = ? GROUP BY record_id`, [...ids, userId]);
+        const hostExpenseRows = await query(`SELECT record_id, SUM(unit_price) as total FROM host_expense_details WHERE record_id IN (${placeholders}) AND user_id = ? GROUP BY record_id`, [...ids, userId]);
+        const incomeMap = {}, expenseMap = {}, hostExpenseMap = {};
+        incomeRows.forEach(r => incomeMap[r.record_id] = r.total);
+        expenseRows.forEach(r => expenseMap[r.record_id] = r.total);
+        hostExpenseRows.forEach(r => hostExpenseMap[r.record_id] = r.total);
+        const deletableIds = ids.filter(id => !(incomeMap[id] > 0 || expenseMap[id] > 0 || hostExpenseMap[id] > 0));
+        if (deletableIds.length === 0) {
+            return res.status(400).json({ error: '选中的行均存在收入或支出记录，无法删除' });
+        }
+        const delPlaceholders = deletableIds.map(() => '?').join(',');
         await execute(
-            `DELETE FROM records WHERE id IN (${placeholders}) AND user_id = ?`,
-            [...ids, userId]
+            `DELETE FROM records WHERE id IN (${delPlaceholders}) AND user_id = ?`,
+            [...deletableIds, userId]
         );
-        res.json({ success: true, message: `已删除 ${ids.length} 条记录` });
+        const skipped = ids.length - deletableIds.length;
+        const msg = skipped > 0 ? `已删除 ${deletableIds.length} 条记录（跳过 ${skipped} 条有收支记录的行）` : `已删除 ${deletableIds.length} 条记录`;
+        res.json({ success: true, message: msg, deletedCount: deletableIds.length, skippedCount: skipped });
     } catch (err) {
         console.error('批量删除错误:', err);
         res.status(500).json({ error: '服务器错误' });

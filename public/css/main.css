@@ -2477,6 +2477,90 @@ tr.client-row.cut-pending {
     font-weight: 500;
 }
 
+.cmd-tabs {
+    display: flex;
+    border-bottom: 1px solid #e4e7ed;
+    background: #f8f9fa;
+}
+.cmd-tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px 0;
+    font-size: 13px;
+    cursor: pointer;
+    color: #606266;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+.cmd-tab:hover {
+    color: #1890ff;
+}
+.cmd-tab.active {
+    color: #1890ff;
+    border-bottom-color: #1890ff;
+    background: #fff;
+    font-weight: 500;
+}
+.cmd-tab-content {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.fm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #f5f7fa;
+    border-bottom: 1px solid #e4e7ed;
+    gap: 8px;
+}
+.fm-path {
+    font-size: 12px;
+    color: #303133;
+    font-family: monospace;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fm-actions {
+    display: flex;
+    gap: 4px;
+}
+.fm-list {
+    padding: 4px 0;
+    max-height: 340px;
+    overflow-y: auto;
+}
+.fm-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.15s;
+}
+.fm-item:hover {
+    background: #f0f7ff;
+}
+.fm-item-icon {
+    font-size: 14px;
+    width: 18px;
+    text-align: center;
+}
+.fm-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fm-item-size {
+    color: #909399;
+    font-size: 11px;
+}
+
 .ssh-settings-section {
     border: 1px solid #e4e7ed;
     border-radius: 8px;

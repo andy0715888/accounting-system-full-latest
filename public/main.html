@@ -139,7 +139,6 @@
                         <div class="terminal-header" id="terminalHeader">
                             <span class="terminal-title">请选择主机连接</span>
                             <div class="terminal-actions">
-                                <button class="tool-btn sm" id="fileManagerBtn" style="display:none;">📁 文件管理</button>
                                 <button class="tool-btn sm" id="disconnectBtn" style="display:none;">断开连接</button>
                             </div>
                         </div>
@@ -197,12 +196,32 @@
                             </div>
                         </div>
                         <div class="saved-commands-section">
-                            <div class="saved-commands-header">
-                                <span>📁 保存的命令</span>
-                                <button class="tool-btn sm" id="addCmdFolderBtn">➕ 文件夹</button>
+                            <div class="cmd-tabs">
+                                <div class="cmd-tab active" data-cmd-tab="commands">命令</div>
+                                <div class="cmd-tab" data-cmd-tab="files">文件管理</div>
                             </div>
-                            <div class="folders-list" id="foldersList">
-                                <div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>
+                            <div class="cmd-tab-content" data-cmd-tab-content="commands">
+                                <div class="saved-commands-header">
+                                    <span>📁 命令</span>
+                                    <button class="tool-btn sm" id="addCmdFolderBtn">➕ 文件夹</button>
+                                </div>
+                                <div class="folders-list" id="foldersList">
+                                    <div style="text-align:center;color:#999;padding:15px 0;font-size:12px;">暂无文件夹</div>
+                                </div>
+                            </div>
+                            <div class="cmd-tab-content" data-cmd-tab-content="files" style="display:none;">
+                                <div class="file-manager-panel" id="fileManagerPanel">
+                                    <div class="fm-header">
+                                        <span class="fm-path" id="fmPath">/</span>
+                                        <div class="fm-actions">
+                                            <button class="tool-btn sm" id="fmUpBtn" title="上级目录">⬆️</button>
+                                            <button class="tool-btn sm" id="fmRefreshBtn" title="刷新">🔄</button>
+                                        </div>
+                                    </div>
+                                    <div class="fm-list" id="fmList">
+                                        <div style="text-align:center;color:#999;padding:30px 0;font-size:12px;">请先连接主机</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
