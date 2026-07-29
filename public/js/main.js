@@ -6443,6 +6443,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let connIdCounter = 0;
     let hosts = [];
     let commandFolders = [];
+    let currentHostTab = 'list';
+    let hostContextMenu = null;
+    let contextHostId = null;
 
     async function loadHosts() {
         try {
@@ -6458,21 +6461,28 @@ document.addEventListener('DOMContentLoaded', function() {
         const keyword = (searchInput?.value || '').trim().toLowerCase();
 
         let filtered = hosts;
+        if (currentHostTab === 'favorite') {
+            filtered = hosts.filter(h => h.is_favorite);
+        }
         if (keyword) {
-            filtered = hosts.filter(h =>
+            filtered = filtered.filter(h =>
                 (h.host || '').toLowerCase().includes(keyword) ||
                 (h.name || '').toLowerCase().includes(keyword)
             );
         }
 
+        const emptyMsg = currentHostTab === 'favorite'
+            ? (keyword ? '未找到匹配的收藏主机' : '暂无收藏主机')
+            : (keyword ? '未找到匹配的主机' : '暂无主机');
+
         if (!filtered.length) {
-            list.innerHTML = '<div style="text-align:center;color:#999;padding:20px 0;">' + (keyword ? '未找到匹配的主机' : '暂无主机') + '</div>';
+            list.innerHTML = '<div style="text-align:center;color:#999;padding:20px 0;">' + emptyMsg + '</div>';
             return;
         }
         list.innerHTML = filtered.map(h => `
             <div class="host-item" data-id="${h.id}">
                 <div class="host-item-main">
-                    <div class="host-name">${escapeHtml(h.name)}</div>
+                    <div class="host-name">${h.is_favorite ? '⭐ ' : ''}${escapeHtml(h.name)}</div>
                     <div class="host-info">${escapeHtml(h.username)}@${escapeHtml(h.host)}:${h.port || 22}</div>
                 </div>
                 <div class="host-item-actions">
@@ -6793,6 +6803,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
+                } else if (msg.type === 'last_login') {
+                    if (activeConnId === connId) {
+                        appendTerminalOutput(msg.data + '\n', 'info');
+                    } else {
+                        conn.terminalContent += msg.data + '\n';
+                    }
                 } else if (msg.type === 'output') {
                     if (activeConnId === connId) {
                         appendTerminalOutput(msg.data);
@@ -8204,7 +8220,89 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
+        // 主机列表标签切换
+        document.querySelectorAll('.hosts-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.hosts-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentHostTab = tab.dataset.hostTab;
+                renderHosts();
+            });
+        });
+
+        // 主机右键菜单
+        function showHostContextMenu(clientX, clientY, hostId) {
+            hideHostContextMenu();
+            const host = hosts.find(h => h.id === hostId);
+            if (!host) return;
+            contextHostId = hostId;
+            const menu = document.createElement('div');
+            menu.className = 'host-context-menu';
+            menu.style.position = 'fixed';
+            menu.style.left = clientX + 'px';
+            menu.style.top = clientY + 'px';
+            menu.style.zIndex = '10000';
+            const isFav = !!host.is_favorite;
+            menu.innerHTML = `
+                <div class="host-ctx-item" data-action="favorite">${isFav ? '💔 取消收藏' : '⭐ 添加收藏'}</div>
+                <div class="host-ctx-item" data-action="connect">🔌 连接</div>
+                <div class="host-ctx-item" data-action="edit">✏️ 编辑</div>
+                <div class="host-ctx-item" data-action="delete" style="color:#f56c6c;">🗑️ 删除</div>
+            `;
+            document.body.appendChild(menu);
+            hostContextMenu = menu;
+
+            menu.querySelectorAll('.host-ctx-item').forEach(item => {
+                item.addEventListener('click', async () => {
+                    const action = item.dataset.action;
+                    hideHostContextMenu();
+                    if (action === 'favorite') {
+                        try {
+                            await fetch(`/api/hosts/${hostId}/favorite`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ is_favorite: !isFav })
+                            });
+                            await loadHosts();
+                        } catch (err) { setStatus('❌ 操作失败: ' + err.message); }
+                    } else if (action === 'connect') {
+                        if (host) connectSSH(host);
+                    } else if (action === 'edit') {
+                        showAddHostModal(host);
+                    } else if (action === 'delete') {
+                        if (!confirm('确定要删除这个主机吗？')) return;
+                        try {
+                            const res = await fetch(`/api/hosts/${hostId}`, { method: 'DELETE' });
+                            const data = await res.json();
+                            if (res.ok) { setStatus(data.message); await loadHosts(); }
+                            else setStatus('❌ ' + (data.error || '删除失败'));
+                        } catch (err) { setStatus('❌ 删除失败: ' + err.message); }
+                    }
+                });
+            });
+
+            setTimeout(() => {
+                document.addEventListener('click', hideHostContextMenu, { once: true });
+            }, 0);
+        }
+
+        function hideHostContextMenu() {
+            if (hostContextMenu) {
+                hostContextMenu.remove();
+                hostContextMenu = null;
+                contextHostId = null;
+            }
+        }
+
         const hostsList = document.getElementById('hostsList');
+        hostsList.addEventListener('contextmenu', (e) => {
+            const hostItem = e.target.closest('.host-item');
+            if (!hostItem) return;
+            e.preventDefault();
+            const hostId = parseInt(hostItem.dataset.id);
+            showHostContextMenu(e.clientX, e.clientY, hostId);
+        });
+
         hostsList.addEventListener('click', async (e) => {
             const connectBtn = e.target.closest('.host-connect-btn');
             const editBtn = e.target.closest('.host-edit-btn');

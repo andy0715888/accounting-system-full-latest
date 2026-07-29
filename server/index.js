@@ -566,13 +566,36 @@ function startHttp() {
                         ws.send(JSON.stringify({ type: 'connected', data: 'SSH 连接成功' }));
                         logAudit(sessionUser.userId, 'ssh_connect', `${username}@${host}:${port || 22}`);
 
-                        sshConn.shell({ cols: 120, rows: 40 }, (err, stream) => {
+                        sshConn.shell({
+                            cols: 120,
+                            rows: 40,
+                            term: 'xterm-256color',
+                            env: {
+                                TERM: 'xterm-256color',
+                                LANG: 'en_US.UTF-8',
+                                LC_ALL: 'en_US.UTF-8'
+                            }
+                        }, (err, stream) => {
                             if (err) {
                                 ws.send(JSON.stringify({ type: 'error', data: '创建 Shell 失败: ' + err.message }));
                                 sshConn.end();
                                 return;
                             }
                             sshStream = stream;
+
+                            // 连接成功后查询上次登录信息并发送给前端
+                            const lastLoginCmd = `echo "--- last login info ---" && last -n 2 -R 2>/dev/null || lastlog 2>/dev/null || echo "" && echo ""`;
+                            sshConn.exec(lastLoginCmd, (execErr, execStream) => {
+                                if (!execErr && execStream) {
+                                    let lastLoginOutput = '';
+                                    execStream.on('data', (chunk) => { lastLoginOutput += chunk.toString('utf-8'); });
+                                    execStream.on('close', () => {
+                                        if (lastLoginOutput.trim()) {
+                                            ws.send(JSON.stringify({ type: 'last_login', data: lastLoginOutput }));
+                                        }
+                                    });
+                                }
+                            });
 
                             stream.on('data', (chunk) => {
                                 if (ws.readyState === WebSocket.OPEN) {

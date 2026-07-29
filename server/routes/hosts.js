@@ -14,7 +14,7 @@ router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hosts = await query(
-            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
+            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite FROM hosts WHERE user_id = ? ORDER BY is_favorite DESC, last_connected IS NULL, last_connected DESC, sort_order, id',
             [userId]
         );
         res.json(hosts);
@@ -128,6 +128,22 @@ router.get('/by-ip/:ip', requireAuth, async (req, res) => {
         res.json(host || null);
     } catch (err) {
         console.error('按IP查找主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+router.post('/:id/favorite', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hostId = req.params.id;
+        const { is_favorite } = req.body;
+        const existing = await queryOne('SELECT id, name FROM hosts WHERE id = ? AND user_id = ?', [hostId, userId]);
+        if (!existing) return res.status(404).json({ error: '主机不存在' });
+        await execute('UPDATE hosts SET is_favorite = ? WHERE id = ?', [is_favorite ? 1 : 0, hostId]);
+        logAudit(userId, 'host_favorite', `${existing.name || ''}#${hostId} (${is_favorite ? '收藏' : '取消收藏'})`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('更新主机收藏状态错误:', err);
         res.status(500).json({ error: '服务器错误' });
     }
 });
