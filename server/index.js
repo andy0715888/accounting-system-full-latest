@@ -570,10 +570,16 @@ function startHttp() {
                             cols: 120,
                             rows: 40,
                             term: 'xterm-256color',
+                            modes: {
+                                ECHO: 1,
+                                TTY_OP_ISPEED: 38400,
+                                TTY_OP_OSPEED: 38400
+                            },
                             env: {
                                 TERM: 'xterm-256color',
                                 LANG: 'en_US.UTF-8',
-                                LC_ALL: 'en_US.UTF-8'
+                                LC_ALL: 'en_US.UTF-8',
+                                COLORTERM: 'truecolor'
                             }
                         }, (err, stream) => {
                             if (err) {
@@ -583,15 +589,17 @@ function startHttp() {
                             }
                             sshStream = stream;
 
-                            // 连接成功后查询上次登录信息并发送给前端
-                            const lastLoginCmd = `echo "--- last login info ---" && last -n 2 -R 2>/dev/null || lastlog 2>/dev/null || echo "" && echo ""`;
-                            sshConn.exec(lastLoginCmd, (execErr, execStream) => {
+                            // 连接后主动拉取系统欢迎信息（模拟 FinalShell 的效果）
+                            // 包括：uname（内核信息）、MOTD（欢迎横幅）、last login（上次登录IP）
+                            const welcomeCmd = `(command -v uname >/dev/null 2>&1 && uname -srmpo) 2>/dev/null; echo ""; (cat /etc/motd 2>/dev/null || run-parts /etc/update-motd.d 2>/dev/null); echo ""; echo "Last login: \$(last -n 1 -R 2>/dev/null | head -n 1 | awk '{print \$4" "\$5" "\$6" "\$7" "\$8" "\$9" from "\$10}' 2>/dev/null)"`;
+                            sshConn.exec(welcomeCmd, (execErr, execStream) => {
                                 if (!execErr && execStream) {
-                                    let lastLoginOutput = '';
-                                    execStream.on('data', (chunk) => { lastLoginOutput += chunk.toString('utf-8'); });
+                                    let welcomeOutput = '';
+                                    execStream.on('data', (chunk) => { welcomeOutput += chunk.toString('utf-8'); });
                                     execStream.on('close', () => {
-                                        if (lastLoginOutput.trim()) {
-                                            ws.send(JSON.stringify({ type: 'last_login', data: lastLoginOutput }));
+                                        welcomeOutput = welcomeOutput.trim();
+                                        if (welcomeOutput) {
+                                            ws.send(JSON.stringify({ type: 'welcome', data: welcomeOutput + '\n\n' }));
                                         }
                                     });
                                 }

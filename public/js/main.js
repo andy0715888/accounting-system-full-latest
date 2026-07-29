@@ -6803,6 +6803,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
+                } else if (msg.type === 'welcome') {
+                    if (activeConnId === connId) {
+                        appendTerminalOutput(msg.data, 'info');
+                    } else {
+                        conn.terminalContent += msg.data;
+                    }
                 } else if (msg.type === 'last_login') {
                     if (activeConnId === connId) {
                         appendTerminalOutput(msg.data + '\n', 'info');
@@ -8117,6 +8123,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const span = document.createElement('span');
             if (type === 'error') span.style.color = '#f56c6c';
             else if (type === 'warning') span.style.color = '#e6a23c';
+            else if (type === 'info') span.style.color = '#909399';
             span.textContent = text;
             output.appendChild(span);
             output.scrollTop = output.scrollHeight;
