@@ -513,13 +513,13 @@ document.addEventListener('DOMContentLoaded', function() {
         return isNaN(num) ? 0 : num;
     }
 
-    // 从 record 取有效单价：优先用 host_expense_unit_price（弹窗字段），回退到 expense（内联字段）
+    // 从 record 取有效单价：只用弹窗的 host_expense_unit_price，单价0就返回0
     function getRecordUnitPrice(record) {
         if (!record) return 0;
         const d = record.data || {};
         const fromModal = parseFloat(d.host_expense_unit_price);
-        if (!isNaN(fromModal) && fromModal > 0) return fromModal;
-        return parseExpenseUnitPrice(d.expense);
+        if (!isNaN(fromModal)) return fromModal > 0 ? fromModal : 0;
+        return 0;
     }
 
     // 把单价 + 附加合成 expense 字段字符串
@@ -2380,32 +2380,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 let val = parseInt(input.value) || 0;
                 val++;
                 input.value = val;
-                // 独享/共享标签：自动新增一笔主机支出明细（使用当前单价）
+                // 独享/共享标签：自动新增一笔主机支出明细（使用当前单价，单价为0时不生成）
                 const record = state.records.find(r => r.id === id);
                 if (record && !isSimpleTab()) {
                     const unitPrice = getRecordUnitPrice(record);
-                    const d = new Date();
-                    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                    // 首次添加明细时，日期用 host_purchase（如果存在）
-                    let useDate = today;
-                    if (!record._hostExpenseDetails || record._hostExpenseDetails.length === 0) {
+                    if (unitPrice > 0) {
+                        const d = new Date();
+                        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                         const hp = record.data.host_purchase || '';
-                        if (/^\d{4}-\d{2}-\d{2}/.test(hp)) useDate = hp.substring(0, 10);
+                        const detailCount = (record._hostExpenseDetails || []).length;
+                        let useDate;
+                        if (detailCount === 0) {
+                            useDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
+                        } else {
+                            useDate = calcHostExpire(hp || today, detailCount);
+                        }
+                        try {
+                            const resp = await API.post('/host-expense', {
+                                record_id: id,
+                                unit_price: unitPrice,
+                                expense_date: useDate
+                            });
+                            if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
+                            record._hostExpenseDetails.push({
+                                id: resp.id,
+                                unit_price: resp.unit_price,
+                                expense_date: resp.expense_date
+                            });
+                            record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
+                        } catch (err) { console.error('新增明细失败:', err); }
                     }
-                    try {
-                        const resp = await API.post('/host-expense', {
-                            record_id: id,
-                            unit_price: unitPrice,
-                            expense_date: useDate
-                        });
-                        if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
-                        record._hostExpenseDetails.push({
-                            id: resp.id,
-                            unit_price: resp.unit_price,
-                            expense_date: resp.expense_date
-                        });
-                        record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
-                    } catch (err) { console.error('新增明细失败:', err); }
                 }
                 handleCellChange(input);
             };
@@ -2421,34 +2425,36 @@ document.addEventListener('DOMContentLoaded', function() {
                     const oldVal = parseInt(record.data.months) || 0;
                     const diff = newVal - oldVal;
                     if (diff > 0) {
-                        // 增加 diff 笔明细
+                        // 增加 diff 笔明细（单价为0时不生成）
                         const unitPrice = getRecordUnitPrice(record);
-                        for (let i = 0; i < diff; i++) {
-                            // 首笔明细日期用 host_purchase
-                            let useDate;
+                        if (unitPrice > 0) {
                             const d = new Date();
                             const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                            if (!record._hostExpenseDetails || record._hostExpenseDetails.length === 0) {
-                                const hp = record.data.host_purchase || '';
-                                useDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
-                            } else {
-                                useDate = today;
+                            const hp = record.data.host_purchase || '';
+                            for (let i = 0; i < diff; i++) {
+                                const currentCount = (record._hostExpenseDetails || []).length;
+                                let useDate;
+                                if (currentCount === 0) {
+                                    useDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
+                                } else {
+                                    useDate = calcHostExpire(hp || today, currentCount);
+                                }
+                                try {
+                                    const resp = await API.post('/host-expense', {
+                                        record_id: id,
+                                        unit_price: unitPrice,
+                                        expense_date: useDate
+                                    });
+                                    if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
+                                    record._hostExpenseDetails.push({
+                                        id: resp.id,
+                                        unit_price: resp.unit_price,
+                                        expense_date: resp.expense_date
+                                    });
+                                } catch (err) { console.error('同步新增明细失败:', err); }
                             }
-                            try {
-                                const resp = await API.post('/host-expense', {
-                                    record_id: id,
-                                    unit_price: unitPrice,
-                                    expense_date: useDate
-                                });
-                                if (!record._hostExpenseDetails) record._hostExpenseDetails = [];
-                                record._hostExpenseDetails.push({
-                                    id: resp.id,
-                                    unit_price: resp.unit_price,
-                                    expense_date: resp.expense_date
-                                });
-                            } catch (err) { console.error('同步新增明细失败:', err); }
+                            record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
                         }
-                        record._hostExpenseTotal = (record._hostExpenseDetails || []).reduce((s, d) => s + (parseFloat(d.unit_price) || 0), 0);
                     } else if (diff < 0) {
                         // 删除 |diff| 笔最晚的明细
                         for (let i = 0; i < -diff; i++) {
@@ -4700,13 +4706,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     const d = new Date();
                     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     const hp = record.data.host_purchase || '';
-                    const firstDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
                     for (let i = 0; i < needToAdd; i++) {
+                        const currentCount = (record._hostExpenseDetails || []).length;
+                        let useDate;
+                        if (currentCount === 0) {
+                            useDate = /^\d{4}-\d{2}-\d{2}/.test(hp) ? hp.substring(0, 10) : today;
+                        } else {
+                            useDate = calcHostExpire(hp || today, currentCount);
+                        }
                         try {
                             const resp = await API.post('/host-expense', {
                                 record_id: state.hostExpenseRecordId,
                                 unit_price: unitPrice,
-                                expense_date: i === 0 ? firstDate : today
+                                expense_date: useDate
                             });
                             record._hostExpenseDetails.push({
                                 id: resp.id,
