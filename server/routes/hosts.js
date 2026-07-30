@@ -14,7 +14,7 @@ router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hosts = await query(
-            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite FROM hosts WHERE user_id = ? ORDER BY is_favorite DESC, last_connected IS NULL, last_connected DESC, sort_order, id',
+            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
             [userId]
         );
         res.json(hosts);

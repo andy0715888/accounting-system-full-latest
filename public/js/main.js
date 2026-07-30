@@ -513,6 +513,15 @@ document.addEventListener('DOMContentLoaded', function() {
         return isNaN(num) ? 0 : num;
     }
 
+    // 从 record 取有效单价：优先用 host_expense_unit_price（弹窗字段），回退到 expense（内联字段）
+    function getRecordUnitPrice(record) {
+        if (!record) return 0;
+        const d = record.data || {};
+        const fromModal = parseFloat(d.host_expense_unit_price);
+        if (!isNaN(fromModal) && fromModal > 0) return fromModal;
+        return parseExpenseUnitPrice(d.expense);
+    }
+
     // 把单价 + 附加合成 expense 字段字符串
     function buildExpenseString(unitPrice, extra) {
         const up = parseFloat(unitPrice) || 0;
@@ -2371,10 +2380,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 let val = parseInt(input.value) || 0;
                 val++;
                 input.value = val;
-                // 独享/共享标签：自动新增一笔主机支出明细（使用 expense 字段中的当前单价）
+                // 独享/共享标签：自动新增一笔主机支出明细（使用当前单价）
                 const record = state.records.find(r => r.id === id);
                 if (record && !isSimpleTab()) {
-                    const unitPrice = parseExpenseUnitPrice(record.data.expense);
+                    const unitPrice = getRecordUnitPrice(record);
                     const d = new Date();
                     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     // 首次添加明细时，日期用 host_purchase（如果存在）
@@ -2413,7 +2422,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const diff = newVal - oldVal;
                     if (diff > 0) {
                         // 增加 diff 笔明细
-                        const unitPrice = parseExpenseUnitPrice(record.data.expense);
+                        const unitPrice = getRecordUnitPrice(record);
                         for (let i = 0; i < diff; i++) {
                             // 首笔明细日期用 host_purchase
                             let useDate;
@@ -6804,10 +6813,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
                 } else if (msg.type === 'welcome') {
+                    const welcomeText = '\r\n' + msg.data;
                     if (activeConnId === connId) {
-                        appendTerminalOutput(msg.data, 'info');
+                        appendTerminalOutput(welcomeText, 'info');
+                        const ws = getActiveWs();
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+                        }
                     } else {
-                        conn.terminalContent += msg.data;
+                        conn.terminalContent += welcomeText;
                     }
                 } else if (msg.type === 'last_login') {
                     if (activeConnId === connId) {
@@ -6824,9 +6838,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (msg.type === 'error') {
                     if (activeConnId === connId) {
                         appendTerminalOutput('\n[错误] ' + msg.data + '\n', 'error');
+                        title.textContent = `${host.name} - 连接失败`;
+                        input.disabled = true;
+                        sendBtn.disabled = true;
+                        disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.textContent = '发起连接';
+                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
                     } else {
                         conn.terminalContent += '\n[错误] ' + msg.data + '\n';
                     }
+                    updateTabStatus(connId, 'error');
                 } else if (msg.type === 'disconnected') {
                     if (activeConnId === connId) {
                         title.textContent = `${host.name} - 已断开`;
@@ -7825,7 +7846,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const displayCpu = cpu > 0 || conn.lastCpu !== undefined ? (cpu > 0 ? cpu : conn.lastCpu || 0) : 0;
         if (cpu > 0) conn.lastCpu = cpu;
 
-        const currentPing = conn.monitorData?.ping;
+        const tcpRtt = data.tcp_rtt !== undefined ? data.tcp_rtt : (conn.monitorData?.tcp_rtt ?? null);
+        const wsRtt = conn.monitorData?.ws_rtt ?? null;
 
         conn.monitorData = {
             uptime: uptimeStr,
@@ -7835,7 +7857,8 @@ document.addEventListener('DOMContentLoaded', function() {
             swapPercent,
             swapStr,
             cpu: displayCpu,
-            ping: currentPing || null
+            tcp_rtt: tcpRtt,
+            ws_rtt: wsRtt
         };
 
         if (activeConnId === connId) {
@@ -7848,10 +7871,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const conn = sshConnections.find(c => c.id === connId);
         if (!conn) return;
         if (conn.monitorData) {
-            conn.monitorData.ping = pingMs;
+            conn.monitorData.ws_rtt = pingMs;
             if (activeConnId === connId) {
-                const pingEl = document.getElementById('monitorPing');
-                if (pingEl) pingEl.textContent = pingMs ? pingMs + 'ms' : '-';
+                const wsPingEl = document.getElementById('monitorWsPing');
+                if (wsPingEl) wsPingEl.textContent = pingMs ? pingMs + 'ms' : '-';
             }
         }
     }
@@ -7866,7 +7889,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const memText = document.getElementById('monitorMemText');
         const swapBar = document.getElementById('monitorSwapBar');
         const swapText = document.getElementById('monitorSwapText');
-        const pingEl = document.getElementById('monitorPing');
+        const tcpPingEl = document.getElementById('monitorTcpPing');
+        const wsPingEl = document.getElementById('monitorWsPing');
 
         if (uptimeEl) uptimeEl.textContent = d.uptime || '-';
         if (loadEl) loadEl.textContent = d.load || '-';
@@ -7889,7 +7913,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (swapText) swapText.textContent = (d.swapPercent || 0) + '% ' + (d.swapStr || '');
 
-        if (pingEl) pingEl.textContent = d.ping ? d.ping + 'ms' : '-';
+        if (tcpPingEl) tcpPingEl.textContent = (d.tcp_rtt !== null && d.tcp_rtt !== undefined) ? d.tcp_rtt + 'ms' : '-';
+        if (wsPingEl) wsPingEl.textContent = (d.ws_rtt !== null && d.ws_rtt !== undefined) ? d.ws_rtt + 'ms' : '-';
     }
 
     function deleteFile(filePath) {

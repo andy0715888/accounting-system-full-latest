@@ -446,7 +446,32 @@ function startHttp() {
         let idleTimer = null;
         let pingTimer = null;
         let lastCpuStat = null;
+        let currentHost = null;
+        let currentPort = 22;
         const IDLE_TIMEOUT = 10 * 60 * 1000;
+
+        // TCP ping: measure RTT to host:port
+        function tcpPing(host, port) {
+            return new Promise((resolve) => {
+                const start = Date.now();
+                const socket = new net.Socket();
+                const timeout = setTimeout(() => {
+                    try { socket.destroy(); } catch(e) {}
+                    resolve(null);
+                }, 5000);
+                socket.on('connect', () => {
+                    const rtt = Date.now() - start;
+                    clearTimeout(timeout);
+                    socket.destroy();
+                    resolve(rtt);
+                });
+                socket.on('error', () => {
+                    clearTimeout(timeout);
+                    resolve(null);
+                });
+                socket.connect(port, host);
+            });
+        }
 
         function resetIdleTimer() {
             if (idleTimer) clearTimeout(idleTimer);
@@ -536,6 +561,8 @@ function startHttp() {
                         ws.send(JSON.stringify({ type: 'error', data: '缺少连接参数' }));
                         return;
                     }
+                    currentHost = host;
+                    currentPort = port || 22;
 
                     let sock = null;
                     if (proxy && proxy.type !== 'none' && proxy.host && proxy.port) {
@@ -716,10 +743,13 @@ function startHttp() {
                                 const memUsed = memTotal - memAvailable;
                                 const swapUsed = swapTotal - swapFree;
 
+                                // 并行执行：uptime exec + TCP ping
+                                const tcpRttPromise = currentHost ? tcpPing(currentHost, currentPort) : Promise.resolve(null);
+
                                 sshConn.exec('uptime', (err2, stream2) => {
                                     let load = '';
                                     if (err2) {
-                                        finishMonitor();
+                                        tcpRttPromise.then(tcpRtt => finishMonitor(tcpRtt));
                                         return;
                                     }
                                     let uptimeOutput = '';
@@ -727,10 +757,10 @@ function startHttp() {
                                     stream2.on('close', () => {
                                         const match = uptimeOutput.match(/load average:\s*([0-9.,\s]+)/);
                                         load = match ? match[1].trim() : '';
-                                        finishMonitor();
+                                        tcpRttPromise.then(tcpRtt => finishMonitor(tcpRtt));
                                     });
 
-                                    function finishMonitor() {
+                                    function finishMonitor(tcpRtt) {
                                         if (ws.readyState === WebSocket.OPEN) {
                                             ws.send(JSON.stringify({
                                                 type: 'monitor_data',
@@ -741,7 +771,8 @@ function startHttp() {
                                                     mem_total: memTotal,
                                                     swap_used: swapUsed,
                                                     swap_total: swapTotal,
-                                                    cpu
+                                                    cpu,
+                                                    tcp_rtt: tcpRtt
                                                 }
                                             }));
                                         }
