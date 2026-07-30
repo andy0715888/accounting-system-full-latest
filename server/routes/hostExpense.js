@@ -109,6 +109,14 @@ router.put('/record-config/:recordId', requireAuth, async (req, res) => {
         if (unit_price !== undefined) data.host_expense_unit_price = unit_price;
         if (extra !== undefined) data.host_expense_extra = extra;
         if (remark !== undefined) data.host_expense_remark = remark;
+        // 同步 expense 字段，保证前端回退公式计算一致
+        const up = parseFloat(unit_price !== undefined ? unit_price : (data.host_expense_unit_price || 0)) || 0;
+        const ex = parseFloat(extra !== undefined ? extra : (data.host_expense_extra || 0)) || 0;
+        if (ex === 0) {
+            data.expense = `=${up}`;
+        } else {
+            data.expense = `=${up}+(${ex})`;
+        }
         await execute('UPDATE records SET data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?', [JSON.stringify(data), recordId, userId]);
         res.json({ success: true });
     } catch (err) {

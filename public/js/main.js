@@ -1476,12 +1476,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else {
                         const rawValue = val || '';
                         const months = parseInt(record.data.months) || 0;
-                        // 若有主机支出明细，显示 = 明细总和 + 附加；否则回退到旧公式 单价×月数+附加
+                        // 若有主机支出明细，显示 = 明细总和 + 附加；
+                        // 否则优先用弹窗单价 host_expense_unit_price 计算；
+                        // 最后才回退到 expense 字段公式
                         let displayValue;
                         if (record._hostExpenseDetails && record._hostExpenseDetails.length > 0) {
                             displayValue = Math.round((record._hostExpenseTotal || 0) + parseExpenseExtra(rawValue));
                         } else {
-                            displayValue = Math.round(computeExpenseValue(rawValue, months));
+                            const modalUnitPrice = parseFloat(record.data.host_expense_unit_price);
+                            const modalExtra = parseFloat(record.data.host_expense_extra) || 0;
+                            if (!isNaN(modalUnitPrice)) {
+                                displayValue = Math.round(modalUnitPrice * months + modalExtra);
+                            } else {
+                                displayValue = Math.round(computeExpenseValue(rawValue, months));
+                            }
                         }
                         const fmt = getConditionalFormat(colKey, displayValue);
                         const fmtStyle = applyFormatStyle(fmt);
@@ -4683,6 +4691,8 @@ document.addEventListener('DOMContentLoaded', function() {
         record.data.host_expense_unit_price = unitPrice;
         record.data.host_expense_extra = extra;
         record.data.host_expense_remark = remark;
+        // 同步 expense 字段，保证页面刷新时回退公式计算正确
+        record.data.expense = buildExpenseString(unitPrice, extra);
         record._updated = true;
         try {
             await saveRecord(record);
