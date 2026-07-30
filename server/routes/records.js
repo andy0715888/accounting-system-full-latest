@@ -578,28 +578,20 @@ router.get('/stats', requireAuth, async (req, res) => {
                 }
             }
 
-            // ========== 支出（三分支） ==========
+            // ========== 支出（两分支） ==========
             // 有 expense_records → 用 expense_records 总和；
             // 否则有 host_expense_details → 用 明细总和 + 附加；
-            // 否则 → 用 月数 × 单价 + 附加
+            // 没明细 → 0（只有明细才是支出的唯一可信来源）
             const expenseTotal = expenseSums[row.id] || 0;
             if (expenseTotal > 0) {
                 totalExpense += expenseTotal;
-            } else {
+            } else if (hostExpenseSums[row.id] !== undefined) {
+                // 有主机支出明细（哪怕总和为 0）：支出 = 明细总和 + 附加
                 const detailSum = hostExpenseSums[row.id] || 0;
-                if (detailSum > 0) {
-                    // 有主机支出明细：支出 = 明细总和 + 附加
-                    const extra = parseExpenseExtraStr(data.expense);
-                    totalExpense += detailSum + extra;
-                } else if (data.expense) {
-                    // 无明细：月数 × 单价 + 附加
-                    const months = parseInt(data.months) || 0;
-                    const expVal = evalExpenseExpr(data.expense, months);
-                    if (typeof expVal === 'number' && !isNaN(expVal)) {
-                        totalExpense += expVal;
-                    }
-                }
+                const extra = parseExpenseExtraStr(data.expense);
+                totalExpense += detailSum + extra;
             }
+            // 没明细 → 支出 = 0，不再用 月数×单价 公式兜底
         });
 
         res.json({

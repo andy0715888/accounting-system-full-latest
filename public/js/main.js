@@ -1475,21 +1475,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         `;
                     } else {
                         const rawValue = val || '';
-                        const months = parseInt(record.data.months) || 0;
-                        // 若有主机支出明细，显示 = 明细总和 + 附加；
-                        // 否则优先用弹窗单价 host_expense_unit_price 计算；
-                        // 最后才回退到 expense 字段公式
+                        // 独享/共享标签：只认明细，没明细就是 0
+                        // 有主机支出明细 → 明细总和 + 附加；没明细 → 0
                         let displayValue;
                         if (record._hostExpenseDetails && record._hostExpenseDetails.length > 0) {
                             displayValue = Math.round((record._hostExpenseTotal || 0) + parseExpenseExtra(rawValue));
                         } else {
-                            const modalUnitPrice = parseFloat(record.data.host_expense_unit_price);
-                            const modalExtra = parseFloat(record.data.host_expense_extra) || 0;
-                            if (!isNaN(modalUnitPrice)) {
-                                displayValue = Math.round(modalUnitPrice * months + modalExtra);
-                            } else {
-                                displayValue = Math.round(computeExpenseValue(rawValue, months));
-                            }
+                            displayValue = 0;
                         }
                         const fmt = getConditionalFormat(colKey, displayValue);
                         const fmtStyle = applyFormatStyle(fmt);
@@ -1638,7 +1630,7 @@ document.addEventListener('DOMContentLoaded', function() {
         panel.style.left = left + 'px';
         panel.style.top = top + 'px';
         panel.style.width = panelWidth + 'px';
-        panel.style.maxHeight = '280px';
+        panel.style.height = '280px';
         panel.style.overflowY = 'auto';
         panel.style.zIndex = '10000';
     }
@@ -4972,15 +4964,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const months = parseInt(record.data.months) || 0;
         let expense = 0;
         // 普通记账标签：支出在 expense_records 表，用 _expenseTotal
-        // 独享/共享标签：支出在 record.data.expense，用 computeExpenseValue
+        // 独享/共享标签：只认 host_expense_details 明细，没明细就是 0
         if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
             expense = record._expenseTotal;
         } else if (record._hostExpenseDetails && record._hostExpenseDetails.length > 0) {
             // 有主机支出明细：总支出 = 明细总和 + 附加
             expense = (record._hostExpenseTotal || 0) + parseExpenseExtra(record.data.expense);
-        } else {
-            expense = computeExpenseValue(record.data.expense, months) || 0;
         }
+        // 没明细 → 支出 = 0，不再用 computeExpenseValue 公式兜底
         // Income: 优先用 _incomeTotal（income_records 表汇总）
         // 独享/共享标签收入在 record.data.fee 中，_incomeTotal 为 0 时 fallback
         let income = record._incomeTotal || 0;
@@ -5009,7 +5000,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const incomes = record._incomes || [];
 
         // 支出优先级（与 getRecordFinancials 一致）：
-        // expense_records > host_expense_details > 月数×单价+附加
+        // expense_records > host_expense_details
+        // 没明细 → 不产生任何支出（不再用 月数×单价 公式平摊）
         if (expenses.length > 0) {
             // 有 expense_records 明细：支出按明细日期分配（见下方统一处理）
         } else if (hostDetails.length > 0) {
@@ -5046,36 +5038,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     bucket.expense += extra;
                 }
             }
-        } else if (months > 0 && startDate && !isNaN(startDate)) {
-            // 无明细时按 host_purchase 日期平摊
-            let totalExpense;
-            if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
-                totalExpense = record._expenseTotal;
-            } else {
-                totalExpense = computeExpenseValue(record.data.expense, months) || 0;
-            }
-            const unitExpense = totalExpense / months;
-            for (let i = 0; i < months; i++) {
-                const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
-                const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                results.push({ month: monthKey, income: 0, expense: unitExpense });
-            }
-        } else {
-            // 无明细、无日期时，兜底使用 _expenseTotal / computeExpenseValue
-            let totalExpense;
-            if (record._expenseTotal !== undefined && record._expenseTotal > 0) {
-                totalExpense = record._expenseTotal;
-            } else {
-                totalExpense = computeExpenseValue(record.data.expense, months) || 0;
-            }
-            if (totalExpense > 0) {
-                const d = record.data.host_purchase ? new Date(record.data.host_purchase) : new Date(record.created_at);
-                if (!isNaN(d)) {
-                    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    results.push({ month: monthKey, income: 0, expense: totalExpense });
-                }
-            }
         }
+        // 没明细 → 不产生支出，删除了平摊和兜底分支
 
         // ========== 收入 ==========
         // 所有标签：有 income_records 时按 income_date 分配月度收入
