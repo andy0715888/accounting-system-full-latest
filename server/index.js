@@ -616,22 +616,6 @@ function startHttp() {
                             }
                             sshStream = stream;
 
-                            // 连接后主动拉取系统欢迎信息（模拟 FinalShell 的效果）
-                            // 包括：uname（内核信息）、MOTD（欢迎横幅）、last login（上次登录IP）
-                            const welcomeCmd = `(command -v uname >/dev/null 2>&1 && uname -srmpo) 2>/dev/null; echo ""; (cat /etc/motd 2>/dev/null || run-parts /etc/update-motd.d 2>/dev/null); echo ""; echo "Last login: \$(last -n 1 -R 2>/dev/null | head -n 1 | awk '{print \$4" "\$5" "\$6" "\$7" "\$8" "\$9" from "\$10}' 2>/dev/null)"`;
-                            sshConn.exec(welcomeCmd, (execErr, execStream) => {
-                                if (!execErr && execStream) {
-                                    let welcomeOutput = '';
-                                    execStream.on('data', (chunk) => { welcomeOutput += chunk.toString('utf-8'); });
-                                    execStream.on('close', () => {
-                                        welcomeOutput = welcomeOutput.trim();
-                                        if (welcomeOutput) {
-                                            ws.send(JSON.stringify({ type: 'welcome', data: welcomeOutput + '\n\n' }));
-                                        }
-                                    });
-                                }
-                            });
-
                             stream.on('data', (chunk) => {
                                 if (ws.readyState === WebSocket.OPEN) {
                                     ws.send(JSON.stringify({ type: 'output', data: chunk.toString('utf-8') }));
@@ -699,6 +683,7 @@ function startHttp() {
                                 let memTotal = 0, memAvailable = 0;
                                 let swapTotal = 0, swapFree = 0;
                                 let cpuLineFound = false;
+                                let cpuCores = 0;
 
                                 for (let i = 0; i < lines.length; i++) {
                                     const line = lines[i].trim();
@@ -711,6 +696,8 @@ function startHttp() {
                                         cpuSys = parseInt(parts[3]) || 0;
                                         cpuIdle = parseInt(parts[4]) || 0;
                                         cpuLineFound = true;
+                                    } else if (/^cpu\d+$/.test(parts[0])) {
+                                        cpuCores++;
                                     } else if (parts[0] === 'MemTotal:' && parts[1]) {
                                         memTotal = Math.round(parseInt(parts[1]) / 1024);
                                     } else if (parts[0] === 'MemAvailable:' && parts[1]) {
@@ -772,6 +759,7 @@ function startHttp() {
                                                     swap_used: swapUsed,
                                                     swap_total: swapTotal,
                                                     cpu,
+                                                    cpu_cores: cpuCores,
                                                     tcp_rtt: tcpRtt
                                                 }
                                             }));

@@ -837,6 +837,23 @@
         </div>
     </div>
 
+    <!-- 文件在线编辑弹窗 -->
+    <div class="modal-overlay" id="fileEditModal">
+        <div class="modal" style="width:900px;max-width:95vw;">
+            <div class="modal-header">
+                <h2>📝 文件编辑 - <span id="fileEditPath"></span></h2>
+                <button class="modal-close" id="closeFileEditModal">✕</button>
+            </div>
+            <div class="modal-body" style="padding:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <span id="fileEditStatus" style="font-size:12px;color:#909399;"></span>
+                    <button class="tool-btn primary" id="saveFileEditBtn">💾 保存</button>
+                </div>
+                <textarea id="fileEditContent" style="width:100%;height:500px;font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.5;padding:12px;border:1px solid #dcdfe6;border-radius:4px;resize:vertical;background:#fafafa;outline:none;"></textarea>
+            </div>
+        </div>
+    </div>
+
     <div class="status-bar"><span id="statusText">就绪</span></div>
 
     <script src="/js/api.js"></script>

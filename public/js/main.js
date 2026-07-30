@@ -2713,6 +2713,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function doMultiPaste(ds, clipboardText) {
         const colKey = ds.colKey;
+        const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'client_expire');
         const lines = clipboardText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
         if (lines.length === 0) return;
 
@@ -2827,6 +2828,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function doMultiDelete(ds) {
         const colKey = ds.colKey;
+        const isDateCol = (colKey === 'host_purchase' || colKey === 'client_purchase' || colKey === 'client_expire');
         if (ds.startRowId === null || ds.endRowId === null || !colKey) return;
 
         var rows = Array.from(document.querySelectorAll('#dataTable tbody tr[data-id]'));
@@ -6812,6 +6814,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
+                    // 发送换行触发 shell 提示符显示
+                    const ws = getActiveWs();
+                    setTimeout(() => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+                        }
+                    }, 300);
                 } else if (msg.type === 'welcome') {
                     const welcomeText = '\r\n' + msg.data;
                     if (activeConnId === connId) {
@@ -7472,8 +7481,10 @@ document.addEventListener('DOMContentLoaded', function() {
         menu.style.left = x + 'px';
         menu.style.top = y + 'px';
         const downloadItem = !isDir ? '<div class="fm-context-item" data-action="download-file">⬇️ 下载文件</div>' : '';
+        const editItem = !isDir ? '<div class="fm-context-item" data-action="edit-file">✏️ 在线编辑</div>' : '';
         menu.innerHTML = `
             <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            ${editItem}
             ${downloadItem}
             <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
         `;
@@ -7487,6 +7498,10 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         if (!isDir) {
+            menu.querySelector('[data-action="edit-file"]').onclick = () => {
+                hideFmContextMenu();
+                openFileEditor(filePath);
+            };
             menu.querySelector('[data-action="download-file"]').onclick = () => {
                 hideFmContextMenu();
                 if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
@@ -7586,8 +7601,10 @@ document.addEventListener('DOMContentLoaded', function() {
         menu.style.left = x + 'px';
         menu.style.top = y + 'px';
         const downloadItem = !isDir ? '<div class="fm-context-item" data-action="download-file">⬇️ 下载文件</div>' : '';
+        const editItem = !isDir ? '<div class="fm-context-item" data-action="edit-file">✏️ 在线编辑</div>' : '';
         menu.innerHTML = `
             <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            ${editItem}
             ${downloadItem}
             <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
         `;
@@ -7607,6 +7624,10 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         if (!isDir) {
+            menu.querySelector('[data-action="edit-file"]').onclick = () => {
+                hideFmContextMenu();
+                openFileEditor(filePath);
+            };
             menu.querySelector('[data-action="download-file"]').onclick = () => {
                 hideFmContextMenu();
                 if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
@@ -7661,6 +7682,120 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // 文件在线编辑（模态框）
+    const fileEditModal = {
+        modal: null,
+        pathEl: null,
+        contentEl: null,
+        statusEl: null,
+        saveBtn: null,
+        closeBtn: null,
+        currentPath: null,
+        originalContent: '',
+        initialized: false
+    };
+
+    function initFileEditModal() {
+        if (fileEditModal.initialized) return;
+        fileEditModal.modal = document.getElementById('fileEditModal');
+        fileEditModal.pathEl = document.getElementById('fileEditPath');
+        fileEditModal.contentEl = document.getElementById('fileEditContent');
+        fileEditModal.statusEl = document.getElementById('fileEditStatus');
+        fileEditModal.saveBtn = document.getElementById('saveFileEditBtn');
+        fileEditModal.closeBtn = document.getElementById('closeFileEditModal');
+
+        if (fileEditModal.saveBtn) {
+            fileEditModal.saveBtn.addEventListener('click', () => {
+                saveFileEdit(true);
+            });
+        }
+        if (fileEditModal.closeBtn) {
+            fileEditModal.closeBtn.addEventListener('click', () => {
+                tryCloseFileEdit();
+            });
+        }
+        if (fileEditModal.modal) {
+            fileEditModal.modal.addEventListener('click', (e) => {
+                if (e.target === fileEditModal.modal) tryCloseFileEdit();
+            });
+        }
+        // Ctrl+S 保存
+        document.addEventListener('keydown', (e) => {
+            if (!fileEditModal.modal || fileEditModal.modal.style.display === 'none') return;
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveFileEdit(true);
+            }
+        });
+        fileEditModal.initialized = true;
+    }
+
+    function openFileEditor(filePath) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) {
+            setStatus('⚠️ 请先连接主机');
+            return;
+        }
+        initFileEditModal();
+        if (!fileEditModal.modal) return;
+
+        fileEditModal.currentPath = filePath;
+        fileEditModal.originalContent = '';
+        fileEditModal.pathEl.textContent = filePath;
+        fileEditModal.contentEl.value = '';
+        fileEditModal.contentEl.disabled = true;
+        fileEditModal.saveBtn.disabled = true;
+        fileEditModal.statusEl.style.color = '#909399';
+        fileEditModal.statusEl.textContent = '⏳ 读取中...';
+        fileEditModal.modal.style.display = 'flex';
+
+        getActiveWs().send(JSON.stringify({ type: 'sftp_read', path: filePath, modal: true }));
+    }
+
+    function isFileEditDirty() {
+        if (!fileEditModal.contentEl) return false;
+        return fileEditModal.contentEl.value !== fileEditModal.originalContent;
+    }
+
+    async function tryCloseFileEdit() {
+        initFileEditModal();
+        if (isFileEditDirty()) {
+            const confirmed = await showConfirm('文件已修改，是否保存并退出？（确定=保存，取消=不保存）', '保存确认');
+            if (confirmed) {
+                await saveFileEdit(true);
+            } else {
+                closeFileEditModal();
+            }
+        } else {
+            closeFileEditModal();
+        }
+    }
+
+    function closeFileEditModal() {
+        initFileEditModal();
+        if (fileEditModal.modal) fileEditModal.modal.style.display = 'none';
+        fileEditModal.currentPath = null;
+        fileEditModal.originalContent = '';
+    }
+
+    async function saveFileEdit(closeAfter) {
+        initFileEditModal();
+        if (!fileEditModal.currentPath || !fileEditModal.contentEl) return;
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
+
+        fileEditModal.saveBtn.disabled = true;
+        fileEditModal.statusEl.style.color = '#909399';
+        fileEditModal.statusEl.textContent = '⏳ 保存中...';
+
+        const content = fileEditModal.contentEl.value;
+        fileEditModal._closeAfterSave = closeAfter;
+        getActiveWs().send(JSON.stringify({
+            type: 'sftp_write',
+            path: fileEditModal.currentPath,
+            content: content,
+            modal: true
+        }));
+    }
+
     function readFile(name) {
         if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) return;
         const filePath = fileManagerState.currentPath.endsWith('/')
@@ -7674,16 +7809,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function handleSftpRead(data) {
+        initFileEditModal();
+        // 模态框编辑器
+        if (fileEditModal.modal && fileEditModal.modal.style.display === 'flex' && fileEditModal.currentPath === data.path) {
+            fileEditModal.originalContent = data.content || '';
+            fileEditModal.contentEl.value = data.content || '';
+            fileEditModal.contentEl.disabled = false;
+            fileEditModal.saveBtn.disabled = false;
+            fileEditModal.statusEl.style.color = '#67c23a';
+            fileEditModal.statusEl.textContent = '✅ 读取完成';
+            setTimeout(() => {
+                if (fileEditModal.statusEl.textContent === '✅ 读取完成') {
+                    fileEditModal.statusEl.textContent = '';
+                }
+            }, 1500);
+            return;
+        }
+        // 面板编辑器（兼容旧代码）
         const overlay = fileManagerState.overlay;
         if (!overlay) return;
         fileManagerState.editingFile = data.path;
         fileManagerState.editingContent = data.content || '';
-
-        overlay.querySelector('#fmEditorTitle').textContent = '编辑: ' + data.path;
-        overlay.querySelector('#fmEditorContent').value = data.content || '';
-        overlay.querySelector('#fmEditorStatus').textContent = '';
-        overlay.querySelector('#fmEditor').style.display = 'flex';
-        overlay.querySelector('#fmStatus').textContent = '';
+        const editorTitle = overlay.querySelector('#fmEditorTitle');
+        if (editorTitle) editorTitle.textContent = '编辑: ' + data.path;
+        const editorContent = overlay.querySelector('#fmEditorContent');
+        if (editorContent) editorContent.value = data.content || '';
+        const editorStatus = overlay.querySelector('#fmEditorStatus');
+        if (editorStatus) editorStatus.textContent = '';
+        const editor = overlay.querySelector('#fmEditor');
+        if (editor) editor.style.display = 'flex';
+        const fmStatus = overlay.querySelector('#fmStatus');
+        if (fmStatus) fmStatus.textContent = '';
     }
 
     function saveFile() {
@@ -7702,12 +7858,32 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function handleSftpWrite(data) {
+        initFileEditModal();
+        // 模态框编辑器
+        if (fileEditModal.modal && fileEditModal.modal.style.display === 'flex' && fileEditModal.currentPath === data.path) {
+            fileEditModal.saveBtn.disabled = false;
+            fileEditModal.statusEl.style.color = '#67c23a';
+            fileEditModal.statusEl.textContent = '✅ 保存成功';
+            fileEditModal.originalContent = fileEditModal.contentEl.value;
+            if (fileEditModal._closeAfterSave) {
+                setTimeout(() => {
+                    closeFileEditModal();
+                    fileEditModal._closeAfterSave = false;
+                }, 500);
+            } else {
+                setTimeout(() => { fileEditModal.statusEl.textContent = ''; }, 2000);
+            }
+            return;
+        }
+        // 面板编辑器（兼容旧代码）
         const overlay = fileManagerState.overlay;
         if (!overlay) return;
         const statusEl = overlay.querySelector('#fmEditorStatus');
-        statusEl.style.color = '#67c23a';
-        statusEl.textContent = '✅ 保存成功';
-        setTimeout(() => { statusEl.textContent = ''; }, 2000);
+        if (statusEl) {
+            statusEl.style.color = '#67c23a';
+            statusEl.textContent = '✅ 保存成功';
+            setTimeout(() => { statusEl.textContent = ''; }, 2000);
+        }
     }
 
     function closeEditor() {
@@ -7754,6 +7930,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function handleSftpError(msg) {
+        initFileEditModal();
+        if (fileEditModal.modal && fileEditModal.modal.style.display === 'flex') {
+            fileEditModal.saveBtn.disabled = false;
+            fileEditModal.statusEl.style.color = '#f56c6c';
+            fileEditModal.statusEl.textContent = '❌ ' + msg;
+            return;
+        }
         const overlay = fileManagerState.overlay;
         if (overlay) {
             overlay.querySelector('#fmStatus').style.color = '#f56c6c';
@@ -7845,6 +8028,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const cpu = parseInt(data.cpu) || 0;
         const displayCpu = cpu > 0 || conn.lastCpu !== undefined ? (cpu > 0 ? cpu : conn.lastCpu || 0) : 0;
         if (cpu > 0) conn.lastCpu = cpu;
+        const cpuCores = parseInt(data.cpu_cores) || (conn.monitorData?.cpu_cores ?? 0);
 
         const tcpRtt = data.tcp_rtt !== undefined ? data.tcp_rtt : (conn.monitorData?.tcp_rtt ?? null);
         const wsRtt = conn.monitorData?.ws_rtt ?? null;
@@ -7857,6 +8041,7 @@ document.addEventListener('DOMContentLoaded', function() {
             swapPercent,
             swapStr,
             cpu: displayCpu,
+            cpu_cores: cpuCores,
             tcp_rtt: tcpRtt,
             ws_rtt: wsRtt
         };
@@ -7899,7 +8084,10 @@ document.addEventListener('DOMContentLoaded', function() {
             cpuBar.style.setProperty('--bar-width', (d.cpu || 0) + '%');
             cpuBar.className = 'monitor-bar' + (d.cpu > 80 ? ' danger' : d.cpu > 60 ? ' warning' : '');
         }
-        if (cpuText) cpuText.textContent = (d.cpu || 0) + '%';
+        if (cpuText) {
+            const cores = d.cpu_cores ? d.cpu_cores + 'C/' : '';
+            cpuText.textContent = cores + (d.cpu || 0) + '%';
+        }
 
         if (memBar) {
             memBar.style.setProperty('--bar-width', (d.memPercent || 0) + '%');
