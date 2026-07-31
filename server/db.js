@@ -215,6 +215,27 @@ function createTables() {
         db.run(`ALTER TABLE memos ADD COLUMN width_units INTEGER DEFAULT 1`, () => {});
         db.run(`ALTER TABLE memos ADD COLUMN height_units INTEGER DEFAULT 1`, () => {});
 
+        // 网络报价标签表
+        db.run(`CREATE TABLE IF NOT EXISTS network_quote_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            tag_order INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )`);
+
+        // 网络报价数据表（存每个标签的完整表格数据，JSON 格式）
+        db.run(`CREATE TABLE IF NOT EXISTS network_quote_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            grid_data TEXT NOT NULL DEFAULT '{}',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (tag_id) REFERENCES network_quote_tags(id) ON DELETE CASCADE
+        )`);
+
         createDefaultAdmin();
         // 默认关闭注册功能（INSERT OR IGNORE 不更新已有记录，所以额外用 UPDATE 确保）
         db.run(`INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (1, 'allow_register', 'false')`);

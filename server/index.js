@@ -8,7 +8,8 @@ const https = require('https');
 const http = require('http');
 const net = require('net');
 const { Client } = require('ssh2');
-const iconv = require('iconv-lite');
+let iconv = null;
+try { iconv = require('iconv-lite'); } catch (e) { console.log('[iconv-lite] 未安装，跳过 GBK 解码'); }
 const WebSocket = require('ws');
 const { SocksClient } = require('socks');
 const cookieParser = require('cookie-parser');
@@ -28,6 +29,7 @@ const hostRoutes = require('./routes/hosts');
 const commandRoutes = require('./routes/commands');
 const hostExpenseRoutes = require('./routes/hostExpense');
 const memoRoutes = require('./routes/memos');
+const networkQuoteRoutes = require('./routes/networkQuote');
 const systemFileRoutes = require('./routes/systemFiles');
 
 const app = express();
@@ -208,6 +210,7 @@ app.use('/api/hosts', hostRoutes);
 app.use('/api/commands', commandRoutes);
 app.use('/api/host-expense', hostExpenseRoutes);
 app.use('/api/memos', memoRoutes);
+app.use('/api/network-quote', networkQuoteRoutes);
 app.use('/api/system-files', systemFileRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -573,12 +576,16 @@ function startHttp() {
                             decoded = buf.toString('utf-8');
                             // 检查是否有大量替换字符（UTF-8 解码失败的标志）
                             const replacementCount = (decoded.match(/\uFFFD/g) || []).length;
-                            if (replacementCount > decoded.length * 0.02) {
+                            if (replacementCount > decoded.length * 0.02 && iconv) {
                                 // UTF-8 解码质量差，尝试 GBK
                                 decoded = iconv.decode(buf, 'gbk');
                             }
                         } catch (e) {
-                            decoded = iconv.decode(buf, 'gbk');
+                            if (iconv) {
+                                decoded = iconv.decode(buf, 'gbk');
+                            } else {
+                                decoded = buf.toString('utf-8');
+                            }
                         }
                         return stripAnsi(decoded);
                     }
@@ -633,13 +640,6 @@ function startHttp() {
                                 ECHO: 1,
                                 TTY_OP_ISPEED: 38400,
                                 TTY_OP_OSPEED: 38400
-                            },
-                            env: {
-                                TERM: 'xterm-256color',
-                                LANG: 'zh_CN.UTF-8',
-                                LC_ALL: 'zh_CN.UTF-8',
-                                LANGUAGE: 'zh_CN:en_US',
-                                COLORTERM: 'truecolor'
                             }
                         }, (err, stream) => {
                             if (err) {
@@ -671,9 +671,14 @@ function startHttp() {
 
                     // keyboard-interactive 认证支持（很多服务器要求这种方式）
                     sshConn.on('keyboard-interactive', (name, instructions, lang, prompts, finish) => {
-                        const responses = prompts.map((p) => {
-                            // 如果提示要求密码，填入密码
-                            if (/password/i.test(p.prompt) || /密码/.test(p.prompt)) {
+                        console.log(`[SSH keyboard-interactive ${host}:${port || 22}] prompts:`, prompts.map(p => p.prompt));
+                        const responses = prompts.map((p, idx) => {
+                            // 如果提示要求密码/口令，填入密码
+                            if (/password|passwd|口令|密码/i.test(p.prompt)) {
+                                return password || '';
+                            }
+                            // 第一个非echo提示通常也是密码
+                            if (idx === 0 && !p.echo) {
                                 return password || '';
                             }
                             return '';
@@ -682,24 +687,33 @@ function startHttp() {
                     });
 
                     sshConn.on('error', (err) => {
+                        console.error(`[SSH error ${host}:${port || 22}]`, err.message);
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'error', data: 'SSH 连接错误: ' + err.message }));
                         }
                     });
 
                     sshConn.on('end', () => {
+                        console.log(`[SSH end ${host}:${port || 22}]`);
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'disconnected', data: 'SSH 连接已断开' }));
                         }
                     });
 
+                    sshConn.on('close', (hadError) => {
+                        console.log(`[SSH close ${host}:${port || 22}] hadError=${hadError}`);
+                    });
+
                     const connectOpts = {
+                        host: host,
+                        port: port || 22,
                         username,
                         password: password || '',
-                        readyTimeout: 20000,
+                        readyTimeout: 60000,
                         strictVendor: false,
                         keepaliveInterval: 15000,
                         keepaliveCountMax: 3,
+                        tryKeyboard: true,
                         algorithms: {
                             kex: [
                                 'curve25519-sha256',
@@ -711,39 +725,52 @@ function startHttp() {
                                 'diffie-hellman-group14-sha256',
                                 'diffie-hellman-group15-sha512',
                                 'diffie-hellman-group16-sha512',
-                                'diffie-hellman-group18-sha512',
                                 'diffie-hellman-group14-sha1',
-                                'diffie-hellman-group-exchange-sha1'
+                                'diffie-hellman-group1-sha1'
                             ],
                             cipher: [
-                                'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
-                                'aes128-gcm', 'aes128-gcm@openssh.com',
-                                'aes256-gcm', 'aes256-gcm@openssh.com',
-                                'chacha20-poly1305', 'chacha20-poly1305@openssh.com',
-                                '3des-cbc', 'aes128-cbc', 'aes192-cbc', 'aes256-cbc',
-                                'blowfish-cbc', 'arcfour256', 'arcfour128', 'arcfour',
-                                'cast128-cbc'
+                                'aes128-ctr',
+                                'aes192-ctr',
+                                'aes256-ctr',
+                                'aes128-gcm',
+                                'aes128-gcm@openssh.com',
+                                'aes256-gcm',
+                                'aes256-gcm@openssh.com',
+                                'chacha20-poly1305',
+                                'chacha20-poly1305@openssh.com',
+                                'aes256-cbc',
+                                'aes192-cbc',
+                                'aes128-cbc',
+                                '3des-cbc',
+                                'blowfish-cbc'
                             ],
                             serverHostKey: [
-                                'ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384',
-                                'ecdsa-sha2-nistp521', 'rsa-sha2-512', 'rsa-sha2-256',
-                                'ssh-rsa', 'ssh-dss'
+                                'ssh-ed25519',
+                                'ecdsa-sha2-nistp256',
+                                'ecdsa-sha2-nistp384',
+                                'ecdsa-sha2-nistp521',
+                                'rsa-sha2-512',
+                                'rsa-sha2-256',
+                                'ssh-rsa',
+                                'ssh-dss'
                             ],
                             hmac: [
-                                'hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1',
-                                'hmac-sha1-96', 'hmac-md5', 'hmac-md5-96',
-                                'hmac-sha2-256-etm@openssh.com',
-                                'hmac-sha2-512-etm@openssh.com'
+                                'hmac-sha2-256',
+                                'hmac-sha2-512',
+                                'hmac-sha1',
+                                'hmac-sha1-96',
+                                'hmac-md5',
+                                'hmac-md5-96'
                             ]
                         },
-                        // 启用 keyboard-interactive 认证
-                        tryKeyboard: true
+                        debug: (msg) => {
+                            console.log(`[SSH debug ${host}:${port || 22}]`, msg);
+                        }
                     };
                     if (sock) {
+                        delete connectOpts.host;
+                        delete connectOpts.port;
                         connectOpts.sock = sock;
-                    } else {
-                        connectOpts.host = host;
-                        connectOpts.port = port || 22;
                     }
                     sshConn.connect(connectOpts);
                 } else if (msg.type === 'monitor') {
@@ -971,8 +998,7 @@ function startHttp() {
             } catch (err) {
                 console.error('WebSocket 消息处理错误:', err);
                 if (ws.readyState === WebSocket.OPEN) {
-                    // 不向客户端泄露内部错误细节
-                    ws.send(JSON.stringify({ type: 'error', data: '请求处理失败' }));
+                    ws.send(JSON.stringify({ type: 'error', data: '请求处理失败: ' + err.message }));
                 }
             }
         });

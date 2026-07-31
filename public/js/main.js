@@ -9531,7 +9531,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (!currentMemoTagId) selectMemoTag(memoTags[0].id);
                     } else {
                         document.getElementById('memosList').innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>';
-                        document.getElementById('memoCurrentTagName').textContent = '请选择标签';
+                        const nameEl2 = document.getElementById('memoCurrentTagName');
+                        if (nameEl2) nameEl2.textContent = '请选择标签';
                         if (addItemBtn) addItemBtn.disabled = true;
                     }
                 } catch (err) { console.error('删除标签失败:', err); }
@@ -9620,84 +9621,396 @@ document.addEventListener('DOMContentLoaded', function() {
             document.querySelectorAll('.memo-sub-panel').forEach(p => p.classList.remove('active'));
             const panel = document.getElementById('subview-' + subview);
             if (panel) panel.classList.add('active');
+            if (subview === 'network-quote') loadQuoteTags();
+            if (subview === 'memos') loadMemoTags();
         });
     });
 
-    // ===== 网络报价 Excel 式网格 =====
-    let quoteGrid = {
-        columns: [], // [{ id, name }]
-        rows: [],    // [{ id, cells: { colId: value } }]
-        selectedColId: null,
-        selectedRowId: null,
-        nextColId: 1,
-        nextRowId: 1
-    };
+    // ===== 网络报价（多标签 + 增强表格） =====
+    let quoteTags = [];
+    let currentQuoteTagId = null;
+    let quoteTagManageMode = false;
+    let selectedQuoteTags = new Set();
+    let quoteGrid = null; // 当前标签的网格数据
+    let quoteSaveTimer = null;
 
-    function loadQuoteGrid() {
+    // ---------- 标签管理（完全照抄备忘记录） ----------
+    async function loadQuoteTags() {
         try {
-            const saved = localStorage.getItem('network_quote_grid_' + state.userId);
-            if (saved) {
-                quoteGrid = JSON.parse(saved);
+            const res = await fetch('/api/network-quote/tags');
+            if (!res.ok) throw new Error(await res.text());
+            quoteTags = await res.json();
+            renderQuoteTags();
+            if (quoteTags.length > 0 && !currentQuoteTagId) {
+                selectQuoteTag(quoteTags[0].id);
             }
-        } catch (e) {}
-        renderQuoteGrid();
+        } catch (err) { console.error('加载网络报价标签失败:', err); }
     }
 
-    function saveQuoteGrid() {
-        try {
-            localStorage.setItem('network_quote_grid_' + state.userId, JSON.stringify(quoteGrid));
-            const status = document.getElementById('quoteStatus');
-            if (status) {
-                status.textContent = '✓ 已保存';
-                setTimeout(() => status.textContent = '', 1500);
-            }
-        } catch (e) {}
+    function renderQuoteTags() {
+        const bar = document.getElementById('quoteTabBar');
+        if (!bar) return;
+        const manageBtn = document.getElementById('manageQuoteTagsBtn');
+        const deleteBtn = document.getElementById('deleteQuoteTagsBtn');
+        if (manageBtn) {
+            manageBtn.textContent = quoteTagManageMode ? '完成' : '管理';
+            manageBtn.classList.toggle('active', quoteTagManageMode);
+        }
+        if (deleteBtn) {
+            deleteBtn.disabled = !quoteTagManageMode || selectedQuoteTags.size === 0;
+        }
+        bar.classList.toggle('drag-active', quoteTagManageMode);
+
+        if (!quoteTags.length) {
+            bar.innerHTML = '<div style="color:#909399;font-size:13px;padding:8px 12px;">暂无标签，点击右侧"添加"创建</div>';
+            return;
+        }
+        bar.innerHTML = quoteTags.map(t => {
+            const active = t.id === currentQuoteTagId ? 'active' : '';
+            const checked = selectedQuoteTags.has(t.id) ? 'checked' : '';
+            const checkbox = quoteTagManageMode
+                ? `<input type="checkbox" class="memo-tab-checkbox" data-id="${t.id}" ${checked} />`
+                : '';
+            const draggable = quoteTagManageMode ? 'draggable="true"' : '';
+            return `<div class="memo-tab-item ${active}" data-id="${t.id}" ${draggable}>
+                ${checkbox}
+                <span class="memo-tab-name" data-id="${t.id}">${escapeHtml(t.name)}</span>
+            </div>`;
+        }).join('');
+
+        bar.querySelectorAll('.memo-tab-checkbox').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = parseInt(el.dataset.id);
+                if (el.checked) selectedQuoteTags.add(id);
+                else selectedQuoteTags.delete(id);
+                if (deleteBtn) deleteBtn.disabled = selectedQuoteTags.size === 0;
+            });
+        });
+
+        bar.querySelectorAll('.memo-tab-name').forEach(el => {
+            el.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                const id = parseInt(el.dataset.id);
+                showRenameQuoteTagModal(id);
+            });
+        });
+
+        bar.querySelectorAll('.memo-tab-item').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if (e.target.classList.contains('memo-tab-checkbox')) return;
+                if (quoteTagManageMode) return;
+                selectQuoteTag(parseInt(el.dataset.id));
+            });
+        });
+
+        if (quoteTagManageMode) initQuoteTagDragDrop();
     }
+
+    function initQuoteTagDragDrop() {
+        const bar = document.getElementById('quoteTabBar');
+        if (!bar) return;
+        let draggedId = null;
+        bar.addEventListener('dragstart', (e) => {
+            const item = e.target.closest('.memo-tab-item');
+            if (item) { draggedId = parseInt(item.dataset.id); e.dataTransfer.effectAllowed = 'move'; }
+        });
+        bar.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+        bar.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const target = e.target.closest('.memo-tab-item');
+            if (!target || draggedId === null) return;
+            const targetId = parseInt(target.dataset.id);
+            if (targetId === draggedId) return;
+            const newOrder = quoteTags.map(t => t.id);
+            const fromIdx = newOrder.indexOf(draggedId);
+            const toIdx = newOrder.indexOf(targetId);
+            if (fromIdx < 0 || toIdx < 0) return;
+            newOrder.splice(fromIdx, 1);
+            newOrder.splice(toIdx, 0, draggedId);
+            try {
+                await fetch('/api/network-quote/tags/reorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tagIds: newOrder })
+                });
+                loadQuoteTags();
+            } catch (err) { console.error('排序失败:', err); }
+        });
+    }
+
+    async function selectQuoteTag(tagId) {
+        currentQuoteTagId = tagId;
+        const tag = quoteTags.find(t => t.id === tagId);
+        const nameEl = document.getElementById('quoteCurrentTagName');
+        if (nameEl && tag) nameEl.textContent = tag.name;
+        renderQuoteTags();
+        try {
+            const res = await fetch(`/api/network-quote/tags/${tagId}/grid`);
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            quoteGrid = normalizeQuoteGrid(data);
+            renderQuoteGrid();
+        } catch (err) {
+            quoteGrid = createEmptyQuoteGrid();
+            renderQuoteGrid();
+        }
+    }
+
+    function createEmptyQuoteGrid() {
+        return {
+            columns: [],
+            rows: [],
+            nextColId: 1,
+            nextRowId: 1,
+            colWidths: {},   // colId -> px
+            rowHeights: {},  // rowId -> px
+            styles: {},      // "rowId_colId" -> { align, bold, fontSize, fg, bg }
+            merges: []       // [{ row, col, rowspan, colspan }]
+        };
+    }
+
+    function normalizeQuoteGrid(data) {
+        if (!data || typeof data !== 'object') return createEmptyQuoteGrid();
+        return {
+            columns: Array.isArray(data.columns) ? data.columns : [],
+            rows: Array.isArray(data.rows) ? data.rows : [],
+            nextColId: data.nextColId || 1,
+            nextRowId: data.nextRowId || 1,
+            colWidths: data.colWidths || {},
+            rowHeights: data.rowHeights || {},
+            styles: data.styles || {},
+            merges: Array.isArray(data.merges) ? data.merges : []
+        };
+    }
+
+    function saveQuoteGridDebounced() {
+        if (!currentQuoteTagId) return;
+        if (quoteSaveTimer) clearTimeout(quoteSaveTimer);
+        quoteSaveTimer = setTimeout(async () => {
+            try {
+                await fetch(`/api/network-quote/tags/${currentQuoteTagId}/grid`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(quoteGrid)
+                });
+                const status = document.getElementById('quoteStatus');
+                if (status) { status.textContent = '✓ 已保存'; setTimeout(() => status.textContent = '', 1000); }
+            } catch (e) {}
+        }, 500);
+    }
+
+    function showAddQuoteTagModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:400px;">
+                <div class="modal-header">
+                    <h2>➕ 添加网络报价标签</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>标签名称</label><input type="text" id="newQuoteTagName" placeholder="请输入标签名称" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveNewQuoteTagBtn">添加</button>
+                        <button class="tool-btn cancel-add-quote-tag">取消</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#newQuoteTagName');
+        setTimeout(() => input.focus(), 50);
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-add-quote-tag').onclick = () => overlay.remove();
+        overlay.querySelector('#saveNewQuoteTagBtn').onclick = async () => {
+            const name = input.value.trim();
+            if (!name) { input.focus(); return; }
+            try {
+                const res = await fetch('/api/network-quote/tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                overlay.remove();
+                await loadQuoteTags();
+            } catch (err) { alert('添加失败: ' + err.message); }
+        };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') overlay.querySelector('#saveNewQuoteTagBtn').click(); });
+    }
+
+    function showRenameQuoteTagModal(tagId) {
+        const tag = quoteTags.find(t => t.id === tagId);
+        if (!tag) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay show';
+        overlay.innerHTML = `
+            <div class="modal" style="width:400px;">
+                <div class="modal-header">
+                    <h2>✏️ 重命名标签</h2>
+                    <button class="modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group"><label>标签名称</label><input type="text" id="renameQuoteTagName" value="${escapeAttr(tag.name)}" /></div>
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="saveRenameQuoteTagBtn">保存</button>
+                        <button class="tool-btn cancel-rename-quote-tag">取消</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#renameQuoteTagName');
+        setTimeout(() => { input.focus(); input.select(); }, 50);
+        overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+        overlay.querySelector('.cancel-rename-quote-tag').onclick = () => overlay.remove();
+        overlay.querySelector('#saveRenameQuoteTagBtn').onclick = async () => {
+            const name = input.value.trim();
+            if (!name) { input.focus(); return; }
+            try {
+                const res = await fetch(`/api/network-quote/tags/${tagId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                overlay.remove();
+                await loadQuoteTags();
+            } catch (err) { alert('重命名失败: ' + err.message); }
+        };
+    }
+
+    // 标签按钮
+    const addQuoteTagBtn = document.getElementById('addQuoteTagBtn');
+    if (addQuoteTagBtn) addQuoteTagBtn.addEventListener('click', showAddQuoteTagModal);
+    const manageQuoteTagsBtn = document.getElementById('manageQuoteTagsBtn');
+    if (manageQuoteTagsBtn) manageQuoteTagsBtn.addEventListener('click', () => {
+        quoteTagManageMode = !quoteTagManageMode;
+        if (!quoteTagManageMode) selectedQuoteTags.clear();
+        renderQuoteTags();
+    });
+    const deleteQuoteTagsBtn = document.getElementById('deleteQuoteTagsBtn');
+    if (deleteQuoteTagsBtn) deleteQuoteTagsBtn.addEventListener('click', async () => {
+        if (selectedQuoteTags.size === 0) return;
+        if (!confirm(`确定删除选中的 ${selectedQuoteTags.size} 个标签吗？（关联数据将一并删除）`)) return;
+        try {
+            for (const id of selectedQuoteTags) {
+                await fetch(`/api/network-quote/tags/${id}`, { method: 'DELETE' });
+            }
+            selectedQuoteTags.clear();
+            quoteTagManageMode = false;
+            if (currentQuoteTagId && !quoteTags.find(t => t.id === currentQuoteTagId && selectedQuoteTags.has(t.id) === false)) {
+                currentQuoteTagId = null;
+            }
+            await loadQuoteTags();
+        } catch (err) { alert('删除失败: ' + err.message); }
+    });
+
+    // ---------- 增强表格 ----------
+    let quoteSelection = { startRow: null, startCol: null, endRow: null, endCol: null, selecting: false };
+    let quoteResizing = null;
 
     function renderQuoteGrid() {
         const container = document.getElementById('quoteGridContainer');
         if (!container) return;
-
-        if (quoteGrid.columns.length === 0 && quoteGrid.rows.length === 0) {
-            container.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">点击"添加行"和"添加列"开始创建网络报价表格</div>';
+        if (!quoteGrid || (quoteGrid.columns.length === 0 && quoteGrid.rows.length === 0)) {
+            container.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请先添加行和列开始编辑</div>';
             return;
         }
 
-        let html = '<table class="quote-grid"><thead><tr>';
-        html += '<th class="corner-cell"></th>';
-        quoteGrid.columns.forEach(col => {
-            const selected = quoteGrid.selectedColId === col.id ? 'selected' : '';
-            html += `<th class="${selected}" data-col-id="${col.id}">
+        const g = quoteGrid;
+        let html = '<table class="quote-grid" id="quoteGridTable"><thead><tr>';
+        html += '<th class="corner-cell" style="width:50px;min-width:50px;"></th>';
+        g.columns.forEach(col => {
+            const w = g.colWidths[col.id] || 120;
+            html += `<th data-col-id="${col.id}" style="width:${w}px;min-width:${w}px;position:relative;">
                 <div class="col-header" data-col-id="${col.id}">
                     <span class="col-name" data-col-id="${col.id}">${escapeHtml(col.name)}</span>
                 </div>
+                <div class="col-resize-handle" data-col-id="${col.id}" style="position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;"></div>
             </th>`;
         });
         html += '</tr></thead><tbody>';
 
-        quoteGrid.rows.forEach((row, rowIdx) => {
-            const selected = quoteGrid.selectedRowId === row.id ? 'selected' : '';
-            html += `<tr data-row-id="${row.id}">`;
-            html += `<td class="row-header ${selected}" data-row-id="${row.id}">${rowIdx + 1}</td>`;
-            quoteGrid.columns.forEach(col => {
+        g.rows.forEach((row, rowIdx) => {
+            const h = g.rowHeights[row.id] || 32;
+            html += `<tr data-row-id="${row.id}" style="height:${h}px;">`;
+            html += `<td class="row-header" data-row-id="${row.id}" style="height:${h}px;position:relative;">${rowIdx + 1}
+                <div class="row-resize-handle" data-row-id="${row.id}" style="position:absolute;left:0;bottom:0;width:100%;height:5px;cursor:row-resize;"></div>
+            </td>`;
+            g.columns.forEach(col => {
+                const key = `${row.id}_${col.id}`;
+                const style = g.styles[key] || {};
                 const val = row.cells[col.id] || '';
-                html += `<td data-row-id="${row.id}" data-col-id="${col.id}">
-                    <input type="text" data-row-id="${row.id}" data-col-id="${col.id}" value="${escapeAttr(val)}" />
-                </td>`;
+                const align = style.align || 'left';
+                const bold = style.bold ? 'font-weight:bold;' : '';
+                const fontSize = style.fontSize ? `font-size:${style.fontSize}px;` : '';
+                const fontFamily = style.fontFamily ? `font-family:${style.fontFamily};` : '';
+                const fg = style.fg ? `color:${style.fg};` : '';
+                const bg = style.bg ? `background-color:${style.bg};` : '';
+                const selected = isCellSelected(row.id, col.id) ? 'box-shadow:inset 0 0 0 2px #409eff;' : '';
+                // 检查是否被合并的单元格（非主单元格）
+                const hiddenByMerge = isHiddenByMerge(row.id, col.id);
+                if (hiddenByMerge) {
+                    html += `<td data-row-id="${row.id}" data-col-id="${col.id}" style="display:none;"></td>`;
+                } else {
+                    const merge = getMergeForCell(row.id, col.id);
+                    const rs = merge ? `rowspan="${merge.rowspan}"` : '';
+                    const cs = merge ? `colspan="${merge.colspan}"` : '';
+                    html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
+                        style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}padding:0;position:relative;">
+                        <input type="text" data-row-id="${row.id}" data-col-id="${col.id}" value="${escapeAttr(val)}"
+                            style="width:100%;height:100%;border:none;outline:none;padding:4px 8px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};" />
+                    </td>`;
+                }
             });
             html += '</tr>';
         });
 
         html += '</tbody></table>';
         container.innerHTML = html;
+        bindQuoteGridEvents();
+    }
 
-        // 绑定事件
-        container.querySelectorAll('input[data-row-id]').forEach(inp => {
+    function isCellSelected(rowId, colId) {
+        if (!quoteSelection || quoteSelection.startRow === null) return false;
+        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
+        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+        return rowId >= r1 && rowId <= r2 && colId >= c1 && colId <= c2;
+    }
+
+    function getMergeForCell(rowId, colId) {
+        if (!quoteGrid.merges) return null;
+        return quoteGrid.merges.find(m => m.row === rowId && m.col === colId);
+    }
+
+    function isHiddenByMerge(rowId, colId) {
+        if (!quoteGrid.merges) return false;
+        return quoteGrid.merges.some(m => {
+            if (rowId >= m.row && rowId < m.row + m.rowspan &&
+                colId >= m.col && colId < m.col + m.colspan &&
+                (rowId !== m.row || colId !== m.col)) return true;
+            return false;
+        });
+    }
+
+    function bindQuoteGridEvents() {
+        const container = document.getElementById('quoteGridContainer');
+        if (!container) return;
+        const table = container.querySelector('#quoteGridTable');
+        if (!table) return;
+
+        // 单元格输入
+        table.querySelectorAll('input[data-row-id]').forEach(inp => {
             inp.addEventListener('change', () => {
                 const rowId = parseInt(inp.dataset.rowId);
                 const colId = parseInt(inp.dataset.colId);
                 const row = quoteGrid.rows.find(r => r.id === rowId);
                 if (row) row.cells[colId] = inp.value;
+                saveQuoteGridDebounced();
             });
             inp.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
@@ -9705,41 +10018,62 @@ document.addEventListener('DOMContentLoaded', function() {
                     const rowId = parseInt(inp.dataset.rowId);
                     const colId = parseInt(inp.dataset.colId);
                     const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
-                    const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
-                    // 移到下一行同列
                     if (rowIdx < quoteGrid.rows.length - 1) {
                         const nextRow = quoteGrid.rows[rowIdx + 1];
-                        const nextInput = container.querySelector(`input[data-row-id="${nextRow.id}"][data-col-id="${colId}"]`);
+                        const nextInput = table.querySelector(`input[data-row-id="${nextRow.id}"][data-col-id="${colId}"]`);
                         if (nextInput) nextInput.focus();
                     }
                 } else if (e.key === 'Tab') {
+                    e.preventDefault();
                     const rowId = parseInt(inp.dataset.rowId);
                     const colId = parseInt(inp.dataset.colId);
-                    const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
                     const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
-                    if (e.shiftKey) {
-                        // 上一列
-                        if (colIdx > 0) {
-                            e.preventDefault();
-                            const prevCol = quoteGrid.columns[colIdx - 1];
-                            const prevInput = container.querySelector(`input[data-row-id="${rowId}"][data-col-id="${prevCol.id}"]`);
-                            if (prevInput) prevInput.focus();
-                        }
-                    } else {
-                        // 下一列
-                        if (colIdx < quoteGrid.columns.length - 1) {
-                            e.preventDefault();
-                            const nextCol = quoteGrid.columns[colIdx + 1];
-                            const nextInput = container.querySelector(`input[data-row-id="${rowId}"][data-col-id="${nextCol.id}"]`);
-                            if (nextInput) nextInput.focus();
-                        }
+                    const delta = e.shiftKey ? -1 : 1;
+                    const newIdx = colIdx + delta;
+                    if (newIdx >= 0 && newIdx < quoteGrid.columns.length) {
+                        const targetCol = quoteGrid.columns[newIdx];
+                        const targetInput = table.querySelector(`input[data-row-id="${rowId}"][data-col-id="${targetCol.id}"]`);
+                        if (targetInput) targetInput.focus();
                     }
                 }
             });
+            inp.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                const rowId = parseInt(inp.dataset.rowId);
+                const colId = parseInt(inp.dataset.colId);
+                quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
+            });
         });
 
-        // 列头双击重命名
-        container.querySelectorAll('.col-header').forEach(header => {
+        // 鼠标移动扩展选择
+        table.addEventListener('mousemove', (e) => {
+            if (!quoteSelection.selecting) return;
+            const td = e.target.closest('td[data-row-id]');
+            if (!td) return;
+            const rowId = parseInt(td.dataset.rowId);
+            const colId = parseInt(td.dataset.colId);
+            if (quoteSelection.endRow !== rowId || quoteSelection.endCol !== colId) {
+                quoteSelection.endRow = rowId;
+                quoteSelection.endCol = colId;
+                // 更新选中样式
+                table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
+                    const r = parseInt(cell.dataset.rowId);
+                    const c = parseInt(cell.dataset.colId);
+                    if (isCellSelected(r, c)) {
+                        cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
+                    } else {
+                        cell.style.boxShadow = '';
+                    }
+                });
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (quoteSelection.selecting) quoteSelection.selecting = false;
+        });
+
+        // 列双击重命名
+        table.querySelectorAll('.col-header').forEach(header => {
             header.addEventListener('dblclick', () => {
                 const colId = parseInt(header.dataset.colId);
                 const col = quoteGrid.columns.find(c => c.id === colId);
@@ -9753,8 +10087,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.focus();
                 input.select();
                 const finish = () => {
-                    const newName = input.value.trim() || col.name;
-                    col.name = newName;
+                    col.name = input.value.trim() || col.name;
+                    saveQuoteGridDebounced();
                     renderQuoteGrid();
                 };
                 input.addEventListener('blur', finish);
@@ -9763,107 +10097,262 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (e.key === 'Escape') { input.value = col.name; input.blur(); }
                 });
             });
-            header.addEventListener('click', () => {
-                const colId = parseInt(header.dataset.colId);
-                quoteGrid.selectedColId = quoteGrid.selectedColId === colId ? null : colId;
-                quoteGrid.selectedRowId = null;
-                renderQuoteGrid();
+        });
+
+        // 列宽调整
+        table.querySelectorAll('.col-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                const colId = parseInt(handle.dataset.colId);
+                const startX = e.clientX;
+                const startW = quoteGrid.colWidths[colId] || 120;
+                const onMove = (ev) => {
+                    const newW = Math.max(50, startW + (ev.clientX - startX));
+                    quoteGrid.colWidths[colId] = newW;
+                    const ths = table.querySelectorAll(`th[data-col-id="${colId}"]`);
+                    ths.forEach(th => { th.style.width = newW + 'px'; th.style.minWidth = newW + 'px'; });
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    saveQuoteGridDebounced();
+                    renderQuoteGrid();
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
             });
         });
 
-        // 行头点击选中
-        container.querySelectorAll('.row-header').forEach(rh => {
-            rh.addEventListener('click', () => {
-                const rowId = parseInt(rh.dataset.rowId);
-                quoteGrid.selectedRowId = quoteGrid.selectedRowId === rowId ? null : rowId;
-                quoteGrid.selectedColId = null;
-                renderQuoteGrid();
+        // 行高调整
+        table.querySelectorAll('.row-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                const rowId = parseInt(handle.dataset.rowId);
+                const startY = e.clientY;
+                const startH = quoteGrid.rowHeights[rowId] || 32;
+                const onMove = (ev) => {
+                    const newH = Math.max(24, startH + (ev.clientY - startY));
+                    quoteGrid.rowHeights[rowId] = newH;
+                    const tr = table.querySelector(`tr[data-row-id="${rowId}"]`);
+                    if (tr) tr.style.height = newH + 'px';
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    saveQuoteGridDebounced();
+                    renderQuoteGrid();
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
             });
         });
+    }
+
+    // 对选中区域应用样式
+    function applyQuoteStyle(key, value) {
+        if (!quoteSelection || quoteSelection.startRow === null) return;
+        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
+        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+        for (let rid of quoteGrid.rows.filter(r => r.id >= r1 && r.id <= r2).map(r => r.id)) {
+            for (let cid of quoteGrid.columns.filter(c => c.id >= c1 && c.id <= c2).map(c => c.id)) {
+                const skey = `${rid}_${cid}`;
+                if (!quoteGrid.styles[skey]) quoteGrid.styles[skey] = {};
+                if (value === null || value === undefined) delete quoteGrid.styles[skey][key];
+                else quoteGrid.styles[skey][key] = value;
+            }
+        }
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
     }
 
     // 工具栏按钮
     const quoteAddRowBtn = document.getElementById('quoteAddRowBtn');
     if (quoteAddRowBtn) quoteAddRowBtn.addEventListener('click', () => {
+        if (!quoteGrid) quoteGrid = createEmptyQuoteGrid();
         const row = { id: quoteGrid.nextRowId++, cells: {} };
         quoteGrid.columns.forEach(col => { row.cells[col.id] = ''; });
         quoteGrid.rows.push(row);
+        saveQuoteGridDebounced();
         renderQuoteGrid();
     });
 
     const quoteAddColBtn = document.getElementById('quoteAddColBtn');
     if (quoteAddColBtn) quoteAddColBtn.addEventListener('click', () => {
+        if (!quoteGrid) quoteGrid = createEmptyQuoteGrid();
         const colName = prompt('请输入列名：', '列' + (quoteGrid.columns.length + 1));
         if (colName === null) return;
         const col = { id: quoteGrid.nextColId++, name: colName.trim() || ('列' + quoteGrid.columns.length) };
         quoteGrid.columns.push(col);
+        quoteGrid.colWidths[col.id] = 120;
         quoteGrid.rows.forEach(row => { row.cells[col.id] = ''; });
+        saveQuoteGridDebounced();
         renderQuoteGrid();
     });
 
     const quoteDelRowBtn = document.getElementById('quoteDelRowBtn');
     if (quoteDelRowBtn) quoteDelRowBtn.addEventListener('click', () => {
-        if (quoteGrid.selectedRowId === null) {
-            setStatus('请先点击左侧行号选中要删除的行');
-            return;
-        }
-        quoteGrid.rows = quoteGrid.rows.filter(r => r.id !== quoteGrid.selectedRowId);
-        quoteGrid.selectedRowId = null;
+        if (!quoteSelection || quoteSelection.startRow === null) { setStatus('请先选中要删除的行'); return; }
+        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
+        quoteGrid.rows = quoteGrid.rows.filter(r => r.id < r1 || r.id > r2);
+        quoteSelection = { startRow: null, startCol: null, endRow: null, endCol: null, selecting: false };
+        saveQuoteGridDebounced();
         renderQuoteGrid();
     });
 
     const quoteDelColBtn = document.getElementById('quoteDelColBtn');
     if (quoteDelColBtn) quoteDelColBtn.addEventListener('click', () => {
-        if (quoteGrid.selectedColId === null) {
-            setStatus('请先点击列头选中要删除的列');
-            return;
-        }
-        quoteGrid.columns = quoteGrid.columns.filter(c => c.id !== quoteGrid.selectedColId);
-        quoteGrid.rows.forEach(row => { delete row.cells[quoteGrid.selectedColId]; });
-        quoteGrid.selectedColId = null;
+        if (!quoteSelection || quoteSelection.startCol === null) { setStatus('请先选中要删除的列'); return; }
+        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+        quoteGrid.columns = quoteGrid.columns.filter(c => c.id < c1 || c.id > c2);
+        quoteGrid.rows.forEach(row => {
+            for (let cid = c1; cid <= c2; cid++) delete row.cells[cid];
+        });
+        quoteSelection = { startRow: null, startCol: null, endRow: null, endCol: null, selecting: false };
+        saveQuoteGridDebounced();
         renderQuoteGrid();
     });
 
-    const quoteSaveBtn = document.getElementById('quoteSaveBtn');
-    if (quoteSaveBtn) quoteSaveBtn.addEventListener('click', saveQuoteGrid);
+    // 格式按钮
+    const quoteAlignSelect = document.getElementById('quoteAlignSelect');
+    if (quoteAlignSelect) quoteAlignSelect.addEventListener('change', () => {
+        if (quoteAlignSelect.value) applyQuoteStyle('align', quoteAlignSelect.value);
+        quoteAlignSelect.value = '';
+    });
 
-    // 导入导出
+    const quoteFontSizeSel = document.getElementById('quoteFontSize');
+    if (quoteFontSizeSel) quoteFontSizeSel.addEventListener('change', () => {
+        if (quoteFontSizeSel.value) applyQuoteStyle('fontSize', parseInt(quoteFontSizeSel.value));
+        quoteFontSizeSel.value = '';
+    });
+
+    const quoteFontFamilySel = document.getElementById('quoteFontFamily');
+    if (quoteFontFamilySel) quoteFontFamilySel.addEventListener('change', () => {
+        if (quoteFontFamilySel.value) applyQuoteStyle('fontFamily', quoteFontFamilySel.value);
+        quoteFontFamilySel.value = '';
+    });
+
+    const quoteBoldBtn = document.getElementById('quoteBoldBtn');
+    if (quoteBoldBtn) quoteBoldBtn.addEventListener('click', () => {
+        // 切换：检查第一个单元格是否已加粗
+        if (!quoteSelection || quoteSelection.startRow === null) return;
+        const key = `${quoteSelection.startRow}_${quoteSelection.startCol}`;
+        const curBold = quoteGrid.styles[key] && quoteGrid.styles[key].bold;
+        applyQuoteStyle('bold', !curBold);
+    });
+
+    const quoteFgColor = document.getElementById('quoteFgColor');
+    if (quoteFgColor) quoteFgColor.addEventListener('input', () => { applyQuoteStyle('fg', quoteFgColor.value); });
+
+    const quoteBgColor = document.getElementById('quoteBgColor');
+    if (quoteBgColor) quoteBgColor.addEventListener('input', () => { applyQuoteStyle('bg', quoteBgColor.value); });
+
+    // 合并/拆分
+    const quoteMergeBtn = document.getElementById('quoteMergeBtn');
+    if (quoteMergeBtn) quoteMergeBtn.addEventListener('click', () => {
+        if (!quoteSelection || quoteSelection.startRow === null) return;
+        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
+        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+        if (r1 === r2 && c1 === c2) return;
+        // 清除范围内的旧合并
+        quoteGrid.merges = quoteGrid.merges.filter(m =>
+            !(m.row >= r1 && m.row < r2 + 1 && m.col >= c1 && m.col < c2 + 1));
+        quoteGrid.merges.push({ row: r1, col: c1, rowspan: r2 - r1 + 1, colspan: c2 - c1 + 1 });
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
+    });
+
+    const quoteSplitBtn = document.getElementById('quoteSplitBtn');
+    if (quoteSplitBtn) quoteSplitBtn.addEventListener('click', () => {
+        if (!quoteSelection || quoteSelection.startRow === null) return;
+        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+        quoteGrid.merges = quoteGrid.merges.filter(m => !(m.row === r1 && m.col === c1));
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
+    });
+
+    // 导出 Excel
     const quoteExportBtn = document.getElementById('quoteExportBtn');
     if (quoteExportBtn) quoteExportBtn.addEventListener('click', async () => {
-        if (quoteGrid.columns.length === 0 && quoteGrid.rows.length === 0) {
-            setStatus('表格为空，无法导出');
-            return;
-        }
-        try { await loadXLSX(); } catch (e) {}
-        const headers = quoteGrid.columns.map(c => c.name);
-        const data = quoteGrid.rows.map(row => {
-            const obj = {};
-            quoteGrid.columns.forEach(col => { obj[col.name] = row.cells[col.id] || ''; });
-            return obj;
-        });
+        if (!quoteGrid || quoteGrid.columns.length === 0) { setStatus('表格为空'); return; }
         try {
+            await loadXLSX();
             const XLSX = window.XLSX;
+            const headers = quoteGrid.columns.map(c => c.name);
+            const data = quoteGrid.rows.map(row => {
+                const obj = {};
+                quoteGrid.columns.forEach(col => { obj[col.name] = row.cells[col.id] || ''; });
+                return obj;
+            });
             const ws = XLSX.utils.json_to_sheet(data, { header: headers });
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, '网络报价');
             XLSX.writeFile(wb, '网络报价.xlsx');
             setStatus('✅ 导出成功');
             setTimeout(() => setStatus(''), 1500);
-        } catch (e) {
-            // CSV 降级
-            const csv = [headers.join(','), ...data.map(row => headers.map(h => `"${(row[h] || '').replace(/"/g, '""')}"`).join(','))].join('\n');
-            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = '网络报价.csv';
-            a.click();
-            URL.revokeObjectURL(url);
-            setStatus('✅ 导出成功 (CSV)');
-            setTimeout(() => setStatus(''), 1500);
-        }
+        } catch (e) { setStatus('导出失败: ' + e.message); }
     });
 
+    // 导出图片（用表格快照，尽量简洁）
+    const quoteCopyImgBtn = document.getElementById('quoteCopyImgBtn');
+    if (quoteCopyImgBtn) quoteCopyImgBtn.addEventListener('click', async () => {
+        const table = document.querySelector('#quoteGridContainer .quote-grid');
+        if (!table) { setStatus('没有可导出的表格'); return; }
+        try {
+            // 用 SVG foreignObject 快照
+            const rect = table.getBoundingClientRect();
+            const w = Math.ceil(rect.width);
+            const h = Math.ceil(rect.height);
+            const clone = table.cloneNode(true);
+            // 把计算后的样式内联
+            const html = clone.outerHTML;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+                <foreignObject width="100%" height="100%">
+                    <div xmlns="http://www.w3.org/1999/xhtml">${html}</div>
+                </foreignObject>
+            </svg>`;
+            const img = new Image();
+            const blob = new Blob([svg], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            img.onload = async () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(url);
+                try {
+                    canvas.toBlob(async (b) => {
+                        try {
+                            await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]);
+                            setStatus('✅ 已复制到剪贴板');
+                            setTimeout(() => setStatus(''), 1500);
+                        } catch (e) {
+                            // 降级：下载图片
+                            const a = document.createElement('a');
+                            a.href = canvas.toDataURL('image/png');
+                            a.download = '网络报价.png';
+                            a.click();
+                            setStatus('✅ 已保存为图片');
+                            setTimeout(() => setStatus(''), 1500);
+                        }
+                    }, 'image/png');
+                } catch (e) { setStatus('导出图片失败: ' + e.message); }
+            };
+            img.onerror = () => { setStatus('导出图片失败'); URL.revokeObjectURL(url); };
+            img.src = url;
+        } catch (e) { setStatus('导出图片失败: ' + e.message); }
+    });
+
+    // 导入
     const quoteImportBtn = document.getElementById('quoteImportBtn');
     if (quoteImportBtn) quoteImportBtn.addEventListener('click', () => {
         const input = document.createElement('input');
@@ -9881,17 +10370,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
                 if (json.length === 0) { setStatus('文件为空'); return; }
 
-                const headers = json[0].map(h => String(h || ''));
+                if (!quoteGrid) quoteGrid = createEmptyQuoteGrid();
                 quoteGrid.columns = [];
+                quoteGrid.rows = [];
                 quoteGrid.nextColId = 1;
+                quoteGrid.nextRowId = 1;
+                quoteGrid.styles = {};
+                quoteGrid.merges = [];
+                quoteGrid.colWidths = {};
+                quoteGrid.rowHeights = {};
+
+                const headers = json[0].map(h => String(h || ''));
                 headers.forEach(h => {
                     if (h.trim()) {
-                        quoteGrid.columns.push({ id: quoteGrid.nextColId++, name: h });
+                        const col = { id: quoteGrid.nextColId++, name: h };
+                        quoteGrid.columns.push(col);
+                        quoteGrid.colWidths[col.id] = 120;
                     }
                 });
-
-                quoteGrid.rows = [];
-                quoteGrid.nextRowId = 1;
                 for (let i = 1; i < json.length; i++) {
                     const row = { id: quoteGrid.nextRowId++, cells: {} };
                     quoteGrid.columns.forEach((col, idx) => {
@@ -9899,20 +10395,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                     quoteGrid.rows.push(row);
                 }
-
+                saveQuoteGridDebounced();
                 renderQuoteGrid();
-                saveQuoteGrid();
                 setStatus('✅ 导入成功');
                 setTimeout(() => setStatus(''), 1500);
-            } catch (err) {
-                setStatus('导入失败: ' + err.message);
-            }
+            } catch (err) { setStatus('导入失败: ' + err.message); }
         };
         input.click();
     });
 
-    // 加载保存的网格
-    loadQuoteGrid();
+    // 加载标签
+    loadQuoteTags();
 
     init();
 });
