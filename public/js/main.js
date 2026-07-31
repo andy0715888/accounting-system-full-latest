@@ -3187,8 +3187,14 @@ document.addEventListener('DOMContentLoaded', function() {
             updateTabCache(state.currentTabId);
             renderTable(false);
             setStatus('添加成功');
-            const firstInput = document.querySelector('.cell-input');
-            if (firstInput) firstInput.focus();
+            // 滚动到最后一行，focus 最后一行的输入框（避免跳转到顶部）
+            const rows = document.querySelectorAll('tr[data-id]');
+            if (rows.length > 0) {
+                const lastRow = rows[rows.length - 1];
+                lastRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                const lastInput = lastRow.querySelector('.cell-input');
+                if (lastInput) setTimeout(() => lastInput.focus(), 100);
+            }
         } catch (err) { setStatus('添加失败: ' + err.message); }
     }
 
@@ -5874,23 +5880,25 @@ document.addEventListener('DOMContentLoaded', function() {
         const tabType = tab ? tab.tab_type : 'dedicated';
         const isShared = tabType === 'shared';
         const isDedicated = tabType === 'dedicated';
-        if (!isShared && !isDedicated) { contextMenu.style.display = 'none'; return; }
+        const isSimple = tabType === 'simple';
+        if (!isShared && !isDedicated && !isSimple) { contextMenu.style.display = 'none'; return; }
 
         e.preventDefault();
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
-        // 独享标签：在上方插入一行/多行
-        ctxInsertMultiAbove.style.display = isDedicated ? 'block' : 'none';
-        ctxInsertAbove.style.display = isDedicated ? 'block' : 'none';
+        // 独享/共享标签：在上方插入一行/多行
+        ctxInsertMultiAbove.style.display = (isDedicated || isShared) ? 'block' : 'none';
+        ctxInsertAbove.style.display = (isDedicated || isShared) ? 'block' : 'none';
         // 共享标签菜单项
         ctxAddClient.style.display = (isShared && recordType === 'server') ? 'block' : 'none';
         ctxCopyClient.style.display = (isShared && recordType === 'client') ? 'block' : 'none';
         ctxPasteClient.style.display = (isShared && recordType === 'server' && state.copiedClientRecordId) ? 'block' : 'none';
-        // 独享标签菜单项
+        // 服务器行剪切/粘贴（独享、共享、记账标签都支持，跨标签粘贴）
+        const isServerRow = recordType === 'server';
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
-        ctxCopyServer.style.display = (isDedicated && recordType === 'server') ? 'block' : 'none';
-        ctxPasteServer.style.display = (isDedicated && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
+        ctxCopyServer.style.display = isServerRow ? 'block' : 'none';
+        ctxPasteServer.style.display = (isServerRow && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
         // 共享标签：服务器行不显示删除（有客户关联），客户行可以删除；独享标签不显示删除
         const canDelete = isShared ? (recordType === 'client') : false;
         ctxDeleteRecord.style.display = canDelete ? 'block' : 'none';
@@ -5902,6 +5910,20 @@ document.addEventListener('DOMContentLoaded', function() {
         contextMenu.style.display = 'block';
         contextMenu.style.left = e.clientX + 'px';
         contextMenu.style.top = e.clientY + 'px';
+        // 防止菜单被任务栏/视口底部遮挡
+        setTimeout(() => {
+            const menuRect = contextMenu.getBoundingClientRect();
+            const viewportH = window.innerHeight || document.documentElement.clientHeight || 800;
+            if (menuRect.bottom > viewportH - 8) {
+                const newTop = Math.max(8, e.clientY - menuRect.height);
+                contextMenu.style.top = newTop + 'px';
+            }
+            const viewportW = window.innerWidth || document.documentElement.clientWidth || 1200;
+            if (menuRect.right > viewportW - 8) {
+                const newLeft = Math.max(8, viewportW - menuRect.width - 8);
+                contextMenu.style.left = newLeft + 'px';
+            }
+        }, 0);
     });
 
     document.addEventListener('click', function() { contextMenu.style.display = 'none'; });
@@ -6073,7 +6095,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             setStatus('粘贴中...');
             // Write copied server info into target (empty) row
-            const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info'];
+            const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'fee'];
             const updateData = { ...targetRecord.data };
             SERVER_FIELDS.forEach(key => {
                 updateData[key] = state.copiedServerData[key] || '';
@@ -8728,6 +8750,77 @@ document.addEventListener('DOMContentLoaded', function() {
                 openFileManager();
             }
         };
+
+        // SSH 终端右键菜单：清屏 + 粘贴并运行
+        const terminalCtxMenu = document.createElement('div');
+        terminalCtxMenu.className = 'context-menu';
+        terminalCtxMenu.style.display = 'none';
+        terminalCtxMenu.style.minWidth = '140px';
+        terminalCtxMenu.innerHTML = `
+            <div class="context-menu-item" data-action="clear">🗑️ 清屏</div>
+            <div class="context-menu-item" data-action="paste">📋 粘贴并运行</div>
+        `;
+        document.body.appendChild(terminalCtxMenu);
+
+        const terminalContainer = document.getElementById('terminalContainer');
+        terminalContainer.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            terminalCtxMenu.style.display = 'block';
+            terminalCtxMenu.style.left = e.clientX + 'px';
+            terminalCtxMenu.style.top = e.clientY + 'px';
+            // 防止超出视口
+            setTimeout(() => {
+                const rect = terminalCtxMenu.getBoundingClientRect();
+                const vh = window.innerHeight || 800;
+                const vw = window.innerWidth || 1200;
+                if (rect.bottom > vh - 8) {
+                    terminalCtxMenu.style.top = Math.max(8, e.clientY - rect.height) + 'px';
+                }
+                if (rect.right > vw - 8) {
+                    terminalCtxMenu.style.left = Math.max(8, vw - rect.width - 8) + 'px';
+                }
+            }, 0);
+        });
+
+        terminalCtxMenu.querySelectorAll('.context-menu-item').forEach(item => {
+            item.addEventListener('click', async () => {
+                const action = item.dataset.action;
+                terminalCtxMenu.style.display = 'none';
+                if (action === 'clear') {
+                    // 清屏：清除当前连接的终端内容
+                    const conn = getActiveConn();
+                    if (conn) conn.terminalContent = '';
+                    const output = document.getElementById('terminalOutput');
+                    if (output) output.innerHTML = '';
+                } else if (action === 'paste') {
+                    // 粘贴并运行：读取剪贴板，发送到 SSH
+                    let text = '';
+                    try {
+                        if (navigator.clipboard && navigator.clipboard.readText) {
+                            text = await navigator.clipboard.readText();
+                        }
+                    } catch (e) {}
+                    if (!text) {
+                        setStatus('无法读取剪贴板，请使用 Ctrl+V');
+                        return;
+                    }
+                    const ws = getActiveWs();
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const lines = text.split(/\r?\n/);
+                        for (let i = 0; i < lines.length; i++) {
+                            const line = lines[i];
+                            if (line.trim() !== '' || i < lines.length - 1) {
+                                ws.send(JSON.stringify({ type: 'input', data: line + '\n' }));
+                            }
+                        }
+                    } else {
+                        setStatus('SSH 未连接，无法发送命令');
+                    }
+                }
+            });
+        });
+
+        document.addEventListener('click', () => { terminalCtxMenu.style.display = 'none'; });
 
         const terminalBgColor = document.getElementById('terminalBgColor');
         const terminalBgColorText = document.getElementById('terminalBgColorText');
