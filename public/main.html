@@ -241,26 +241,54 @@
                 </div>
             </div>
             <div id="view-memos" class="view-panel">
-                <h2 class="memo-title">📝备忘记录</h2>
-                <div class="memo-tab-bar-container">
-                    <div class="memo-tab-bar" id="memoTabBar"></div>
-                    <div class="memo-tab-actions">
-                        <button class="tab-action-btn primary" id="addMemoTagBtn">添加</button>
-                        <button class="tab-action-btn" id="manageMemoTagsBtn">管理</button>
-                        <button class="tab-action-btn danger" id="deleteMemoTagsBtn" disabled>删除</button>
+                <div class="memo-sub-nav">
+                    <div class="memo-sub-tab active" data-subview="memos">📝 备忘记录</div>
+                    <div class="memo-sub-tab" data-subview="network-quote">💻 网络报价</div>
+                </div>
+                <div id="subview-memos" class="memo-sub-panel active">
+                    <h2 class="memo-title">📝备忘记录</h2>
+                    <div class="memo-tab-bar-container">
+                        <div class="memo-tab-bar" id="memoTabBar"></div>
+                        <div class="memo-tab-actions">
+                            <button class="tab-action-btn primary" id="addMemoTagBtn">添加</button>
+                            <button class="tab-action-btn" id="manageMemoTagsBtn">管理</button>
+                            <button class="tab-action-btn danger" id="deleteMemoTagsBtn" disabled>删除</button>
+                        </div>
+                    </div>
+                    <div class="memo-toolbar">
+                        <div class="toolbar-left">
+                            <h3 id="memoCurrentTagName" style="margin:0;color:#303133;">请选择标签</h3>
+                        </div>
+                        <div class="toolbar-right">
+                            <button class="tool-btn primary" id="addMemoItemBtn" disabled>➕ 添加备忘</button>
+                            <button class="tool-btn" id="manageMemoItemsBtn">⚙️ 管理备忘</button>
+                        </div>
+                    </div>
+                    <div class="memos-list" id="memosList">
+                        <div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>
                     </div>
                 </div>
-                <div class="memo-toolbar">
-                    <div class="toolbar-left">
-                        <h3 id="memoCurrentTagName" style="margin:0;color:#303133;">请选择标签</h3>
+                <div id="subview-network-quote" class="memo-sub-panel">
+                    <h2 class="memo-title">💻 网络报价</h2>
+                    <div class="quote-toolbar">
+                        <div class="toolbar-left">
+                            <button class="tool-btn primary" id="quoteAddRowBtn">➕ 添加行</button>
+                            <button class="tool-btn primary" id="quoteAddColBtn">➕ 添加列</button>
+                            <button class="tool-btn danger" id="quoteDelRowBtn">🗑️ 删除行</button>
+                            <button class="tool-btn danger" id="quoteDelColBtn">🗑️ 删除列</button>
+                            <span class="tool-divider"></span>
+                            <button class="tool-btn" id="quoteImportBtn">📥 导入</button>
+                            <button class="tool-btn" id="quoteExportBtn">📤 导出</button>
+                            <span class="tool-divider"></span>
+                            <button class="tool-btn" id="quoteSaveBtn">💾 保存</button>
+                        </div>
+                        <div class="toolbar-right">
+                            <span id="quoteStatus" style="color:#909399;font-size:13px;"></span>
+                        </div>
                     </div>
-                    <div class="toolbar-right">
-                        <button class="tool-btn primary" id="addMemoItemBtn" disabled>➕ 添加备忘</button>
-                        <button class="tool-btn" id="manageMemoItemsBtn">⚙️ 管理备忘</button>
+                    <div class="quote-grid-container" id="quoteGridContainer">
+                        <div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">点击"添加行"和"添加列"开始创建网络报价表格</div>
                     </div>
-                </div>
-                <div class="memos-list" id="memosList">
-                    <div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请从上方选择一个标签开始使用备忘记录</div>
                 </div>
             </div>
             <div id="view-stats" class="view-panel">

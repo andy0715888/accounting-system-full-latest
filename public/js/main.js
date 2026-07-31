@@ -9611,5 +9611,308 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // ===== 辅助工具子导航切换 =====
+    document.querySelectorAll('.memo-sub-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.memo-sub-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const subview = tab.dataset.subview;
+            document.querySelectorAll('.memo-sub-panel').forEach(p => p.classList.remove('active'));
+            const panel = document.getElementById('subview-' + subview);
+            if (panel) panel.classList.add('active');
+        });
+    });
+
+    // ===== 网络报价 Excel 式网格 =====
+    let quoteGrid = {
+        columns: [], // [{ id, name }]
+        rows: [],    // [{ id, cells: { colId: value } }]
+        selectedColId: null,
+        selectedRowId: null,
+        nextColId: 1,
+        nextRowId: 1
+    };
+
+    function loadQuoteGrid() {
+        try {
+            const saved = localStorage.getItem('network_quote_grid_' + state.userId);
+            if (saved) {
+                quoteGrid = JSON.parse(saved);
+            }
+        } catch (e) {}
+        renderQuoteGrid();
+    }
+
+    function saveQuoteGrid() {
+        try {
+            localStorage.setItem('network_quote_grid_' + state.userId, JSON.stringify(quoteGrid));
+            const status = document.getElementById('quoteStatus');
+            if (status) {
+                status.textContent = '✓ 已保存';
+                setTimeout(() => status.textContent = '', 1500);
+            }
+        } catch (e) {}
+    }
+
+    function renderQuoteGrid() {
+        const container = document.getElementById('quoteGridContainer');
+        if (!container) return;
+
+        if (quoteGrid.columns.length === 0 && quoteGrid.rows.length === 0) {
+            container.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">点击"添加行"和"添加列"开始创建网络报价表格</div>';
+            return;
+        }
+
+        let html = '<table class="quote-grid"><thead><tr>';
+        html += '<th class="corner-cell"></th>';
+        quoteGrid.columns.forEach(col => {
+            const selected = quoteGrid.selectedColId === col.id ? 'selected' : '';
+            html += `<th class="${selected}" data-col-id="${col.id}">
+                <div class="col-header" data-col-id="${col.id}">
+                    <span class="col-name" data-col-id="${col.id}">${escapeHtml(col.name)}</span>
+                </div>
+            </th>`;
+        });
+        html += '</tr></thead><tbody>';
+
+        quoteGrid.rows.forEach((row, rowIdx) => {
+            const selected = quoteGrid.selectedRowId === row.id ? 'selected' : '';
+            html += `<tr data-row-id="${row.id}">`;
+            html += `<td class="row-header ${selected}" data-row-id="${row.id}">${rowIdx + 1}</td>`;
+            quoteGrid.columns.forEach(col => {
+                const val = row.cells[col.id] || '';
+                html += `<td data-row-id="${row.id}" data-col-id="${col.id}">
+                    <input type="text" data-row-id="${row.id}" data-col-id="${col.id}" value="${escapeAttr(val)}" />
+                </td>`;
+            });
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+        // 绑定事件
+        container.querySelectorAll('input[data-row-id]').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const rowId = parseInt(inp.dataset.rowId);
+                const colId = parseInt(inp.dataset.colId);
+                const row = quoteGrid.rows.find(r => r.id === rowId);
+                if (row) row.cells[colId] = inp.value;
+            });
+            inp.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const rowId = parseInt(inp.dataset.rowId);
+                    const colId = parseInt(inp.dataset.colId);
+                    const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
+                    const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
+                    // 移到下一行同列
+                    if (rowIdx < quoteGrid.rows.length - 1) {
+                        const nextRow = quoteGrid.rows[rowIdx + 1];
+                        const nextInput = container.querySelector(`input[data-row-id="${nextRow.id}"][data-col-id="${colId}"]`);
+                        if (nextInput) nextInput.focus();
+                    }
+                } else if (e.key === 'Tab') {
+                    const rowId = parseInt(inp.dataset.rowId);
+                    const colId = parseInt(inp.dataset.colId);
+                    const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
+                    const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
+                    if (e.shiftKey) {
+                        // 上一列
+                        if (colIdx > 0) {
+                            e.preventDefault();
+                            const prevCol = quoteGrid.columns[colIdx - 1];
+                            const prevInput = container.querySelector(`input[data-row-id="${rowId}"][data-col-id="${prevCol.id}"]`);
+                            if (prevInput) prevInput.focus();
+                        }
+                    } else {
+                        // 下一列
+                        if (colIdx < quoteGrid.columns.length - 1) {
+                            e.preventDefault();
+                            const nextCol = quoteGrid.columns[colIdx + 1];
+                            const nextInput = container.querySelector(`input[data-row-id="${rowId}"][data-col-id="${nextCol.id}"]`);
+                            if (nextInput) nextInput.focus();
+                        }
+                    }
+                }
+            });
+        });
+
+        // 列头双击重命名
+        container.querySelectorAll('.col-header').forEach(header => {
+            header.addEventListener('dblclick', () => {
+                const colId = parseInt(header.dataset.colId);
+                const col = quoteGrid.columns.find(c => c.id === colId);
+                if (!col) return;
+                const nameSpan = header.querySelector('.col-name');
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'col-rename-input';
+                input.value = col.name;
+                nameSpan.replaceWith(input);
+                input.focus();
+                input.select();
+                const finish = () => {
+                    const newName = input.value.trim() || col.name;
+                    col.name = newName;
+                    renderQuoteGrid();
+                };
+                input.addEventListener('blur', finish);
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                    if (e.key === 'Escape') { input.value = col.name; input.blur(); }
+                });
+            });
+            header.addEventListener('click', () => {
+                const colId = parseInt(header.dataset.colId);
+                quoteGrid.selectedColId = quoteGrid.selectedColId === colId ? null : colId;
+                quoteGrid.selectedRowId = null;
+                renderQuoteGrid();
+            });
+        });
+
+        // 行头点击选中
+        container.querySelectorAll('.row-header').forEach(rh => {
+            rh.addEventListener('click', () => {
+                const rowId = parseInt(rh.dataset.rowId);
+                quoteGrid.selectedRowId = quoteGrid.selectedRowId === rowId ? null : rowId;
+                quoteGrid.selectedColId = null;
+                renderQuoteGrid();
+            });
+        });
+    }
+
+    // 工具栏按钮
+    const quoteAddRowBtn = document.getElementById('quoteAddRowBtn');
+    if (quoteAddRowBtn) quoteAddRowBtn.addEventListener('click', () => {
+        const row = { id: quoteGrid.nextRowId++, cells: {} };
+        quoteGrid.columns.forEach(col => { row.cells[col.id] = ''; });
+        quoteGrid.rows.push(row);
+        renderQuoteGrid();
+    });
+
+    const quoteAddColBtn = document.getElementById('quoteAddColBtn');
+    if (quoteAddColBtn) quoteAddColBtn.addEventListener('click', () => {
+        const colName = prompt('请输入列名：', '列' + (quoteGrid.columns.length + 1));
+        if (colName === null) return;
+        const col = { id: quoteGrid.nextColId++, name: colName.trim() || ('列' + quoteGrid.columns.length) };
+        quoteGrid.columns.push(col);
+        quoteGrid.rows.forEach(row => { row.cells[col.id] = ''; });
+        renderQuoteGrid();
+    });
+
+    const quoteDelRowBtn = document.getElementById('quoteDelRowBtn');
+    if (quoteDelRowBtn) quoteDelRowBtn.addEventListener('click', () => {
+        if (quoteGrid.selectedRowId === null) {
+            setStatus('请先点击左侧行号选中要删除的行');
+            return;
+        }
+        quoteGrid.rows = quoteGrid.rows.filter(r => r.id !== quoteGrid.selectedRowId);
+        quoteGrid.selectedRowId = null;
+        renderQuoteGrid();
+    });
+
+    const quoteDelColBtn = document.getElementById('quoteDelColBtn');
+    if (quoteDelColBtn) quoteDelColBtn.addEventListener('click', () => {
+        if (quoteGrid.selectedColId === null) {
+            setStatus('请先点击列头选中要删除的列');
+            return;
+        }
+        quoteGrid.columns = quoteGrid.columns.filter(c => c.id !== quoteGrid.selectedColId);
+        quoteGrid.rows.forEach(row => { delete row.cells[quoteGrid.selectedColId]; });
+        quoteGrid.selectedColId = null;
+        renderQuoteGrid();
+    });
+
+    const quoteSaveBtn = document.getElementById('quoteSaveBtn');
+    if (quoteSaveBtn) quoteSaveBtn.addEventListener('click', saveQuoteGrid);
+
+    // 导入导出
+    const quoteExportBtn = document.getElementById('quoteExportBtn');
+    if (quoteExportBtn) quoteExportBtn.addEventListener('click', async () => {
+        if (quoteGrid.columns.length === 0 && quoteGrid.rows.length === 0) {
+            setStatus('表格为空，无法导出');
+            return;
+        }
+        try { await loadXLSX(); } catch (e) {}
+        const headers = quoteGrid.columns.map(c => c.name);
+        const data = quoteGrid.rows.map(row => {
+            const obj = {};
+            quoteGrid.columns.forEach(col => { obj[col.name] = row.cells[col.id] || ''; });
+            return obj;
+        });
+        try {
+            const XLSX = window.XLSX;
+            const ws = XLSX.utils.json_to_sheet(data, { header: headers });
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '网络报价');
+            XLSX.writeFile(wb, '网络报价.xlsx');
+            setStatus('✅ 导出成功');
+            setTimeout(() => setStatus(''), 1500);
+        } catch (e) {
+            // CSV 降级
+            const csv = [headers.join(','), ...data.map(row => headers.map(h => `"${(row[h] || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '网络报价.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+            setStatus('✅ 导出成功 (CSV)');
+            setTimeout(() => setStatus(''), 1500);
+        }
+    });
+
+    const quoteImportBtn = document.getElementById('quoteImportBtn');
+    if (quoteImportBtn) quoteImportBtn.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xlsx,.xls,.csv';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                await loadXLSX();
+                const XLSX = window.XLSX;
+                const data = await file.arrayBuffer();
+                const wb = XLSX.read(data);
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                if (json.length === 0) { setStatus('文件为空'); return; }
+
+                const headers = json[0].map(h => String(h || ''));
+                quoteGrid.columns = [];
+                quoteGrid.nextColId = 1;
+                headers.forEach(h => {
+                    if (h.trim()) {
+                        quoteGrid.columns.push({ id: quoteGrid.nextColId++, name: h });
+                    }
+                });
+
+                quoteGrid.rows = [];
+                quoteGrid.nextRowId = 1;
+                for (let i = 1; i < json.length; i++) {
+                    const row = { id: quoteGrid.nextRowId++, cells: {} };
+                    quoteGrid.columns.forEach((col, idx) => {
+                        row.cells[col.id] = json[i][idx] !== undefined ? String(json[i][idx]) : '';
+                    });
+                    quoteGrid.rows.push(row);
+                }
+
+                renderQuoteGrid();
+                saveQuoteGrid();
+                setStatus('✅ 导入成功');
+                setTimeout(() => setStatus(''), 1500);
+            } catch (err) {
+                setStatus('导入失败: ' + err.message);
+            }
+        };
+        input.click();
+    });
+
+    // 加载保存的网格
+    loadQuoteGrid();
+
     init();
 });
