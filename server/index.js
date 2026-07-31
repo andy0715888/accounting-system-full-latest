@@ -669,24 +669,13 @@ function startHttp() {
                         });
                     });
 
-                    // keyboard-interactive 认证支持（很多服务器只启用这种方式）
-                    // 注意：不配置 password 字段，所有密码都通过 keyboard-interactive 填入
-                    // 这样 password 和 keyboard-interactive 两种认证方式都能兼容
+                    // keyboard-interactive 认证支持（很多服务器要求这种方式）
                     sshConn.on('keyboard-interactive', (name, instructions, lang, prompts, finish) => {
                         console.log(`[SSH keyboard-interactive ${host}:${port || 22}] prompts:`, prompts.map(p => p.prompt));
                         const responses = prompts.map((p, idx) => {
-                            // 如果提示要求密码/口令，填入密码
-                            if (/password|passwd|口令|密码/i.test(p.prompt)) {
-                                return password || '';
-                            }
-                            // 第一个非echo提示通常也是密码
-                            if (idx === 0 && !p.echo) {
-                                return password || '';
-                            }
-                            // yes/no 提示（如首次连接主机密钥确认）
-                            if (/yes\/no|y\/n/i.test(p.prompt) && p.echo) {
-                                return 'yes';
-                            }
+                            if (/password|passwd|口令|密码/i.test(p.prompt)) return password || '';
+                            if (idx === 0 && !p.echo) return password || '';
+                            if (/yes\/no|y\/n/i.test(p.prompt) && p.echo) return 'yes';
                             return '';
                         });
                         finish(responses);
@@ -714,44 +703,12 @@ function startHttp() {
                         host: host,
                         port: port || 22,
                         username,
+                        password: password || '',
                         readyTimeout: 60000,
                         strictVendor: false,
                         keepaliveInterval: 15000,
                         keepaliveCountMax: 3,
-                        // 使用 authHandler 完全手动控制认证流程，确保兼容各种服务器
-                        authHandler: function authHandler(methodsLeft, partialSuccess, callback) {
-                            console.log(`[SSH auth ${host}:${port || 22}] 服务器支持的方法:`, methodsLeft, 'partialSuccess:', partialSuccess);
-                            // 优先尝试 password
-                            if (methodsLeft.includes('password')) {
-                                console.log(`[SSH auth ${host}:${port || 22}] 尝试 password 认证`);
-                                callback({
-                                    type: 'password',
-                                    password: password || ''
-                                });
-                                return;
-                            }
-                            // 再尝试 keyboard-interactive
-                            if (methodsLeft.includes('keyboard-interactive')) {
-                                console.log(`[SSH auth ${host}:${port || 22}] 尝试 keyboard-interactive 认证`);
-                                callback({
-                                    type: 'keyboard-interactive',
-                                    prompt: function(name, instructions, lang, prompts, finish) {
-                                        console.log(`[SSH keyboard-interactive ${host}:${port || 22}] prompts:`, prompts.map(p => p.prompt));
-                                        const responses = prompts.map((p, idx) => {
-                                            if (/password|passwd|口令|密码/i.test(p.prompt)) return password || '';
-                                            if (idx === 0 && !p.echo) return password || '';
-                                            if (/yes\/no|y\/n/i.test(p.prompt) && p.echo) return 'yes';
-                                            return '';
-                                        });
-                                        finish(responses);
-                                    }
-                                });
-                                return;
-                            }
-                            // 没有支持的方法
-                            console.log(`[SSH auth ${host}:${port || 22}] 没有支持的认证方法`);
-                            callback(null);
-                        },
+                        tryKeyboard: true,
                         debug: (msg) => {
                             console.log(`[SSH debug ${host}:${port || 22}]`, msg);
                         }
