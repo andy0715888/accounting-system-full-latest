@@ -736,8 +736,6 @@ function startHttp() {
                                 'aes128-gcm@openssh.com',
                                 'aes256-gcm',
                                 'aes256-gcm@openssh.com',
-                                'chacha20-poly1305',
-                                'chacha20-poly1305@openssh.com',
                                 'aes256-cbc',
                                 'aes192-cbc',
                                 'aes128-cbc',

@@ -9643,6 +9643,11 @@ document.addEventListener('DOMContentLoaded', function() {
             renderQuoteTags();
             if (quoteTags.length > 0 && !currentQuoteTagId) {
                 selectQuoteTag(quoteTags[0].id);
+            } else if (quoteTags.length === 0) {
+                // 没有标签，清空状态
+                currentQuoteTagId = null;
+                quoteGrid = null;
+                renderQuoteGrid();
             }
         } catch (err) { console.error('加载网络报价标签失败:', err); }
     }
@@ -9914,6 +9919,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderQuoteGrid() {
         const container = document.getElementById('quoteGridContainer');
         if (!container) return;
+        const toolbar = document.getElementById('quoteToolbar');
+        // 有标签选中时显示工具栏
+        if (toolbar) {
+            if (currentQuoteTagId) toolbar.style.display = '';
+            else toolbar.style.display = 'none';
+        }
         if (!quoteGrid || (quoteGrid.columns.length === 0 && quoteGrid.rows.length === 0)) {
             container.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;font-size:14px;">请先添加行和列开始编辑</div>';
             return;
@@ -10038,10 +10049,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
             inp.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
+                // 左键且不是已经在编辑状态的情况下允许选择
+                if (e.button !== 0) return;
                 const rowId = parseInt(inp.dataset.rowId);
                 const colId = parseInt(inp.dataset.colId);
                 quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
+                e.stopPropagation();
+            });
+        });
+
+        // td 上的 mousedown（点击单元格空白区域时触发）
+        table.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+            td.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                // 避免列宽/行高调整时触发
+                if (e.target.classList.contains('col-resize-handle') || e.target.classList.contains('row-resize-handle')) return;
+                const rowId = parseInt(td.dataset.rowId);
+                const colId = parseInt(td.dataset.colId);
+                if (isHiddenByMerge(rowId, colId)) return;
+                quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
+                // 立即更新视觉
+                table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
+                    const r = parseInt(cell.dataset.rowId);
+                    const c = parseInt(cell.dataset.colId);
+                    if (isCellSelected(r, c)) {
+                        cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
+                    } else {
+                        cell.style.boxShadow = '';
+                    }
+                });
+                e.preventDefault();
             });
         });
 
@@ -10299,56 +10336,154 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { setStatus('导出失败: ' + e.message); }
     });
 
-    // 导出图片（用表格快照，尽量简洁）
+    // 导出图片（用 Canvas 直接绘制，更可靠）
     const quoteCopyImgBtn = document.getElementById('quoteCopyImgBtn');
     if (quoteCopyImgBtn) quoteCopyImgBtn.addEventListener('click', async () => {
-        const table = document.querySelector('#quoteGridContainer .quote-grid');
-        if (!table) { setStatus('没有可导出的表格'); return; }
+        if (!quoteGrid || quoteGrid.columns.length === 0) { setStatus('表格为空'); return; }
         try {
-            // 用 SVG foreignObject 快照
-            const rect = table.getBoundingClientRect();
-            const w = Math.ceil(rect.width);
-            const h = Math.ceil(rect.height);
-            const clone = table.cloneNode(true);
-            // 把计算后的样式内联
-            const html = clone.outerHTML;
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-                <foreignObject width="100%" height="100%">
-                    <div xmlns="http://www.w3.org/1999/xhtml">${html}</div>
-                </foreignObject>
-            </svg>`;
-            const img = new Image();
-            const blob = new Blob([svg], { type: 'image/svg+xml' });
-            const url = URL.createObjectURL(blob);
-            img.onload = async () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, w, h);
-                ctx.drawImage(img, 0, 0);
-                URL.revokeObjectURL(url);
-                try {
-                    canvas.toBlob(async (b) => {
-                        try {
-                            await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]);
-                            setStatus('✅ 已复制到剪贴板');
-                            setTimeout(() => setStatus(''), 1500);
-                        } catch (e) {
-                            // 降级：下载图片
-                            const a = document.createElement('a');
-                            a.href = canvas.toDataURL('image/png');
-                            a.download = '网络报价.png';
-                            a.click();
-                            setStatus('✅ 已保存为图片');
-                            setTimeout(() => setStatus(''), 1500);
+            const g = quoteGrid;
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const padding = 20;
+            const rowHeaderW = 50; // 行号列宽
+            const defaultRowH = 32;
+
+            // 计算列宽
+            const colWidths = g.columns.map(c => g.colWidths[c.id] || 120);
+            const totalWidth = rowHeaderW + colWidths.reduce((a, b) => a + b, 0) + padding * 2;
+
+            // 计算行高和行数（考虑合并）
+            const rowHeights = g.rows.map(r => g.rowHeights[r.id] || defaultRowH);
+            const totalHeight = defaultRowH + rowHeights.reduce((a, b) => a + b, 0) + padding * 2;
+
+            canvas.width = totalWidth;
+            canvas.height = totalHeight;
+
+            // 白色背景
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, totalWidth, totalHeight);
+            ctx.strokeStyle = '#dcdfe6';
+            ctx.lineWidth = 1;
+
+            // 绘制表头行
+            let x = padding;
+            const headerY = padding;
+            // 左上角单元格
+            ctx.fillStyle = '#f5f7fa';
+            ctx.fillRect(x, headerY, rowHeaderW, defaultRowH);
+            ctx.strokeRect(x + 0.5, headerY + 0.5, rowHeaderW, defaultRowH);
+            x += rowHeaderW;
+
+            // 列名
+            ctx.fillStyle = '#f5f7fa';
+            g.columns.forEach((col, idx) => {
+                ctx.fillRect(x, headerY, colWidths[idx], defaultRowH);
+                ctx.strokeRect(x + 0.5, headerY + 0.5, colWidths[idx], defaultRowH);
+                ctx.fillStyle = '#303133';
+                ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif';
+                const text = col.name;
+                const tw = ctx.measureText(text).width;
+                ctx.fillText(text, x + colWidths[idx] / 2 - tw / 2, headerY + defaultRowH / 2 + 5);
+                ctx.fillStyle = '#f5f7fa';
+                x += colWidths[idx];
+            });
+
+            // 绘制数据行
+            let y = padding + defaultRowH;
+            g.rows.forEach((row, rowIdx) => {
+                x = padding;
+                const rh = rowHeights[rowIdx];
+                // 行号
+                ctx.fillStyle = '#f5f7fa';
+                ctx.fillRect(x, y, rowHeaderW, rh);
+                ctx.strokeRect(x + 0.5, y + 0.5, rowHeaderW, rh);
+                ctx.fillStyle = '#606266';
+                ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+                const rowNo = String(rowIdx + 1);
+                const rnw = ctx.measureText(rowNo).width;
+                ctx.fillText(rowNo, x + rowHeaderW / 2 - rnw / 2, y + rh / 2 + 4);
+                x += rowHeaderW;
+
+                g.columns.forEach((col, colIdx) => {
+                    const cw = colWidths[colIdx];
+                    const skey = `${row.id}_${col.id}`;
+                    const style = g.styles[skey] || {};
+
+                    // 检查是否被合并隐藏
+                    if (isHiddenByMerge(row.id, col.id)) {
+                        x += cw;
+                        return;
+                    }
+
+                    // 检查合并
+                    const merge = getMergeForCell(row.id, col.id);
+                    let cellW = cw;
+                    let cellH = rh;
+                    if (merge) {
+                        for (let i = 1; i < merge.colspan; i++) {
+                            const ci = colIdx + i;
+                            if (ci < colWidths.length) cellW += colWidths[ci];
                         }
-                    }, 'image/png');
-                } catch (e) { setStatus('导出图片失败: ' + e.message); }
-            };
-            img.onerror = () => { setStatus('导出图片失败'); URL.revokeObjectURL(url); };
-            img.src = url;
+                        for (let i = 1; i < merge.rowspan; i++) {
+                            const ri = rowIdx + i;
+                            if (ri < rowHeights.length) cellH += rowHeights[ri];
+                        }
+                    }
+
+                    // 背景色
+                    if (style.bg) {
+                        ctx.fillStyle = style.bg;
+                        ctx.fillRect(x, y, cellW, cellH);
+                    }
+                    ctx.strokeRect(x + 0.5, y + 0.5, cellW, cellH);
+
+                    // 内容
+                    const val = row.cells[col.id] || '';
+                    if (val) {
+                        const bold = style.bold ? 'bold ' : '';
+                        const fs = style.fontSize || 13;
+                        const ff = style.fontFamily ? `"${style.fontFamily}", ` : '';
+                        ctx.font = `${bold}${fs}px -apple-system, BlinkMacSystemFont, ${ff}"Microsoft YaHei", sans-serif`;
+                        ctx.fillStyle = style.fg || '#303133';
+                        const align = style.align || 'left';
+                        const tw = ctx.measureText(val).width;
+                        let tx;
+                        if (align === 'center') tx = x + cellW / 2 - tw / 2;
+                        else if (align === 'right') tx = x + cellW - 8 - tw;
+                        else tx = x + 8;
+                        const ty = y + cellH / 2 + (fs / 3);
+                        // 裁剪文字防止溢出
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.rect(x + 2, y + 2, cellW - 4, cellH - 4);
+                        ctx.clip();
+                        ctx.fillText(val, tx, ty);
+                        ctx.restore();
+                    }
+
+                    x += cw;
+                });
+                y += rh;
+            });
+
+            // 导出
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            try {
+                if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+                    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    setStatus('✅ 已复制到剪贴板');
+                } else {
+                    throw new Error('剪贴板不可用');
+                }
+            } catch (e) {
+                // 降级：下载图片
+                const a = document.createElement('a');
+                a.href = canvas.toDataURL('image/png');
+                a.download = '网络报价.png';
+                a.click();
+                setStatus('✅ 已保存为图片（剪贴板不可用）');
+            }
+            setTimeout(() => setStatus(''), 2000);
         } catch (e) { setStatus('导出图片失败: ' + e.message); }
     });
 
