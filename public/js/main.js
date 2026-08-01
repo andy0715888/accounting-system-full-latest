@@ -5603,8 +5603,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!colors) return;
         const navbar = document.querySelector('.navbar');
         const menubar = document.querySelector('.top-menu');
-        if (navbar && colors.navbar) navbar.style.backgroundColor = colors.navbar;
-        if (menubar && colors.menubar) menubar.style.backgroundColor = colors.menubar;
+        // 用 background 覆盖 CSS 中的渐变（linear-gradient）
+        if (navbar && colors.navbar) navbar.style.background = colors.navbar;
+        if (menubar && colors.menubar) menubar.style.background = colors.menubar;
     }
 
     // --- 事件绑定 ---
@@ -9987,6 +9988,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // ---------- 增强表格 ----------
     let quoteSelection = { startRow: null, startCol: null, endRow: null, endCol: null, selecting: false };
     let quoteResizing = null;
+    let quoteGridEventsBound = false; // 防止 document 事件重复绑定
 
     function renderQuoteGrid() {
         const container = document.getElementById('quoteGridContainer');
@@ -10151,30 +10153,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateQuoteSelectionVisual();
             
             // 如果点击的是 input，不阻止默认行为（允许编辑）
-            // 但也不要让它干扰多选
             if (e.target.tagName !== 'INPUT') {
                 e.preventDefault();
             }
         });
 
-        // 鼠标移动扩展选择（绑定在 document 上，确保不会丢失）
-        document.addEventListener('mousemove', (e) => {
-            if (!quoteSelection || !quoteSelection.selecting) return;
-            const td = e.target.closest && e.target.closest('td[data-row-id][data-col-id]');
-            if (!td) return;
-            const rowId = parseInt(td.dataset.rowId);
-            const colId = parseInt(td.dataset.colId);
-            if (isHiddenByMerge(rowId, colId)) return;
-            if (quoteSelection.endRow !== rowId || quoteSelection.endCol !== colId) {
-                quoteSelection.endRow = rowId;
-                quoteSelection.endCol = colId;
-                updateQuoteSelectionVisual();
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (quoteSelection && quoteSelection.selecting) quoteSelection.selecting = false;
-        });
+        // document 上的 mousemove/mouseup 只绑定一次（见函数外）
 
         // 列双击重命名
         table.querySelectorAll('.col-header').forEach(header => {
@@ -10249,6 +10233,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
+        });
+    }
+
+    // document 上的 mousemove/mouseup（只绑定一次）
+    if (!quoteGridEventsBound) {
+        quoteGridEventsBound = true;
+        document.addEventListener('mousemove', (e) => {
+            if (!quoteSelection || !quoteSelection.selecting) return;
+            const td = e.target.closest && e.target.closest('td[data-row-id][data-col-id]');
+            if (!td) return;
+            const rowId = parseInt(td.dataset.rowId);
+            const colId = parseInt(td.dataset.colId);
+            if (isHiddenByMerge(rowId, colId)) return;
+            if (quoteSelection.endRow !== rowId || quoteSelection.endCol !== colId) {
+                quoteSelection.endRow = rowId;
+                quoteSelection.endCol = colId;
+                // 更新视觉
+                const table = document.querySelector('#quoteGridTable');
+                if (table) {
+                    table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
+                        const r = parseInt(cell.dataset.rowId);
+                        const c = parseInt(cell.dataset.colId);
+                        if (isCellSelected(r, c)) {
+                            cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
+                        } else {
+                            cell.style.boxShadow = '';
+                        }
+                    });
+                }
+            }
+        });
+        document.addEventListener('mouseup', () => {
+            if (quoteSelection && quoteSelection.selecting) quoteSelection.selecting = false;
         });
     }
 
@@ -10357,28 +10374,34 @@ document.addEventListener('DOMContentLoaded', function() {
     // 合并/拆分
     const quoteMergeBtn = document.getElementById('quoteMergeBtn');
     if (quoteMergeBtn) quoteMergeBtn.addEventListener('click', () => {
-        if (!quoteSelection || quoteSelection.startRow === null) return;
+        if (!quoteSelection || quoteSelection.startRow === null) { setStatus('请先选中要合并的单元格（鼠标拖拽选择）'); return; }
         const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
         const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
         const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
         const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
-        if (r1 === r2 && c1 === c2) return;
+        if (r1 === r2 && c1 === c2) { setStatus('请选中至少2个单元格'); return; }
         // 清除范围内的旧合并
         quoteGrid.merges = quoteGrid.merges.filter(m =>
             !(m.row >= r1 && m.row < r2 + 1 && m.col >= c1 && m.col < c2 + 1));
         quoteGrid.merges.push({ row: r1, col: c1, rowspan: r2 - r1 + 1, colspan: c2 - c1 + 1 });
         saveQuoteGridDebounced();
         renderQuoteGrid();
+        setStatus('✅ 已合并单元格');
+        setTimeout(() => setStatus(''), 1500);
     });
 
     const quoteSplitBtn = document.getElementById('quoteSplitBtn');
     if (quoteSplitBtn) quoteSplitBtn.addEventListener('click', () => {
-        if (!quoteSelection || quoteSelection.startRow === null) return;
+        if (!quoteSelection || quoteSelection.startRow === null) { setStatus('请先选中要拆分的单元格'); return; }
         const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
         const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+        const hasMerge = quoteGrid.merges.some(m => m.row === r1 && m.col === c1);
+        if (!hasMerge) { setStatus('选中的单元格没有合并'); return; }
         quoteGrid.merges = quoteGrid.merges.filter(m => !(m.row === r1 && m.col === c1));
         saveQuoteGridDebounced();
         renderQuoteGrid();
+        setStatus('✅ 已拆分单元格');
+        setTimeout(() => setStatus(''), 1500);
     });
 
     // 导出 Excel
@@ -10412,16 +10435,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             const padding = 20;
-            const rowHeaderW = 50; // 行号列宽
             const defaultRowH = 32;
 
             // 计算列宽
             const colWidths = g.columns.map(c => g.colWidths[c.id] || 120);
-            const totalWidth = rowHeaderW + colWidths.reduce((a, b) => a + b, 0) + padding * 2;
+            const totalWidth = colWidths.reduce((a, b) => a + b, 0) + padding * 2;
 
-            // 计算行高和行数（考虑合并）
+            // 计算行高
             const rowHeights = g.rows.map(r => g.rowHeights[r.id] || defaultRowH);
-            const totalHeight = defaultRowH + rowHeights.reduce((a, b) => a + b, 0) + padding * 2;
+            const totalHeight = rowHeights.reduce((a, b) => a + b, 0) + padding * 2;
 
             canvas.width = totalWidth;
             canvas.height = totalHeight;
@@ -10432,44 +10454,11 @@ document.addEventListener('DOMContentLoaded', function() {
             ctx.strokeStyle = '#dcdfe6';
             ctx.lineWidth = 1;
 
-            // 绘制表头行
-            let x = padding;
-            const headerY = padding;
-            // 左上角单元格
-            ctx.fillStyle = '#f5f7fa';
-            ctx.fillRect(x, headerY, rowHeaderW, defaultRowH);
-            ctx.strokeRect(x + 0.5, headerY + 0.5, rowHeaderW, defaultRowH);
-            x += rowHeaderW;
-
-            // 列名
-            ctx.fillStyle = '#f5f7fa';
-            g.columns.forEach((col, idx) => {
-                ctx.fillRect(x, headerY, colWidths[idx], defaultRowH);
-                ctx.strokeRect(x + 0.5, headerY + 0.5, colWidths[idx], defaultRowH);
-                ctx.fillStyle = '#303133';
-                ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif';
-                const text = col.name;
-                const tw = ctx.measureText(text).width;
-                ctx.fillText(text, x + colWidths[idx] / 2 - tw / 2, headerY + defaultRowH / 2 + 5);
-                ctx.fillStyle = '#f5f7fa';
-                x += colWidths[idx];
-            });
-
-            // 绘制数据行
-            let y = padding + defaultRowH;
+            // 绘制数据行（不包含列名和行号）
+            let y = padding;
             g.rows.forEach((row, rowIdx) => {
-                x = padding;
+                let x = padding;
                 const rh = rowHeights[rowIdx];
-                // 行号
-                ctx.fillStyle = '#f5f7fa';
-                ctx.fillRect(x, y, rowHeaderW, rh);
-                ctx.strokeRect(x + 0.5, y + 0.5, rowHeaderW, rh);
-                ctx.fillStyle = '#606266';
-                ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-                const rowNo = String(rowIdx + 1);
-                const rnw = ctx.measureText(rowNo).width;
-                ctx.fillText(rowNo, x + rowHeaderW / 2 - rnw / 2, y + rh / 2 + 4);
-                x += rowHeaderW;
 
                 g.columns.forEach((col, colIdx) => {
                     const cw = colWidths[colIdx];

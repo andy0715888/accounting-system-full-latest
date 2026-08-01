@@ -671,6 +671,8 @@ function startHttp() {
                     });
 
                     // keyboard-interactive 认证支持
+                    // 注意：不设置 password 字段，完全通过 keyboard-interactive 填入密码
+                    // 这样可以兼容 password 和 keyboard-interactive 两种认证方式的服务器
                     sshConn.on('keyboard-interactive', (name, instructions, lang, prompts, finish) => {
                         const responses = prompts.map((p, idx) => {
                             if (/password|passwd|口令|密码/i.test(p.prompt)) return password || '';
@@ -703,7 +705,6 @@ function startHttp() {
                         host: host,
                         port: port || 22,
                         username,
-                        password: password || '',
                         readyTimeout: 30000,
                         strictVendor: false,
                         tryKeyboard: true
