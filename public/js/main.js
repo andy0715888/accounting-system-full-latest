@@ -1738,12 +1738,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const nowClearing = hadFilter && !isFilterActive(colKey);
                 const tw = $('#tableWrapper');
+                // 保存滚动位置和页码，清除筛选时保持位置
                 const savedScrollTop = (tw && nowClearing) ? tw.scrollTop : 0;
+                const savedPage = state.page;
                 if (!nowClearing) state.page = 1;
                 loadRecords(state.currentTabId).then(() => {
                     renderTable(false);
                     if (tw && nowClearing) {
-                        requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
+                        // 尝试保持筛选前的位置：先恢复page，再恢复scrollTop
+                        if (savedPage && savedPage <= state.totalPages) state.page = savedPage;
+                        if (state.page !== savedPage) {
+                            loadRecords(state.currentTabId).then(() => {
+                                renderTable(false);
+                                requestAnimationFrame(() => {
+                                    if (tw) tw.scrollTop = savedScrollTop;
+                                });
+                            });
+                        } else {
+                            requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
+                        }
                     }
                 });
                 return;
@@ -1771,10 +1784,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 const tw = $('#tableWrapper');
                 const savedScrollTop = tw ? tw.scrollTop : 0;
+                const savedPage = state.page;
                 loadRecords(state.currentTabId).then(() => {
                     renderTable(false);
                     if (tw) {
-                        requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
+                        // 尝试恢复原来的页码和滚动位置
+                        if (savedPage && savedPage <= state.totalPages) state.page = savedPage;
+                        if (state.page !== savedPage) {
+                            loadRecords(state.currentTabId).then(() => {
+                                renderTable(false);
+                                requestAnimationFrame(() => {
+                                    if (tw) tw.scrollTop = savedScrollTop;
+                                });
+                            });
+                        } else {
+                            requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
+                        }
                     }
                 });
                 return;
@@ -10045,8 +10070,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const cs = merge ? `colspan="${merge.colspan}"` : '';
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
                         style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}padding:0;position:relative;">
-                        <input type="text" data-row-id="${row.id}" data-col-id="${col.id}" value="${escapeAttr(val)}"
-                            style="width:100%;height:100%;border:none;outline:none;padding:4px 8px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};" />
+                        <textarea data-row-id="${row.id}" data-col-id="${col.id}"
+                            style="width:100%;height:100%;border:none;outline:none;padding:4px 8px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:hidden;vertical-align:middle;line-height:1.4;"
+                        >${escapeHtml(val)}</textarea>
                     </td>`;
                 }
             });
@@ -10102,8 +10128,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // 单元格输入
-        table.querySelectorAll('input[data-row-id]').forEach(inp => {
-            // 阻止 input 的 mousedown 冒泡，防止干扰选择逻辑
+        table.querySelectorAll('textarea[data-row-id]').forEach(inp => {
+            // 阻止 textarea 的 mousedown 冒泡，防止干扰选择逻辑
             inp.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -10125,23 +10151,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
                 updateQuoteSelectionVisual();
             });
-            inp.addEventListener('change', () => {
+            inp.addEventListener('input', () => {
                 const rowId = parseInt(inp.dataset.rowId);
                 const colId = parseInt(inp.dataset.colId);
                 const row = quoteGrid.rows.find(r => r.id === rowId);
                 if (row) row.cells[colId] = inp.value;
                 saveQuoteGridDebounced();
+                // 自动调整高度
+                inp.style.height = 'auto';
+                inp.style.height = Math.max(32, inp.scrollHeight) + 'px';
             });
             inp.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
+                // Alt+Enter 换行；Enter 跳转到下一行
+                if (e.key === 'Enter' && !e.altKey) {
                     e.preventDefault();
                     const rowId = parseInt(inp.dataset.rowId);
                     const colId = parseInt(inp.dataset.colId);
                     const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
                     if (rowIdx < quoteGrid.rows.length - 1) {
                         const nextRow = quoteGrid.rows[rowIdx + 1];
-                        const nextInput = table.querySelector(`input[data-row-id="${nextRow.id}"][data-col-id="${colId}"]`);
-                        if (nextInput) nextInput.focus();
+                        const nextInput = table.querySelector(`textarea[data-row-id="${nextRow.id}"][data-col-id="${colId}"]`);
+                        if (nextInput) {
+                            nextInput.focus();
+                            // 光标定位到末尾
+                            const len = nextInput.value.length;
+                            nextInput.setSelectionRange(len, len);
+                        }
                     }
                 } else if (e.key === 'Tab') {
                     e.preventDefault();
@@ -10152,8 +10187,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const newIdx = colIdx + delta;
                     if (newIdx >= 0 && newIdx < quoteGrid.columns.length) {
                         const targetCol = quoteGrid.columns[newIdx];
-                        const targetInput = table.querySelector(`input[data-row-id="${rowId}"][data-col-id="${targetCol.id}"]`);
-                        if (targetInput) targetInput.focus();
+                        const targetInput = table.querySelector(`textarea[data-row-id="${rowId}"][data-col-id="${targetCol.id}"]`);
+                        if (targetInput) {
+                            targetInput.focus();
+                            const len = targetInput.value.length;
+                            targetInput.setSelectionRange(len, len);
+                        }
                     }
                 }
             });
@@ -10306,12 +10345,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 const isClick = dx < 5 && dy < 5;
                 quoteSelection.selecting = false;
                 if (isClick && quoteSelection._startRow !== undefined) {
-                    // 单击：聚焦 input 进行编辑
+                    // 单击：聚焦 textarea 进行编辑，光标定位到末尾，不选中文本
                     setTimeout(() => {
                         const input = document.querySelector(
-                            `input[data-row-id="${quoteSelection._startRow}"][data-col-id="${quoteSelection._startCol}"]`
+                            `textarea[data-row-id="${quoteSelection._startRow}"][data-col-id="${quoteSelection._startCol}"]`
                         );
-                        if (input) { input.focus(); input.select(); }
+                        if (input) {
+                            input.focus();
+                            // 光标定位到末尾，不选中文本
+                            const len = input.value.length;
+                            input.setSelectionRange(len, len);
+                        }
                     }, 0);
                 }
             }

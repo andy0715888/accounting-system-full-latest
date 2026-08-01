@@ -704,35 +704,12 @@ function startHttp() {
                         host: host,
                         port: port || 22,
                         username,
+                        password: password || '',
                         readyTimeout: 30000,
                         strictVendor: false,
-                        tryKeyboard: true,
-                        // 使用 authHandler 精确控制认证流程，先 password 后 keyboard-interactive
-                        authHandler: function (methodsLeft, partialSuccess, callback) {
-                            console.log(`[SSH auth ${host}:${port || 22}] methodsLeft=${methodsLeft.join(',')}, partialSuccess=${partialSuccess}`);
-                            if (methodsLeft.includes('password')) {
-                                callback({
-                                    type: 'password',
-                                    username: username,
-                                    password: password || ''
-                                });
-                            } else if (methodsLeft.includes('keyboard-interactive')) {
-                                callback({
-                                    type: 'keyboard-interactive',
-                                    username: username,
-                                    prompts: []
-                                });
-                            } else {
-                                callback();
-                            }
-                        },
-                        debug: (dbg) => {
-                            if (dbg.includes('authentication') || dbg.includes('keyboard') || dbg.includes('password') || dbg.includes('Handshake') || dbg.includes('algorithm')) {
-                                console.log(`[SSH debug ${host}:${port || 22}] ${dbg}`);
-                            }
-                        }
+                        tryKeyboard: true
                     };
-                    console.log(`[SSH connect ${host}:${port || 22}] user=${username}, pwdLen=${password ? password.length : 0}, authHandler=custom`);
+                    console.log(`[SSH connect ${host}:${port || 22}] user=${username}, pwdLen=${password ? password.length : 0}`);
                     if (sock) {
                         delete connectOpts.host;
                         delete connectOpts.port;
