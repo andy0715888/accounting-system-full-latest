@@ -565,6 +565,7 @@ function startHttp() {
                         ws.send(JSON.stringify({ type: 'error', data: '缺少连接参数' }));
                         return;
                     }
+                    console.log(`[SSH连接] 收到连接请求: ${username}@${host}:${port || 22}, 密码长度=${password ? password.length : 0}`);
 
                     // 终端输出编码智能转换 + ANSI 清除
                     function decodeTerminalChunk(chunk) {
@@ -703,12 +704,47 @@ function startHttp() {
                         host: host,
                         port: port || 22,
                         username,
-                        password: password || '',
                         readyTimeout: 60000,
                         strictVendor: false,
                         keepaliveInterval: 15000,
                         keepaliveCountMax: 3,
-                        tryKeyboard: true,
+                        // 使用 authHandler 手动控制认证流程，按顺序尝试多种方式
+                        authHandler: function authHandler(methodsLeft, partialSuccess, callback) {
+                            console.log(`[SSH auth ${host}:${port || 22}] methodsLeft=`, methodsLeft, 'partialSuccess=', partialSuccess);
+                            const available = Array.isArray(methodsLeft) ? methodsLeft : ['password', 'keyboard-interactive'];
+                            
+                            // 1. 优先尝试 password
+                            if (available.includes('password')) {
+                                console.log(`[SSH auth ${host}:${port || 22}] 尝试 password 认证`);
+                                callback({
+                                    type: 'password',
+                                    password: password || ''
+                                });
+                                return;
+                            }
+                            
+                            // 2. 再尝试 keyboard-interactive
+                            if (available.includes('keyboard-interactive')) {
+                                console.log(`[SSH auth ${host}:${port || 22}] 尝试 keyboard-interactive 认证`);
+                                callback({
+                                    type: 'keyboard-interactive',
+                                    prompt: function(name, instructions, lang, prompts, finish) {
+                                        console.log(`[SSH keyboard-interactive ${host}:${port || 22}] prompts:`, prompts.map(p => p.prompt));
+                                        const responses = prompts.map((p, idx) => {
+                                            if (/password|passwd|口令|密码/i.test(p.prompt)) return password || '';
+                                            if (idx === 0 && !p.echo) return password || '';
+                                            if (/yes\/no|y\/n/i.test(p.prompt) && p.echo) return 'yes';
+                                            return '';
+                                        });
+                                        finish(responses);
+                                    }
+                                });
+                                return;
+                            }
+                            
+                            console.log(`[SSH auth ${host}:${port || 22}] 没有可用的认证方法`);
+                            callback(null);
+                        },
                         debug: (msg) => {
                             console.log(`[SSH debug ${host}:${port || 22}]`, msg);
                         }
