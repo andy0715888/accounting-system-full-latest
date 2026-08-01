@@ -10068,10 +10068,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     const merge = getMergeForCell(row.id, col.id);
                     const rs = merge ? `rowspan="${merge.rowspan}"` : '';
                     const cs = merge ? `colspan="${merge.colspan}"` : '';
+                    // 计算合并后的总高度（按索引位置，避免ID不连续的问题）
+                    let totalHeight = h;
+                    if (merge && merge.rowspan > 1) {
+                        totalHeight = 0;
+                        for (let ri = 0; ri < merge.rowspan; ri++) {
+                            const targetRow = g.rows[rowIdx + ri];
+                            if (targetRow) totalHeight += g.rowHeights[targetRow.id] || 32;
+                        }
+                    }
+                    const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : '';
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
-                        style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}padding:0;position:relative;">
+                        style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}${tdHeight}padding:0;position:relative;vertical-align:top;">
                         <textarea data-row-id="${row.id}" data-col-id="${col.id}"
-                            style="width:100%;height:100%;border:none;outline:none;padding:4px 8px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:hidden;vertical-align:middle;line-height:1.4;"
+                            style="width:100%;min-height:${totalHeight}px;height:${totalHeight}px;border:none;outline:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;vertical-align:top;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;"
                         >${escapeHtml(val)}</textarea>
                     </td>`;
                 }
