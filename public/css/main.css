@@ -3593,6 +3593,8 @@ tr.client-row.cut-pending {
     font-size: 13px;
     min-width: 100%;
     background: #fff;
+    user-select: none;
+    -webkit-user-select: none;
 }
 .quote-grid th,
 .quote-grid td {

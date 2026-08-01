@@ -10103,6 +10103,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 单元格输入
         table.querySelectorAll('input[data-row-id]').forEach(inp => {
+            // 阻止 input 的 mousedown 冒泡，防止干扰选择逻辑
+            inp.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                // 手动触发选择逻辑
+                const td = inp.closest('td[data-row-id][data-col-id]');
+                if (!td) return;
+                const rowId = parseInt(td.dataset.rowId);
+                const colId = parseInt(td.dataset.colId);
+                if (isHiddenByMerge(rowId, colId)) return;
+                quoteSelection._startX = e.clientX;
+                quoteSelection._startY = e.clientY;
+                quoteSelection._startRow = rowId;
+                quoteSelection._startCol = colId;
+                quoteSelection = {
+                    ...quoteSelection,
+                    startRow: rowId, startCol: colId,
+                    endRow: rowId, endCol: colId,
+                    selecting: true
+                };
+                updateQuoteSelectionVisual();
+            });
             inp.addEventListener('change', () => {
                 const rowId = parseInt(inp.dataset.rowId);
                 const colId = parseInt(inp.dataset.colId);
@@ -10149,13 +10171,22 @@ document.addEventListener('DOMContentLoaded', function() {
             const colId = parseInt(td.dataset.colId);
             if (isHiddenByMerge(rowId, colId)) return;
             
-            quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
+            // 记录起始位置（用于判断是单击还是拖拽）
+            quoteSelection._startX = e.clientX;
+            quoteSelection._startY = e.clientY;
+            quoteSelection._startRow = rowId;
+            quoteSelection._startCol = colId;
+            
+            quoteSelection = { 
+                ...quoteSelection,
+                startRow: rowId, startCol: colId, 
+                endRow: rowId, endCol: colId, 
+                selecting: true 
+            };
             updateQuoteSelectionVisual();
             
-            // 如果点击的是 input，不阻止默认行为（允许编辑）
-            if (e.target.tagName !== 'INPUT') {
-                e.preventDefault();
-            }
+            // 总是阻止默认行为，防止 input 获得焦点进行文本选择
+            e.preventDefault();
         });
 
         // document 上的 mousemove/mouseup 只绑定一次（见函数外）
@@ -10241,10 +10272,13 @@ document.addEventListener('DOMContentLoaded', function() {
         quoteGridEventsBound = true;
         document.addEventListener('mousemove', (e) => {
             if (!quoteSelection || !quoteSelection.selecting) return;
-            const td = e.target.closest && e.target.closest('td[data-row-id][data-col-id]');
+            // 使用 elementFromPoint 确保即使鼠标移出 table 也能定位 td
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            const td = el && el.closest ? el.closest('td[data-row-id][data-col-id]') : null;
             if (!td) return;
             const rowId = parseInt(td.dataset.rowId);
             const colId = parseInt(td.dataset.colId);
+            if (isNaN(rowId) || isNaN(colId)) return;
             if (isHiddenByMerge(rowId, colId)) return;
             if (quoteSelection.endRow !== rowId || quoteSelection.endCol !== colId) {
                 quoteSelection.endRow = rowId;
@@ -10264,8 +10298,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
-        document.addEventListener('mouseup', () => {
-            if (quoteSelection && quoteSelection.selecting) quoteSelection.selecting = false;
+        document.addEventListener('mouseup', (e) => {
+            if (quoteSelection && quoteSelection.selecting) {
+                // 判断是否是单击（移动距离小于 5 像素）
+                const dx = Math.abs((e.clientX || 0) - (quoteSelection._startX || 0));
+                const dy = Math.abs((e.clientY || 0) - (quoteSelection._startY || 0));
+                const isClick = dx < 5 && dy < 5;
+                quoteSelection.selecting = false;
+                if (isClick && quoteSelection._startRow !== undefined) {
+                    // 单击：聚焦 input 进行编辑
+                    setTimeout(() => {
+                        const input = document.querySelector(
+                            `input[data-row-id="${quoteSelection._startRow}"][data-col-id="${quoteSelection._startCol}"]`
+                        );
+                        if (input) { input.focus(); input.select(); }
+                    }, 0);
+                }
+            }
+        });
+        // 防止拖拽时选中文本
+        document.addEventListener('selectstart', (e) => {
+            if (quoteSelection && quoteSelection.selecting) e.preventDefault();
         });
     }
 
