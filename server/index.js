@@ -706,8 +706,7 @@ function startHttp() {
                         username,
                         password: password || '',
                         readyTimeout: 30000,
-                        strictVendor: false,
-                        tryKeyboard: true
+                        strictVendor: false
                     };
                     console.log(`[SSH connect ${host}:${port || 22}] user=${username}, pwdLen=${password ? password.length : 0}`);
                     if (sock) {

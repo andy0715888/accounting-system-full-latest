@@ -10045,7 +10045,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         g.rows.forEach((row, rowIdx) => {
             const h = g.rowHeights[row.id] || 32;
-            html += `<tr data-row-id="${row.id}" style="height:${h}px;">`;
+            // 被合并覆盖的行（非主行）添加 class 隐藏边框
+            const coveredClass = isRowCoveredByMerge(row.id) ? ' merge-covered-row' : '';
+            html += `<tr data-row-id="${row.id}" class="${coveredClass}" style="height:${h}px;">`;
             html += `<td class="row-header" data-row-id="${row.id}" style="height:${h}px;position:relative;">${rowIdx + 1}
                 <div class="row-resize-handle" data-row-id="${row.id}" style="position:absolute;left:0;bottom:0;width:100%;height:5px;cursor:row-resize;"></div>
             </td>`;
@@ -10054,6 +10056,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const style = g.styles[key] || {};
                 const val = row.cells[col.id] || '';
                 const align = style.align || 'left';
+                const valign = style.valign || (getMergeForCell(row.id, col.id) ? 'middle' : 'top');
                 const bold = style.bold ? 'font-weight:bold;' : '';
                 const fontSize = style.fontSize ? `font-size:${style.fontSize}px;` : '';
                 const fontFamily = style.fontFamily ? `font-family:${style.fontFamily};` : '';
@@ -10078,10 +10081,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                     const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : '';
+                    // 用 padding-top 控制垂直对齐
+                    let paddingTop = '6px';
+                    let paddingBottom = '6px';
+                    if (valign === 'middle') {
+                        paddingTop = '0';
+                        paddingBottom = '0';
+                    } else if (valign === 'bottom') {
+                        paddingTop = '0';
+                        paddingBottom = '6px';
+                    }
+                    const tdVAlign = `vertical-align:${valign};`;
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
-                        style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}${tdHeight}padding:0;position:relative;vertical-align:top;">
+                        style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}${tdHeight}${tdVAlign}padding:0;position:relative;">
                         <textarea data-row-id="${row.id}" data-col-id="${col.id}"
-                            style="width:100%;min-height:${totalHeight}px;height:${totalHeight}px;border:none;outline:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;vertical-align:top;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;"
+                            style="width:100%;min-height:${totalHeight}px;height:${totalHeight}px;border:0 !important;outline:0 !important;box-shadow:none !important;padding:${paddingTop} 10px ${paddingBottom} 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;"
                         >${escapeHtml(val)}</textarea>
                     </td>`;
                 }
@@ -10114,6 +10128,15 @@ document.addEventListener('DOMContentLoaded', function() {
             if (rowId >= m.row && rowId < m.row + m.rowspan &&
                 colId >= m.col && colId < m.col + m.colspan &&
                 (rowId !== m.row || colId !== m.col)) return true;
+            return false;
+        });
+    }
+
+    // 判断某一行是否完全被合并覆盖（非主行，用于隐藏该行的边框）
+    function isRowCoveredByMerge(rowId) {
+        if (!quoteGrid.merges) return false;
+        return quoteGrid.merges.some(m => {
+            if (rowId > m.row && rowId < m.row + m.rowspan) return true;
             return false;
         });
     }
@@ -10449,6 +10472,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (quoteAlignSelect) quoteAlignSelect.addEventListener('change', () => {
         if (quoteAlignSelect.value) applyQuoteStyle('align', quoteAlignSelect.value);
         quoteAlignSelect.value = '';
+    });
+
+    const quoteVAlignSelect = document.getElementById('quoteVAlignSelect');
+    if (quoteVAlignSelect) quoteVAlignSelect.addEventListener('change', () => {
+        if (quoteVAlignSelect.value) applyQuoteStyle('valign', quoteVAlignSelect.value);
+        quoteVAlignSelect.value = '';
     });
 
     const quoteFontSizeSel = document.getElementById('quoteFontSize');
