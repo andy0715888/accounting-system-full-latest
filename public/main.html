@@ -377,6 +377,30 @@
                         </div>
                     </div>
                     <div class="setting-group">
+                        <h3>🎨 顶部标题栏</h3>
+                        <p class="setting-desc">自定义顶部导航栏和菜单栏的背景颜色</p>
+                        <div class="header-color-setting">
+                            <div class="input-group">
+                                <label>导航栏底色</label>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <input type="color" id="navbarColorInput" value="#1a1a2e" />
+                                    <input type="text" id="navbarColorText" value="#1a1a2e" style="width:120px;" />
+                                    <button class="tool-btn" id="resetNavbarColor">重置</button>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label>菜单栏底色</label>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <input type="color" id="menubarColorInput" value="#16213e" />
+                                    <input type="text" id="menubarColorText" value="#16213e" style="width:120px;" />
+                                    <button class="tool-btn" id="resetMenubarColor">重置</button>
+                                </div>
+                            </div>
+                            <button class="tool-btn primary" id="saveHeaderColorBtn">保存设置</button>
+                            <span id="headerColorStatus"></span>
+                        </div>
+                    </div>
+                    <div class="setting-group">
                         <h3>🖼️ 登录背景</h3>
                         <p class="setting-desc">支持 HTTPS 图片链接或上传本地图片</p>
                         <div class="bg-setting">

@@ -5575,6 +5575,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     preview.classList.add('has-bg'); preview.textContent = '';
                 }
             }
+            // 加载标题栏颜色
+            try {
+                const headerColors = await API.get('/settings/header_colors');
+                if (headerColors.value) {
+                    applyHeaderColors(headerColors.value);
+                    if (headerColors.value.navbar) {
+                        document.getElementById('navbarColorInput').value = headerColors.value.navbar;
+                        document.getElementById('navbarColorText').value = headerColors.value.navbar;
+                    }
+                    if (headerColors.value.menubar) {
+                        document.getElementById('menubarColorInput').value = headerColors.value.menubar;
+                        document.getElementById('menubarColorText').value = headerColors.value.menubar;
+                    }
+                }
+            } catch (e) { /* 忽略旧版本没有这个设置的情况 */ }
             await loadRegisterSwitch();
             await loadSuffixSettings();
             await loadProviderOptions();
@@ -5582,6 +5597,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const auth = await API.get('/auth/check');
             if (auth.loggedIn && auth.user.id === 1) registerSwitchGroup.style.display = 'block';
         } catch (err) { console.warn('加载设置失败:', err); }
+    }
+
+    function applyHeaderColors(colors) {
+        if (!colors) return;
+        const navbar = document.querySelector('.navbar');
+        const menubar = document.querySelector('.top-menu');
+        if (navbar && colors.navbar) navbar.style.backgroundColor = colors.navbar;
+        if (menubar && colors.menubar) menubar.style.backgroundColor = colors.menubar;
     }
 
     // --- 事件绑定 ---
@@ -6254,6 +6277,55 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('faviconFileInput').addEventListener('change', () => document.getElementById('faviconStatus').textContent = '');
     saveRegisterSwitchBtn.addEventListener('click', saveRegisterSwitch);
     saveSuffixBtn.addEventListener('click', saveSuffixSettings);
+
+    // 标题栏颜色设置
+    const DEFAULT_HEADER_COLORS = { navbar: '#1a1a2e', menubar: '#16213e' };
+    const navbarInput = document.getElementById('navbarColorInput');
+    const navbarText = document.getElementById('navbarColorText');
+    const menubarInput = document.getElementById('menubarColorInput');
+    const menubarText = document.getElementById('menubarColorText');
+
+    // 颜色选择器和文本框联动
+    if (navbarInput && navbarText) {
+        navbarInput.addEventListener('input', () => { navbarText.value = navbarInput.value; });
+        navbarText.addEventListener('input', () => {
+            if (/^#[0-9a-fA-F]{6}$/.test(navbarText.value)) navbarInput.value = navbarText.value;
+        });
+    }
+    if (menubarInput && menubarText) {
+        menubarInput.addEventListener('input', () => { menubarText.value = menubarInput.value; });
+        menubarText.addEventListener('input', () => {
+            if (/^#[0-9a-fA-F]{6}$/.test(menubarText.value)) menubarInput.value = menubarText.value;
+        });
+    }
+
+    // 重置按钮
+    const resetNavbar = document.getElementById('resetNavbarColor');
+    const resetMenubar = document.getElementById('resetMenubarColor');
+    if (resetNavbar) resetNavbar.addEventListener('click', () => {
+        navbarInput.value = DEFAULT_HEADER_COLORS.navbar;
+        navbarText.value = DEFAULT_HEADER_COLORS.navbar;
+    });
+    if (resetMenubar) resetMenubar.addEventListener('click', () => {
+        menubarInput.value = DEFAULT_HEADER_COLORS.menubar;
+        menubarText.value = DEFAULT_HEADER_COLORS.menubar;
+    });
+
+    // 保存按钮
+    const saveHeaderBtn = document.getElementById('saveHeaderColorBtn');
+    if (saveHeaderBtn) saveHeaderBtn.addEventListener('click', async () => {
+        const colors = {
+            navbar: navbarInput.value,
+            menubar: menubarInput.value
+        };
+        try {
+            await API.post('/settings', { key: 'header_colors', value: colors });
+            applyHeaderColors(colors);
+            const status = document.getElementById('headerColorStatus');
+            if (status) { status.textContent = '✅ 已保存'; setTimeout(() => status.textContent = '', 2000); }
+            setStatus('✅ 标题栏颜色已保存');
+        } catch (err) { setStatus('❌ 保存失败: ' + err.message); }
+    });
 
     async function undoLastAction() {
         if (state.undoStack.length === 0) {
@@ -10014,6 +10086,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const table = container.querySelector('#quoteGridTable');
         if (!table) return;
 
+        // 更新选中视觉的辅助函数
+        function updateQuoteSelectionVisual() {
+            table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
+                const r = parseInt(cell.dataset.rowId);
+                const c = parseInt(cell.dataset.colId);
+                if (isCellSelected(r, c)) {
+                    cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
+                } else {
+                    cell.style.boxShadow = '';
+                }
+            });
+        }
+
         // 单元格输入
         table.querySelectorAll('input[data-row-id]').forEach(inp => {
             inp.addEventListener('change', () => {
@@ -10048,65 +10133,47 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             });
-            inp.addEventListener('mousedown', (e) => {
-                // 左键且不是已经在编辑状态的情况下允许选择
-                if (e.button !== 0) return;
-                const rowId = parseInt(inp.dataset.rowId);
-                const colId = parseInt(inp.dataset.colId);
-                quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
-                e.stopPropagation();
-            });
         });
 
-        // td 上的 mousedown（点击单元格空白区域时触发）
-        table.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
-            td.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return;
-                // 避免列宽/行高调整时触发
-                if (e.target.classList.contains('col-resize-handle') || e.target.classList.contains('row-resize-handle')) return;
-                const rowId = parseInt(td.dataset.rowId);
-                const colId = parseInt(td.dataset.colId);
-                if (isHiddenByMerge(rowId, colId)) return;
-                quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
-                // 立即更新视觉
-                table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
-                    const r = parseInt(cell.dataset.rowId);
-                    const c = parseInt(cell.dataset.colId);
-                    if (isCellSelected(r, c)) {
-                        cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
-                    } else {
-                        cell.style.boxShadow = '';
-                    }
-                });
-                e.preventDefault();
-            });
-        });
-
-        // 鼠标移动扩展选择
-        table.addEventListener('mousemove', (e) => {
-            if (!quoteSelection.selecting) return;
-            const td = e.target.closest('td[data-row-id]');
+        // 在 table 上统一处理 mousedown（覆盖所有 td 和 input）
+        table.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            // 避免列宽/行高调整时触发
+            if (e.target.classList && (e.target.classList.contains('col-resize-handle') || e.target.classList.contains('row-resize-handle'))) return;
+            
+            const td = e.target.closest('td[data-row-id][data-col-id]');
             if (!td) return;
             const rowId = parseInt(td.dataset.rowId);
             const colId = parseInt(td.dataset.colId);
+            if (isHiddenByMerge(rowId, colId)) return;
+            
+            quoteSelection = { startRow: rowId, startCol: colId, endRow: rowId, endCol: colId, selecting: true };
+            updateQuoteSelectionVisual();
+            
+            // 如果点击的是 input，不阻止默认行为（允许编辑）
+            // 但也不要让它干扰多选
+            if (e.target.tagName !== 'INPUT') {
+                e.preventDefault();
+            }
+        });
+
+        // 鼠标移动扩展选择（绑定在 document 上，确保不会丢失）
+        document.addEventListener('mousemove', (e) => {
+            if (!quoteSelection || !quoteSelection.selecting) return;
+            const td = e.target.closest && e.target.closest('td[data-row-id][data-col-id]');
+            if (!td) return;
+            const rowId = parseInt(td.dataset.rowId);
+            const colId = parseInt(td.dataset.colId);
+            if (isHiddenByMerge(rowId, colId)) return;
             if (quoteSelection.endRow !== rowId || quoteSelection.endCol !== colId) {
                 quoteSelection.endRow = rowId;
                 quoteSelection.endCol = colId;
-                // 更新选中样式
-                table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
-                    const r = parseInt(cell.dataset.rowId);
-                    const c = parseInt(cell.dataset.colId);
-                    if (isCellSelected(r, c)) {
-                        cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
-                    } else {
-                        cell.style.boxShadow = '';
-                    }
-                });
+                updateQuoteSelectionVisual();
             }
         });
 
         document.addEventListener('mouseup', () => {
-            if (quoteSelection.selecting) quoteSelection.selecting = false;
+            if (quoteSelection && quoteSelection.selecting) quoteSelection.selecting = false;
         });
 
         // 列双击重命名
@@ -10471,17 +10538,20 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
                     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                    setStatus('✅ 已复制到剪贴板');
+                    setStatus('✅ 已复制到剪贴板，可直接粘贴');
                 } else {
-                    throw new Error('剪贴板不可用');
+                    throw new Error('clipboard_not_available');
                 }
             } catch (e) {
-                // 降级：下载图片
+                // 降级：下载图片（HTTP环境下剪贴板API不可用，需HTTPS）
                 const a = document.createElement('a');
                 a.href = canvas.toDataURL('image/png');
                 a.download = '网络报价.png';
                 a.click();
-                setStatus('✅ 已保存为图片（剪贴板不可用）');
+                const msg = e.message === 'clipboard_not_available' 
+                    ? '当前为HTTP环境，剪贴板不可用（需HTTPS），已下载图片' 
+                    : '剪贴板写入失败，已下载图片';
+                setStatus('💾 ' + msg);
             }
             setTimeout(() => setStatus(''), 2000);
         } catch (e) { setStatus('导出图片失败: ' + e.message); }
