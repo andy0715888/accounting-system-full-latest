@@ -6866,6 +6866,9 @@ document.addEventListener('DOMContentLoaded', function() {
             cursorBlink: true,
             fontSize: 13,
             fontFamily: 'Consolas, "Courier New", monospace',
+            letterSpacing: 0,
+            lineHeight: 1,
+            allowTransparency: false,
             theme: {
                 background: savedBg,
                 foreground: '#e5e5e5',
@@ -6877,7 +6880,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 brightBlue: '#3b8eea', brightMagenta: '#d670d6', brightCyan: '#29b8db', brightWhite: '#ffffff'
             },
             scrollback: 5000,
-            convertEol: true
+            convertEol: false
         });
         term.open(xtermContainer);
         term._initialized = false;
@@ -6980,16 +6983,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         xtermContainer.style.display = 'block';
                         if (!term._initialized) {
                             term._initialized = true;
-                            if (fitAddon) {
-                                try {
-                                    fitAddon.fit();
-                                    const cols = term.cols;
-                                    const rows = term.rows;
-                                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-                                } catch (e) {}
-                            }
+                            // 延迟一帧再 fit，确保容器有实际尺寸
+                            requestAnimationFrame(() => {
+                                if (fitAddon) {
+                                    try {
+                                        fitAddon.fit();
+                                        const cols = term.cols;
+                                        const rows = term.rows;
+                                        if (ws && ws.readyState === WebSocket.OPEN) {
+                                            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                                        }
+                                    } catch (e) {}
+                                }
+                                term.focus();
+                            });
+                        } else {
+                            term.focus();
                         }
-                        term.focus();
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
@@ -10187,15 +10197,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : `height:${h}px;min-height:${h}px;`;
                     // 单元格内容 div（展示模式）：用 flex 控制对齐
-                    // flex-direction:column：justify-content控制垂直，align-items控制水平，text-align兜底
+                    // flex-direction:row（默认）：align-items控制垂直，justify-content控制水平
                     const displayVal = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
-                    const hAlignFlex = align === 'center' ? 'align-items:center;' : (align === 'right' ? 'align-items:flex-end;' : 'align-items:flex-start;');
-                    const vAlignFlex = valign === 'middle' ? 'justify-content:center;' : (valign === 'bottom' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
+                    const hAlignFlex = align === 'center' ? 'justify-content:center;' : (align === 'right' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
+                    const vAlignFlex = valign === 'middle' ? 'align-items:center;' : (valign === 'bottom' ? 'align-items:flex-end;' : 'align-items:flex-start;');
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
                         style="padding:0;position:relative;vertical-align:top;${tdHeight}${bg}${selected}">
                         <div class="cell-display" data-row-id="${row.id}" data-col-id="${col.id}"
-                            style="width:100%;height:100%;min-height:${merge ? totalHeight : h}px;display:flex;flex-direction:column;${vAlignFlex}${hAlignFlex}${fontFamily}${bold}${fontSize}${fg}padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;text-align:${align};">
-                            ${displayVal}
+                            style="width:100%;height:100%;min-height:${merge ? totalHeight : h}px;display:flex;flex-direction:row;flex-wrap:wrap;${vAlignFlex}${hAlignFlex}${fontFamily}${bold}${fontSize}${fg}padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;text-align:${align};">
+                            <span style="width:100%;text-align:${align};">${displayVal}</span>
                         </div>
                     </td>`;
                 }
@@ -10298,11 +10308,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 隐藏 display div，创建 textarea（用 flex 包裹实现垂直对齐）
             displayDiv.style.display = 'none';
-            const hAlignFlex = align === 'center' ? 'align-items:center;' : (align === 'right' ? 'align-items:flex-end;' : 'align-items:flex-start;');
-            const vAlignFlex = valign === 'middle' ? 'justify-content:center;' : (valign === 'bottom' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
+            const hAlignFlex = align === 'center' ? 'justify-content:center;' : (align === 'right' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
+            const vAlignFlex = valign === 'middle' ? 'align-items:center;' : (valign === 'bottom' ? 'align-items:flex-end;' : 'align-items:flex-start;');
             const editWrapper = document.createElement('div');
             editWrapper.className = 'cell-edit-wrapper';
-            editWrapper.style.cssText = `position:absolute;inset:0;display:flex;flex-direction:column;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;`;
+            editWrapper.style.cssText = `position:absolute;inset:0;display:flex;flex-direction:row;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;`;
             const textarea = document.createElement('textarea');
             textarea.value = currentValue;
             textarea.style.cssText = `width:100%;min-height:32px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;`;
@@ -10867,6 +10877,42 @@ document.addEventListener('DOMContentLoaded', function() {
         quoteFontSizeSel.value = '';
     });
 
+    // 字号调整（A- / A+）及快捷键
+    const availableFontSizes = [12, 14, 16, 18, 20, 24, 28, 32];
+    function adjustFontSize(delta) {
+        if (!quoteSelection || quoteSelection.startRow === null) return;
+        const key = `${quoteSelection.startRow}_${quoteSelection.startCol}`;
+        let curSize = (quoteGrid.styles[key] && quoteGrid.styles[key].fontSize) || 13;
+        // 找到最接近的档位
+        let idx = availableFontSizes.findIndex(s => s >= curSize);
+        if (idx < 0) idx = delta > 0 ? availableFontSizes.length - 1 : 0;
+        idx = Math.max(0, Math.min(availableFontSizes.length - 1, idx + delta));
+        // 如果当前大小和档位相同但方向相反，则移动到下一个
+        if (availableFontSizes[idx] === curSize && delta !== 0) {
+            idx = Math.max(0, Math.min(availableFontSizes.length - 1, idx + delta));
+        }
+        applyQuoteStyle('fontSize', availableFontSizes[idx]);
+    }
+    const fontUpBtn = document.getElementById('quoteFontSizeUp');
+    if (fontUpBtn) fontUpBtn.addEventListener('click', () => adjustFontSize(1));
+    const fontDownBtn = document.getElementById('quoteFontSizeDown');
+    if (fontDownBtn) fontDownBtn.addEventListener('click', () => adjustFontSize(-1));
+    // 快捷键：Ctrl+= 或 Ctrl++ 增大，Ctrl+- 减小
+    document.addEventListener('keydown', (e) => {
+        if (!quoteGrid) return;
+        if (e.target.closest('#quoteGridContainer') === null
+            && e.target.closest('#quoteToolbar') === null) return;
+        if (e.ctrlKey || e.metaKey) {
+            if (e.key === '=' || e.key === '+') {
+                e.preventDefault();
+                adjustFontSize(1);
+            } else if (e.key === '-') {
+                e.preventDefault();
+                adjustFontSize(-1);
+            }
+        }
+    });
+
     const quoteFontFamilySel = document.getElementById('quoteFontFamily');
     if (quoteFontFamilySel) quoteFontFamilySel.addEventListener('change', () => {
         if (quoteFontFamilySel.value) applyQuoteStyle('fontFamily', quoteFontFamilySel.value);
@@ -10901,6 +10947,11 @@ document.addEventListener('DOMContentLoaded', function() {
         quoteGrid.merges = quoteGrid.merges.filter(m =>
             !(m.row >= r1 && m.row < r2 + 1 && m.col >= c1 && m.col < c2 + 1));
         quoteGrid.merges.push({ row: r1, col: c1, rowspan: r2 - r1 + 1, colspan: c2 - c1 + 1 });
+        // 合并后自动设置水平垂直居中到主单元格
+        const mainKey = `${r1}_${c1}`;
+        if (!quoteGrid.styles[mainKey]) quoteGrid.styles[mainKey] = {};
+        quoteGrid.styles[mainKey].align = 'center';
+        quoteGrid.styles[mainKey].valign = 'middle';
         saveQuoteGridDebounced();
         renderQuoteGrid();
         setStatus('✅ 已合并单元格');
