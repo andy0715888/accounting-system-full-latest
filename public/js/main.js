@@ -6974,7 +6974,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.textContent = '断开连接';
                         if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                        // 显示 xterm，fit 一次，发送初始尺寸
+                        // 隐藏占位符，显示 xterm
+                        const placeholder = terminal.querySelector('.terminal-placeholder');
+                        if (placeholder) placeholder.style.display = 'none';
                         xtermContainer.style.display = 'block';
                         if (!term._initialized) {
                             term._initialized = true;
@@ -7186,6 +7188,9 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = false;
             disconnectBtn.style.display = 'inline-block';
             if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+            // 隐藏占位符，显示 xterm
+            const placeholder = terminal.querySelector('.terminal-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
             // 显示当前连接的 xterm 容器
             conn.xtermContainer.style.display = 'block';
             // 如果有后台缓冲的数据，一次性写入
@@ -10147,9 +10152,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         g.rows.forEach((row, rowIdx) => {
             const h = g.rowHeights[row.id] || 32;
-            // 被合并覆盖的行（非主行）添加 class 隐藏边框
-            const coveredClass = isRowCoveredByMerge(row.id) ? ' merge-covered-row' : '';
-            html += `<tr data-row-id="${row.id}" class="${coveredClass}" style="height:${h}px;">`;
+            html += `<tr data-row-id="${row.id}" style="height:${h}px;">`;
             html += `<td class="row-header" data-row-id="${row.id}" style="height:${h}px;position:relative;">${rowIdx + 1}
                 <div class="row-resize-handle" data-row-id="${row.id}" style="position:absolute;left:0;bottom:0;width:100%;height:5px;cursor:row-resize;"></div>
             </td>`;
@@ -10168,7 +10171,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 检查是否被合并的单元格（非主单元格）
                 const hiddenByMerge = isHiddenByMerge(row.id, col.id);
                 if (hiddenByMerge) {
-                    html += `<td data-row-id="${row.id}" data-col-id="${col.id}" style="display:none;"></td>`;
+                    html += `<td data-row-id="${row.id}" data-col-id="${col.id}" class="merge-covered-cell" style="display:none;"></td>`;
                 } else {
                     const merge = getMergeForCell(row.id, col.id);
                     const rs = merge ? `rowspan="${merge.rowspan}"` : '';
@@ -10184,11 +10187,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : `height:${h}px;min-height:${h}px;`;
                     // 单元格内容 div（展示模式）：用 flex 控制对齐
+                    // flex-direction:column：justify-content控制垂直，align-items控制水平，text-align兜底
                     const displayVal = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
+                    const hAlignFlex = align === 'center' ? 'align-items:center;' : (align === 'right' ? 'align-items:flex-end;' : 'align-items:flex-start;');
+                    const vAlignFlex = valign === 'middle' ? 'justify-content:center;' : (valign === 'bottom' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
                         style="padding:0;position:relative;vertical-align:top;${tdHeight}${bg}${selected}">
                         <div class="cell-display" data-row-id="${row.id}" data-col-id="${col.id}"
-                            style="width:100%;height:100%;min-height:${merge ? totalHeight : h}px;display:flex;flex-direction:column;justify-content:${valign === 'middle' ? 'center' : (valign === 'bottom' ? 'flex-end' : 'flex-start')};text-align:${align};${fontFamily}${bold}${fontSize}${fg}padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;">
+                            style="width:100%;height:100%;min-height:${merge ? totalHeight : h}px;display:flex;flex-direction:column;${vAlignFlex}${hAlignFlex}${fontFamily}${bold}${fontSize}${fg}padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;text-align:${align};">
                             ${displayVal}
                         </div>
                     </td>`;
@@ -10290,14 +10296,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
 
-            // 隐藏 display div，创建 textarea
+            // 隐藏 display div，创建 textarea（用 flex 包裹实现垂直对齐）
             displayDiv.style.display = 'none';
+            const hAlignFlex = align === 'center' ? 'align-items:center;' : (align === 'right' ? 'align-items:flex-end;' : 'align-items:flex-start;');
+            const vAlignFlex = valign === 'middle' ? 'justify-content:center;' : (valign === 'bottom' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
+            const editWrapper = document.createElement('div');
+            editWrapper.className = 'cell-edit-wrapper';
+            editWrapper.style.cssText = `position:absolute;inset:0;display:flex;flex-direction:column;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;`;
             const textarea = document.createElement('textarea');
             textarea.value = currentValue;
-            textarea.style.cssText = `width:100%;height:${h}px;min-height:${h}px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;position:relative;z-index:10;`;
+            textarea.style.cssText = `width:100%;min-height:32px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;`;
             textarea.dataset.rowId = rowId;
             textarea.dataset.colId = colId;
-            td.appendChild(textarea);
+            editWrapper.appendChild(textarea);
+            td.appendChild(editWrapper);
             textarea.focus();
             // 如果是直接输入字符进入编辑，光标放到末尾
             if (initialValue === undefined) {
@@ -10328,8 +10340,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (r) r.cells[colId] = textarea.value;
                 saveQuoteGridDebounced();
                 // 自动调整高度
-                textarea.style.height = h + 'px';
-                textarea.style.height = Math.max(h, textarea.scrollHeight) + 'px';
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.max(32, textarea.scrollHeight) + 'px';
             });
 
             textarea.addEventListener('keydown', (e) => {
@@ -10378,7 +10390,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!editingCell) return;
             const { rowId, colId, textarea } = editingCell;
             const td = table.querySelector(`td[data-row-id="${rowId}"][data-col-id="${colId}"]`);
-            if (td && textarea.parentNode === td) {
+            // 移除 wrapper（包含 textarea）
+            const wrapper = td ? td.querySelector('.cell-edit-wrapper') : null;
+            if (wrapper && wrapper.parentNode === td) {
+                td.removeChild(wrapper);
+            } else if (td && textarea.parentNode === td) {
                 td.removeChild(textarea);
             }
             const displayDiv = td ? td.querySelector('.cell-display') : null;

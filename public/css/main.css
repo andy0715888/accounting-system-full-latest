@@ -3596,11 +3596,9 @@ tr.client-row.cut-pending {
     user-select: none;
     -webkit-user-select: none;
 }
-/* 被合并覆盖的行：隐藏边框，避免中间出现分割线 */
-.quote-grid tr.merge-covered-row td,
-.quote-grid tr.merge-covered-row th {
-    border-top: none !important;
-    border-bottom: none !important;
+/* 被合并覆盖的单元格：隐藏边框，避免中间出现分割线 */
+.quote-grid td.merge-covered-cell {
+    border: none !important;
 }
 .quote-grid th,
 .quote-grid td {
