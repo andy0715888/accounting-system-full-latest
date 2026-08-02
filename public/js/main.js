@@ -8450,8 +8450,30 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         conn.terminalContent += text;
-        
+
+        // 处理清屏序列（全屏程序如 mtr/nano/top 会发送这些）
+        // \x1b[2J = 清全屏，\x1b[H = 光标回原点，\x0c = Ctrl+L 清屏
+        // 策略：找到最后一个清屏序列，只保留其后的内容
         let buffer = conn.terminalContent;
+        const clearPatterns = [
+            /\x1b\[2J/g,        // 清全屏
+            /\x1b\[H\x1b\[2J/g, // 光标回原点+清屏（mtr常用）
+            /\x0c/g              // Ctrl+L / 换页符
+        ];
+        let lastClearPos = -1;
+        for (const pat of clearPatterns) {
+            let m;
+            while ((m = pat.exec(buffer)) !== null) {
+                const endPos = m.index + m[0].length;
+                if (endPos > lastClearPos) lastClearPos = endPos;
+            }
+        }
+        if (lastClearPos > 0) {
+            buffer = buffer.substring(lastClearPos);
+            conn.terminalContent = buffer;
+        }
+
+        // 处理单独回车符 \r（apt 进度条、mtr 行内刷新用）
         let hasStandaloneCr = true;
         while (hasStandaloneCr) {
             hasStandaloneCr = false;
@@ -8919,6 +8941,40 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         document.addEventListener('click', () => { terminalCtxMenu.style.display = 'none'; });
+
+        // 点击终端区域自动聚焦输入框，保证键盘输入（包括 Ctrl+C）始终生效
+        const tc = document.getElementById('terminalContainer');
+        if (tc) {
+            tc.addEventListener('click', (e) => {
+                if (e.target.closest('.context-menu')) return;
+                const ti = document.getElementById('terminalInput');
+                if (ti) ti.focus();
+            });
+        }
+
+        // 全局 Ctrl+C：当 SSH 已连接且不在输入框/文本区域时，发送中断信号
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+                const ws = getActiveWs();
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const inEditable = e.target.closest('input') || e.target.closest('textarea') || e.target.closest('[contenteditable="true"]');
+                    const hasSelection = inEditable && (window.getSelection().toString() || '').length > 0;
+                    // 如果在可编辑区域且有选中文本，让浏览器正常复制（不拦截）
+                    if (inEditable && !hasSelection && e.target.id === 'terminalInput') {
+                        e.preventDefault();
+                        ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
+                        appendTerminalOutput('^C\n', 'warning');
+                    } else if (!inEditable) {
+                        e.preventDefault();
+                        ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
+                        appendTerminalOutput('^C\n', 'warning');
+                        // 同时聚焦到终端输入框
+                        const ti = document.getElementById('terminalInput');
+                        if (ti) ti.focus();
+                    }
+                }
+            }
+        });
 
         const terminalBgColor = document.getElementById('terminalBgColor');
         const terminalBgColorText = document.getElementById('terminalBgColorText');
@@ -10081,21 +10137,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                     const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : '';
-                    // 用 padding-top 控制垂直对齐
-                    let paddingTop = '6px';
-                    let paddingBottom = '6px';
-                    if (valign === 'middle') {
-                        paddingTop = '0';
-                        paddingBottom = '0';
-                    } else if (valign === 'bottom') {
-                        paddingTop = '0';
-                        paddingBottom = '6px';
-                    }
-                    const tdVAlign = `vertical-align:${valign};`;
+                    // 用 flexbox 控制垂直对齐（vertical-align 在 textarea 占满高度时无效）
+                    const flexJustify = valign === 'middle' ? 'center' : (valign === 'bottom' ? 'flex-end' : 'flex-start');
+                    const tdDisplay = `display:flex;flex-direction:column;justify-content:${flexJustify};`;
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
-                        style="text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}${tdHeight}${tdVAlign}padding:0;position:relative;">
+                        style="${tdDisplay}text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}${tdHeight}padding:0;position:relative;">
                         <textarea data-row-id="${row.id}" data-col-id="${col.id}"
-                            style="width:100%;min-height:${totalHeight}px;height:${totalHeight}px;border:0 !important;outline:0 !important;box-shadow:none !important;padding:${paddingTop} 10px ${paddingBottom} 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;"
+                            style="width:100%;min-height:32px;border:0 !important;outline:0 !important;box-shadow:none !important;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;"
                         >${escapeHtml(val)}</textarea>
                     </td>`;
                 }
@@ -10336,6 +10384,56 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
+        });
+
+        // 点击单元格空白区域聚焦 textarea（flexbox 布局时 textarea 可能不占满整个 td）
+        table.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+            td.addEventListener('click', (e) => {
+                if (e.target.tagName === 'TEXTAREA') return;
+                const ta = td.querySelector('textarea');
+                if (ta) {
+                    ta.focus();
+                    const len = ta.value.length;
+                    ta.setSelectionRange(len, len);
+                }
+            });
+        });
+    }
+
+    // 报价网格全局键盘事件（Del 键清除选中单元格内容）— 只绑定一次
+    if (!quoteGridEventsBound) {
+        document.addEventListener('keydown', (e) => {
+            if (!quoteGrid) return;
+            if (e.target.closest('#quoteGridContainer') === null) return;
+            // 如果在 textarea 内且有内容/有选中文本，让浏览器正常编辑（不拦截）
+            if (e.target.tagName === 'TEXTAREA') {
+                const ta = e.target;
+                if (ta.value !== '' || ta.selectionStart !== ta.selectionEnd) return;
+            }
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+                const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
+                const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+                const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+                let changed = false;
+                for (const row of quoteGrid.rows) {
+                    if (row.id < r1 || row.id > r2) continue;
+                    for (const col of quoteGrid.columns) {
+                        if (col.id < c1 || col.id > c2) continue;
+                        if (isHiddenByMerge(row.id, col.id)) continue;
+                        if (row.cells[col.id] !== '') {
+                            row.cells[col.id] = '';
+                            changed = true;
+                        }
+                    }
+                }
+                if (changed) {
+                    saveQuoteGridDebounced();
+                    renderQuoteGrid();
+                }
+            }
         });
     }
 

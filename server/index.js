@@ -569,16 +569,13 @@ function startHttp() {
 
                     // 终端输出编码智能转换 + ANSI 清除
                     function decodeTerminalChunk(chunk) {
-                        if (typeof chunk === 'string') return stripAnsi(chunk);
+                        if (typeof chunk === 'string') return chunk;
                         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-                        // 先尝试 UTF-8
                         let decoded;
                         try {
                             decoded = buf.toString('utf-8');
-                            // 检查是否有大量替换字符（UTF-8 解码失败的标志）
                             const replacementCount = (decoded.match(/\uFFFD/g) || []).length;
                             if (replacementCount > decoded.length * 0.02 && iconv) {
-                                // UTF-8 解码质量差，尝试 GBK
                                 decoded = iconv.decode(buf, 'gbk');
                             }
                         } catch (e) {
@@ -588,17 +585,9 @@ function startHttp() {
                                 decoded = buf.toString('utf-8');
                             }
                         }
-                        return stripAnsi(decoded);
-                    }
-
-                    // 清除 ANSI 转义序列（颜色、光标控制等）
-                    function stripAnsi(str) {
-                        return str
-                            .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')          // CSI 序列
-                            .replace(/\x1b\][0-9;]*[^\x07]*\x07/g, '')       // OSC 序列
-                            .replace(/\x1b[\[\]()][0-9;]*[a-zA-Z]?/g, '')    // 其他 ESC 序列
-                            .replace(/\x0f/g, '')                                 // SI
-                            .replace(/\x0e/g, '');                                // SO
+                        // 保留 ANSI 序列，让前端 ansiToHtml 处理颜色，
+                        // 同时 mtr/nano 等全屏程序需要光标控制序列才能正常显示
+                        return decoded;
                     }
 
                     currentHost = host;
