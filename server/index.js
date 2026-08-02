@@ -619,12 +619,11 @@ function startHttp() {
                     sshConn = new Client();
 
                     sshConn.on('ready', () => {
-                        ws.send(JSON.stringify({ type: 'connected', data: 'SSH 连接成功' }));
                         logAudit(sessionUser.userId, 'ssh_connect', `${username}@${host}:${port || 22}`);
 
                         sshConn.shell({
-                            cols: 120,
-                            rows: 40,
+                            cols: 160,
+                            rows: 50,
                             term: 'xterm-256color',
                             modes: {
                                 ECHO: 1,
@@ -638,6 +637,8 @@ function startHttp() {
                                 return;
                             }
                             sshStream = stream;
+                            // shell 创建完成后再发送 connected，确保 resize 能被处理
+                            ws.send(JSON.stringify({ type: 'connected', data: 'SSH 连接成功' }));
 
                             stream.on('data', (chunk) => {
                                 if (ws.readyState === WebSocket.OPEN) {

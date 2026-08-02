@@ -10312,7 +10312,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const vAlignFlex = valign === 'middle' ? 'align-items:center;' : (valign === 'bottom' ? 'align-items:flex-end;' : 'align-items:flex-start;');
             const editWrapper = document.createElement('div');
             editWrapper.className = 'cell-edit-wrapper';
-            editWrapper.style.cssText = `position:absolute;inset:0;display:flex;flex-direction:row;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;`;
+            editWrapper.style.cssText = `position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:row;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;`;
             const textarea = document.createElement('textarea');
             textarea.value = currentValue;
             textarea.style.cssText = `width:100%;min-height:32px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;`;
@@ -10321,13 +10321,18 @@ document.addEventListener('DOMContentLoaded', function() {
             editWrapper.appendChild(textarea);
             td.appendChild(editWrapper);
             textarea.focus();
-            // 如果是直接输入字符进入编辑，光标放到末尾
-            if (initialValue === undefined) {
-                textarea.select();
-            } else {
-                const len = textarea.value.length;
-                textarea.setSelectionRange(len, len);
-            }
+            // 初始化时自适应高度 + 光标定位
+            requestAnimationFrame(() => {
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.max(32, textarea.scrollHeight) + 'px';
+                // 如果是直接输入字符进入编辑，光标放到末尾；否则全选
+                if (initialValue === undefined) {
+                    textarea.select();
+                } else {
+                    const len = textarea.value.length;
+                    textarea.setSelectionRange(len, len);
+                }
+            });
 
             editingCell = {
                 rowId, colId, textarea,
