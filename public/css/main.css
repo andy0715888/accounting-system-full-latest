@@ -3018,9 +3018,11 @@ tr.client-row.cut-pending {
 
 .terminal-container {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     background: #1e1e1e;
     overflow: hidden;
-    min-height: 400px;
+    min-height: 0;
 }
 
 .terminal-placeholder {

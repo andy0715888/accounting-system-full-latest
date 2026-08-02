@@ -6857,7 +6857,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 每个连接有自己的 xterm 容器和实例
         const xtermContainer = document.createElement('div');
-        xtermContainer.style.cssText = 'width:100%;height:100%;display:none;';
+        xtermContainer.style.cssText = 'width:100%;flex:1;min-height:0;display:none;';
         xtermContainer.dataset.connId = connId;
         terminal.appendChild(xtermContainer);
 
@@ -10306,13 +10306,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
 
-            // 隐藏 display div，创建 textarea（用 flex 包裹实现垂直对齐）
-            displayDiv.style.display = 'none';
+            // 不隐藏 displayDiv，而是用带背景色的 editWrapper 绝对定位覆盖在上面
+            // 这样 displayDiv 的 flex 布局状态完全不受影响，退出编辑后不会错位
             const hAlignFlex = align === 'center' ? 'justify-content:center;' : (align === 'right' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
             const vAlignFlex = valign === 'middle' ? 'align-items:center;' : (valign === 'bottom' ? 'align-items:flex-end;' : 'align-items:flex-start;');
             const editWrapper = document.createElement('div');
             editWrapper.className = 'cell-edit-wrapper';
-            editWrapper.style.cssText = `position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:row;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;`;
+            // 背景色从 style.bg 取，没有则用白色覆盖，确保看不到下面的 displayDiv
+            const bgColor = style.bg || '#ffffff';
+            editWrapper.style.cssText = `position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:row;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;background:${bgColor};`;
             const textarea = document.createElement('textarea');
             textarea.value = currentValue;
             textarea.style.cssText = `width:100%;min-height:32px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;`;
@@ -10412,13 +10414,16 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (td && textarea.parentNode === td) {
                 td.removeChild(textarea);
             }
+            // displayDiv 从未被隐藏，只需要更新内容（保持与渲染时一致的结构：带 span）
             const displayDiv = td ? td.querySelector('.cell-display') : null;
             if (displayDiv) {
-                displayDiv.style.display = '';
-                // 更新显示内容
                 const row = quoteGrid.rows.find(r => r.id === rowId);
                 const val = row ? (row.cells[colId] || '') : '';
-                displayDiv.innerHTML = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
+                const key = `${rowId}_${colId}`;
+                const style = quoteGrid.styles[key] || {};
+                const align = style.align || 'left';
+                const displayVal = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
+                displayDiv.innerHTML = `<span style="width:100%;text-align:${align};">${displayVal}</span>`;
             }
             editingCell = null;
         }
@@ -10806,12 +10811,14 @@ document.addEventListener('DOMContentLoaded', function() {
             for (let cid of quoteGrid.columns.filter(c => c.id >= c1 && c.id <= c2).map(c => c.id)) {
                 const skey = `${rid}_${cid}`;
                 if (!quoteGrid.styles[skey]) quoteGrid.styles[skey] = {};
-                if (value === null || value === undefined) delete quoteGrid.styles[skey][key];
+                // 空值或 null/undefined 表示清除该样式
+                if (value === null || value === undefined || value === '') delete quoteGrid.styles[skey][key];
                 else quoteGrid.styles[skey][key] = value;
             }
         }
         saveQuoteGridDebounced();
         renderQuoteGrid();
+        updateQuoteToolbarState();
     }
 
     // 工具栏按钮
@@ -10937,7 +10944,20 @@ document.addEventListener('DOMContentLoaded', function() {
     if (quoteFgColor) quoteFgColor.addEventListener('input', () => { applyQuoteStyle('fg', quoteFgColor.value); });
 
     const quoteBgColor = document.getElementById('quoteBgColor');
-    if (quoteBgColor) quoteBgColor.addEventListener('input', () => { applyQuoteStyle('bg', quoteBgColor.value); });
+    if (quoteBgColor) quoteBgColor.addEventListener('input', () => { applyQuoteStyle('bg', quoteBgColor.value); updateQuoteToolbarState(); });
+
+    // 无填充按钮：清除 bg 样式（区分于白色填充）
+    const quoteNoBgBtn = document.getElementById('quoteNoBgBtn');
+    if (quoteNoBgBtn) quoteNoBgBtn.addEventListener('click', () => { applyQuoteStyle('bg', ''); updateQuoteToolbarState(); });
+
+    // 更新工具栏状态（显示当前选中单元格的字号等）
+    function updateQuoteToolbarState() {
+        if (!quoteSelection || quoteSelection.startRow === null) return;
+        const key = `${quoteSelection.startRow}_${quoteSelection.startCol}`;
+        const style = quoteGrid.styles[key] || {};
+        const fontSizeLabel = document.getElementById('quoteFontSizeLabel');
+        if (fontSizeLabel) fontSizeLabel.textContent = style.fontSize || 13;
+    }
 
     // 合并/拆分
     const quoteMergeBtn = document.getElementById('quoteMergeBtn');
