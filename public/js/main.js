@@ -6855,12 +6855,74 @@ document.addEventListener('DOMContentLoaded', function() {
         const wsUrl = `${wsProto}//${location.host}/ssh`;
         const ws = new WebSocket(wsUrl);
 
+        // 每个连接有自己的 xterm 容器和实例
+        const xtermContainer = document.createElement('div');
+        xtermContainer.style.cssText = 'width:100%;height:100%;display:none;';
+        xtermContainer.dataset.connId = connId;
+        terminal.appendChild(xtermContainer);
+
+        const savedBg = localStorage.getItem('sshTerminalBg') || '#1e1e1e';
+        const term = new Terminal({
+            cursorBlink: true,
+            fontSize: 13,
+            fontFamily: 'Consolas, "Courier New", monospace',
+            theme: {
+                background: savedBg,
+                foreground: '#e5e5e5',
+                cursor: '#e5e5e5',
+                selectionBackground: 'rgba(255,255,255,0.3)',
+                black: '#000000', red: '#cd3131', green: '#0dbc79', yellow: '#e5e510',
+                blue: '#2472c8', magenta: '#bc3fbc', cyan: '#11a8cd', white: '#e5e5e5',
+                brightBlack: '#666666', brightRed: '#f14c4c', brightGreen: '#23d18b', brightYellow: '#f5f543',
+                brightBlue: '#3b8eea', brightMagenta: '#d670d6', brightCyan: '#29b8db', brightWhite: '#ffffff'
+            },
+            scrollback: 5000,
+            convertEol: true
+        });
+        term.open(xtermContainer);
+        term._initialized = false;
+
+        // Fit 插件
+        let fitAddon = null;
+        try {
+            if (window.FitAddon) {
+                fitAddon = new FitAddon.FitAddon();
+                term.loadAddon(fitAddon);
+            }
+        } catch (e) {}
+
+        // xterm 输入发送到后端
+        term.onData((data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'input', data: data }));
+            }
+        });
+
+        // 窗口大小变化时调整终端
+        const handleResize = () => {
+            if (fitAddon && term._initialized) {
+                try {
+                    fitAddon.fit();
+                    const cols = term.cols;
+                    const rows = term.rows;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                    }
+                } catch (e) {}
+            }
+        };
+        window.addEventListener('resize', handleResize);
+
         const conn = {
             id: connId,
             host: host,
             ws: ws,
             clientPing: null,
-            terminalContent: ''
+            terminalContent: '',   // 保留用于后台连接时的缓冲
+            xterm: term,
+            xtermContainer: xtermContainer,
+            fitAddon: fitAddon,
+            handleResize: handleResize
         };
         sshConnections.push(conn);
 
@@ -6868,7 +6930,6 @@ document.addEventListener('DOMContentLoaded', function() {
         renderSshTabs();
 
         title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
-        terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
 
         const clientPing = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -6897,7 +6958,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 ws.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password, proxy }));
             } catch (err) {
-                terminal.innerHTML = `<div style="padding:16px;color:#f56c6c;">获取密码失败: ${err.message}</div>`;
+                term.writeln('\r\n\x1b[31m获取密码失败: ' + err.message + '\x1b[0m');
             }
         };
 
@@ -6908,72 +6969,55 @@ document.addEventListener('DOMContentLoaded', function() {
                     fetch(`/api/hosts/${host.id}/touch`, { method: 'POST' }).then(() => loadHosts()).catch(() => {});
                     if (activeConnId === connId) {
                         title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
-                        terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
                         input.disabled = false;
                         sendBtn.disabled = false;
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.textContent = '断开连接';
                         if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                        appendTerminalOutput(msg.data + '\n');
-                    } else {
-                        conn.terminalContent = msg.data + '\n';
+                        // 显示 xterm，fit 一次，发送初始尺寸
+                        xtermContainer.style.display = 'block';
+                        if (!term._initialized) {
+                            term._initialized = true;
+                            if (fitAddon) {
+                                try {
+                                    fitAddon.fit();
+                                    const cols = term.cols;
+                                    const rows = term.rows;
+                                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                                } catch (e) {}
+                            }
+                        }
+                        term.focus();
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
-                    // 发送换行触发 shell 提示符显示
-                    const ws = getActiveWs();
-                    setTimeout(() => {
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'input', data: '\r' }));
-                        }
-                    }, 300);
-                } else if (msg.type === 'welcome') {
-                    const welcomeText = '\r\n' + msg.data;
-                    if (activeConnId === connId) {
-                        appendTerminalOutput(welcomeText, 'info');
-                        const ws = getActiveWs();
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'input', data: '\r' }));
-                        }
-                    } else {
-                        conn.terminalContent += welcomeText;
-                    }
-                } else if (msg.type === 'last_login') {
-                    if (activeConnId === connId) {
-                        appendTerminalOutput(msg.data + '\n', 'info');
-                    } else {
-                        conn.terminalContent += msg.data + '\n';
-                    }
                 } else if (msg.type === 'output') {
-                    if (activeConnId === connId) {
-                        appendTerminalOutput(msg.data);
+                    if (activeConnId === connId && term._initialized) {
+                        term.write(msg.data);
                     } else {
+                        // 后台连接时缓冲，切换回来时一次性写入
                         conn.terminalContent += msg.data;
                     }
                 } else if (msg.type === 'error') {
                     if (activeConnId === connId) {
-                        appendTerminalOutput('\n[错误] ' + msg.data + '\n', 'error');
+                        term.writeln('\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m');
                         title.textContent = `${host.name} - 连接失败`;
                         input.disabled = true;
                         sendBtn.disabled = true;
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.textContent = '发起连接';
                         if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                    } else {
-                        conn.terminalContent += '\n[错误] ' + msg.data + '\n';
                     }
                     updateTabStatus(connId, 'error');
                 } else if (msg.type === 'disconnected') {
                     if (activeConnId === connId) {
                         title.textContent = `${host.name} - 已断开`;
+                        term.writeln('\r\n\x1b[33m' + msg.data + '\x1b[0m');
                         input.disabled = true;
                         sendBtn.disabled = true;
                         disconnectBtn.style.display = 'inline-block';
                         disconnectBtn.textContent = '发起连接';
                         if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                        appendTerminalOutput('\n' + msg.data + '\n', 'warning');
-                    } else {
-                        conn.terminalContent += '\n' + msg.data + '\n';
                     }
                     updateTabStatus(connId, 'disconnected');
                     clearInterval(clientPing);
@@ -7006,8 +7050,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         ws.onerror = () => {
             if (activeConnId === connId) {
-                terminal.innerHTML = '<div style="padding:16px;color:#f56c6c;">WebSocket 连接失败</div>';
                 title.textContent = '连接失败';
+                term.writeln('\r\n\x1b[31mWebSocket 连接失败\x1b[0m');
                 input.disabled = true;
                 sendBtn.disabled = true;
                 disconnectBtn.style.display = 'inline-block';
@@ -7022,14 +7066,15 @@ document.addEventListener('DOMContentLoaded', function() {
         ws.onclose = () => {
             clearInterval(clientPing);
             stopMonitor(connId);
+            window.removeEventListener('resize', handleResize);
             if (activeConnId === connId && title.textContent.indexOf('已断开') === -1 && title.textContent.indexOf('连接失败') === -1) {
                 title.textContent = `${host.name} - 连接已关闭`;
+                term.writeln('\r\n\x1b[33m[连接已关闭]\x1b[0m');
                 input.disabled = true;
                 sendBtn.disabled = true;
                 disconnectBtn.style.display = 'inline-block';
                 disconnectBtn.textContent = '发起连接';
                 if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                appendTerminalOutput('\n[连接已关闭]\n', 'warning');
             }
             updateTabStatus(connId, 'closed');
         };
@@ -7125,48 +7170,65 @@ document.addEventListener('DOMContentLoaded', function() {
         const disconnectBtn = document.getElementById('disconnectBtn');
         const fileManagerBtn = document.getElementById('fileManagerBtn');
 
+        // 先隐藏所有 xterm 容器
+        terminal.querySelectorAll('[data-conn-id]').forEach(el => {
+            el.style.display = 'none';
+        });
+
         const ws = conn.ws;
         const host = conn.host;
         const isOpen = ws && ws.readyState === WebSocket.OPEN;
+        const term = conn.xterm;
 
-        if (isOpen) {
+        if (isOpen && term) {
             title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
-            terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
             input.disabled = false;
             sendBtn.disabled = false;
             disconnectBtn.style.display = 'inline-block';
             if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-            if (conn.terminalContent) {
-                const output = document.getElementById('terminalOutput');
-                const span = document.createElement('span');
-                span.innerHTML = ansiToHtml(conn.terminalContent);
-                output.appendChild(span);
-                output.scrollTop = output.scrollHeight;
+            // 显示当前连接的 xterm 容器
+            conn.xtermContainer.style.display = 'block';
+            // 如果有后台缓冲的数据，一次性写入
+            if (conn.terminalContent && conn.terminalContent.length > 0) {
+                term.write(conn.terminalContent);
+                conn.terminalContent = '';
             }
+            if (!term._initialized) {
+                term._initialized = true;
+                if (conn.fitAddon) {
+                    try {
+                        conn.fitAddon.fit();
+                        const cols = term.cols;
+                        const rows = term.rows;
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                        }
+                    } catch (e) {}
+                }
+            }
+            term.focus();
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
             }
         } else if (ws && ws.readyState === WebSocket.CONNECTING) {
             title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
-            terminal.innerHTML = '<div style="padding:16px;color:#909399;">正在建立 SSH 连接...</div>';
             input.disabled = true;
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
             if (fileManagerBtn) fileManagerBtn.style.display = "none";
         } else {
             title.textContent = `${host.name} - 已断开`;
-            terminal.innerHTML = '<div class="terminal-output" id="terminalOutput"></div>';
             input.disabled = true;
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'inline-block';
             disconnectBtn.textContent = '发起连接';
             if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-            if (conn.terminalContent) {
-                const output = document.getElementById('terminalOutput');
-                const span = document.createElement('span');
-                span.innerHTML = ansiToHtml(conn.terminalContent);
-                output.appendChild(span);
-                output.scrollTop = output.scrollHeight;
+            if (term && conn.xtermContainer) {
+                conn.xtermContainer.style.display = 'block';
+                if (conn.terminalContent && conn.terminalContent.length > 0) {
+                    term.write(conn.terminalContent);
+                    conn.terminalContent = '';
+                }
             }
         }
     }
@@ -7187,7 +7249,15 @@ document.addEventListener('DOMContentLoaded', function() {
             try { conn.ws.close(); } catch(e) {}
         }
         if (conn.clientPing) clearInterval(conn.clientPing);
+        if (conn.handleResize) window.removeEventListener('resize', conn.handleResize);
         stopMonitor(connId);
+        // 销毁 xterm 实例和容器
+        if (conn.xterm) {
+            try { conn.xterm.dispose(); } catch (e) {}
+        }
+        if (conn.xtermContainer && conn.xtermContainer.parentNode) {
+            conn.xtermContainer.parentNode.removeChild(conn.xtermContainer);
+        }
         sshConnections.splice(idx, 1);
 
         if (silent) return;
@@ -8772,45 +8842,40 @@ document.addEventListener('DOMContentLoaded', function() {
         const fileManagerBtn = document.getElementById('fileManagerBtn');
 
         terminalInput.addEventListener('keydown', (e) => {
-            // Ctrl+C 发送中断信号到SSH
+            const conn = getActiveConn();
+            const ws = conn ? conn.ws : null;
+            const isOpen = ws && ws.readyState === WebSocket.OPEN;
+            // Ctrl+C 发送中断
             if (e.ctrlKey && e.key === 'c') {
                 e.preventDefault();
-                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
-                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x03' }));
-                    appendTerminalOutput('^C\n', 'warning');
-                }
+                if (isOpen) ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
+                // 聚焦到 xterm
+                if (conn && conn.xterm) conn.xterm.focus();
                 return;
             }
             // Ctrl+D 发送EOF
             if (e.ctrlKey && e.key === 'd') {
                 e.preventDefault();
-                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
-                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x04' }));
-                }
+                if (isOpen) ws.send(JSON.stringify({ type: 'input', data: '\x04' }));
                 return;
             }
             // Ctrl+Z 发送暂停信号
             if (e.ctrlKey && e.key === 'z') {
                 e.preventDefault();
-                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
-                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x1a' }));
-                    appendTerminalOutput('^Z\n', 'warning');
-                }
+                if (isOpen) ws.send(JSON.stringify({ type: 'input', data: '\x1a' }));
                 return;
             }
             // Ctrl+L 清屏
             if (e.ctrlKey && e.key === 'l') {
                 e.preventDefault();
-                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
-                    getActiveWs().send(JSON.stringify({ type: 'input', data: '\x0c' }));
-                }
+                if (conn && conn.xterm) conn.xterm.clear();
                 return;
             }
             if (e.key === 'Enter') {
                 e.preventDefault();
                 const cmd = terminalInput.value;
-                if (getActiveWs() && getActiveWs().readyState === WebSocket.OPEN) {
-                    getActiveWs().send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
+                if (isOpen) {
+                    ws.send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
                 }
                 terminalInput.value = '';
             }
@@ -8906,12 +8971,10 @@ document.addEventListener('DOMContentLoaded', function() {
             item.addEventListener('click', async () => {
                 const action = item.dataset.action;
                 terminalCtxMenu.style.display = 'none';
+                const conn = getActiveConn();
                 if (action === 'clear') {
-                    // 清屏：清除当前连接的终端内容
-                    const conn = getActiveConn();
+                    if (conn && conn.xterm) conn.xterm.clear();
                     if (conn) conn.terminalContent = '';
-                    const output = document.getElementById('terminalOutput');
-                    if (output) output.innerHTML = '';
                 } else if (action === 'paste') {
                     // 粘贴并运行：读取剪贴板，发送到 SSH
                     let text = '';
@@ -8942,39 +9005,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.addEventListener('click', () => { terminalCtxMenu.style.display = 'none'; });
 
-        // 点击终端区域自动聚焦输入框，保证键盘输入（包括 Ctrl+C）始终生效
+        // 点击终端区域聚焦 xterm
         const tc = document.getElementById('terminalContainer');
         if (tc) {
             tc.addEventListener('click', (e) => {
                 if (e.target.closest('.context-menu')) return;
-                const ti = document.getElementById('terminalInput');
-                if (ti) ti.focus();
+                if (e.target.closest('input')) return;
+                const conn = getActiveConn();
+                if (conn && conn.xterm) conn.xterm.focus();
             });
         }
-
-        // 全局 Ctrl+C：当 SSH 已连接且不在输入框/文本区域时，发送中断信号
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-                const ws = getActiveWs();
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    const inEditable = e.target.closest('input') || e.target.closest('textarea') || e.target.closest('[contenteditable="true"]');
-                    const hasSelection = inEditable && (window.getSelection().toString() || '').length > 0;
-                    // 如果在可编辑区域且有选中文本，让浏览器正常复制（不拦截）
-                    if (inEditable && !hasSelection && e.target.id === 'terminalInput') {
-                        e.preventDefault();
-                        ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
-                        appendTerminalOutput('^C\n', 'warning');
-                    } else if (!inEditable) {
-                        e.preventDefault();
-                        ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
-                        appendTerminalOutput('^C\n', 'warning');
-                        // 同时聚焦到终端输入框
-                        const ti = document.getElementById('terminalInput');
-                        if (ti) ti.focus();
-                    }
-                }
-            }
-        });
 
         const terminalBgColor = document.getElementById('terminalBgColor');
         const terminalBgColorText = document.getElementById('terminalBgColorText');
@@ -9211,6 +9251,12 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('terminalContainer').style.background = color;
             document.getElementById('terminalInput').style.background = color;
             localStorage.setItem('sshTerminalBg', color);
+            // 同步更新所有 xterm 实例的背景色
+            sshConnections.forEach(conn => {
+                if (conn.xterm) {
+                    conn.xterm.options.theme = { ...conn.xterm.options.theme, background: color };
+                }
+            });
 
             localStorage.setItem('sshActiveProxy', activeProxyId || '');
 
@@ -10127,7 +10173,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const merge = getMergeForCell(row.id, col.id);
                     const rs = merge ? `rowspan="${merge.rowspan}"` : '';
                     const cs = merge ? `colspan="${merge.colspan}"` : '';
-                    // 计算合并后的总高度（按索引位置，避免ID不连续的问题）
+                    // 计算合并后的总高度
                     let totalHeight = h;
                     if (merge && merge.rowspan > 1) {
                         totalHeight = 0;
@@ -10136,15 +10182,15 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (targetRow) totalHeight += g.rowHeights[targetRow.id] || 32;
                         }
                     }
-                    const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : '';
-                    // 用 flexbox 控制垂直对齐（vertical-align 在 textarea 占满高度时无效）
-                    const flexJustify = valign === 'middle' ? 'center' : (valign === 'bottom' ? 'flex-end' : 'flex-start');
-                    const tdDisplay = `display:flex;flex-direction:column;justify-content:${flexJustify};`;
+                    const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : `height:${h}px;min-height:${h}px;`;
+                    // 单元格内容 div（展示模式）：用 flex 控制对齐
+                    const displayVal = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
                     html += `<td data-row-id="${row.id}" data-col-id="${col.id}" ${rs} ${cs}
-                        style="${tdDisplay}text-align:${align};${bold}${fontSize}${fontFamily}${fg}${bg}${selected}${tdHeight}padding:0;position:relative;">
-                        <textarea data-row-id="${row.id}" data-col-id="${col.id}"
-                            style="width:100%;min-height:32px;border:0 !important;outline:0 !important;box-shadow:none !important;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;"
-                        >${escapeHtml(val)}</textarea>
+                        style="padding:0;position:relative;vertical-align:top;${tdHeight}${bg}${selected}">
+                        <div class="cell-display" data-row-id="${row.id}" data-col-id="${col.id}"
+                            style="width:100%;height:100%;min-height:${merge ? totalHeight : h}px;display:flex;flex-direction:column;justify-content:${valign === 'middle' ? 'center' : (valign === 'bottom' ? 'flex-end' : 'flex-start')};text-align:${align};${fontFamily}${bold}${fontSize}${fg}padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;">
+                            ${displayVal}
+                        </div>
                     </td>`;
                 }
             });
@@ -10195,7 +10241,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const table = container.querySelector('#quoteGridTable');
         if (!table) return;
 
-        // 更新选中视觉的辅助函数
+        // 当前编辑状态
+        let editingCell = null; // {rowId, colId, textarea, originalValue}
+
+        // 更新选中视觉
         function updateQuoteSelectionVisual() {
             table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
                 const r = parseInt(cell.dataset.rowId);
@@ -10208,108 +10257,209 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // 单元格输入
-        table.querySelectorAll('textarea[data-row-id]').forEach(inp => {
-            // 阻止 textarea 的 mousedown 冒泡，防止干扰选择逻辑
-            inp.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                // 手动触发选择逻辑
-                const td = inp.closest('td[data-row-id][data-col-id]');
-                if (!td) return;
-                const rowId = parseInt(td.dataset.rowId);
-                const colId = parseInt(td.dataset.colId);
-                if (isHiddenByMerge(rowId, colId)) return;
-                quoteSelection._startX = e.clientX;
-                quoteSelection._startY = e.clientY;
-                quoteSelection._startRow = rowId;
-                quoteSelection._startCol = colId;
-                quoteSelection = {
-                    ...quoteSelection,
-                    startRow: rowId, startCol: colId,
-                    endRow: rowId, endCol: colId,
-                    selecting: true
-                };
-                updateQuoteSelectionVisual();
-            });
-            inp.addEventListener('input', () => {
-                const rowId = parseInt(inp.dataset.rowId);
-                const colId = parseInt(inp.dataset.colId);
-                const row = quoteGrid.rows.find(r => r.id === rowId);
-                if (row) row.cells[colId] = inp.value;
+        // 进入编辑模式
+        function startEditing(rowId, colId, initialValue) {
+            // 先退出当前编辑
+            finishEditing(true);
+            const td = table.querySelector(`td[data-row-id="${rowId}"][data-col-id="${colId}"]`);
+            if (!td) return;
+            const displayDiv = td.querySelector('.cell-display');
+            if (!displayDiv) return;
+
+            const row = quoteGrid.rows.find(r => r.id === rowId);
+            if (!row) return;
+            const currentValue = initialValue !== undefined ? initialValue : (row.cells[colId] || '');
+            const key = `${rowId}_${colId}`;
+            const style = quoteGrid.styles[key] || {};
+            const align = style.align || 'left';
+            const valign = style.valign || 'top';
+            const bold = style.bold ? 'font-weight:bold;' : '';
+            const fontSize = style.fontSize ? `font-size:${style.fontSize}px;` : '';
+            const fontFamily = style.fontFamily ? `font-family:${style.fontFamily};` : '';
+            const fg = style.fg ? `color:${style.fg};` : '';
+
+            // 计算合并后的高度
+            const merge = getMergeForCell(rowId, colId);
+            let h = quoteGrid.rowHeights[rowId] || 32;
+            if (merge && merge.rowspan > 1) {
+                h = 0;
+                const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
+                for (let ri = 0; ri < merge.rowspan; ri++) {
+                    const tr = quoteGrid.rows[rowIdx + ri];
+                    if (tr) h += quoteGrid.rowHeights[tr.id] || 32;
+                }
+            }
+
+            // 隐藏 display div，创建 textarea
+            displayDiv.style.display = 'none';
+            const textarea = document.createElement('textarea');
+            textarea.value = currentValue;
+            textarea.style.cssText = `width:100%;height:${h}px;min-height:${h}px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;position:relative;z-index:10;`;
+            textarea.dataset.rowId = rowId;
+            textarea.dataset.colId = colId;
+            td.appendChild(textarea);
+            textarea.focus();
+            // 如果是直接输入字符进入编辑，光标放到末尾
+            if (initialValue === undefined) {
+                textarea.select();
+            } else {
+                const len = textarea.value.length;
+                textarea.setSelectionRange(len, len);
+            }
+
+            editingCell = {
+                rowId, colId, textarea,
+                originalValue: row.cells[colId] || ''
+            };
+
+            // 保存编辑
+            function saveEdit() {
+                if (!editingCell) return;
+                const r = quoteGrid.rows.find(rr => rr.id === editingCell.rowId);
+                if (r) {
+                    r.cells[editingCell.colId] = editingCell.textarea.value;
+                    saveQuoteGridDebounced();
+                }
+            }
+
+            textarea.addEventListener('input', () => {
+                // 实时保存
+                const r = quoteGrid.rows.find(rr => rr.id === rowId);
+                if (r) r.cells[colId] = textarea.value;
                 saveQuoteGridDebounced();
                 // 自动调整高度
-                inp.style.height = 'auto';
-                inp.style.height = Math.max(32, inp.scrollHeight) + 'px';
+                textarea.style.height = h + 'px';
+                textarea.style.height = Math.max(h, textarea.scrollHeight) + 'px';
             });
-            inp.addEventListener('keydown', (e) => {
-                // Alt+Enter 换行；Enter 跳转到下一行
-                if (e.key === 'Enter' && !e.altKey) {
+
+            textarea.addEventListener('keydown', (e) => {
+                // Esc：取消编辑
+                if (e.key === 'Escape') {
                     e.preventDefault();
-                    const rowId = parseInt(inp.dataset.rowId);
-                    const colId = parseInt(inp.dataset.colId);
-                    const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
-                    if (rowIdx < quoteGrid.rows.length - 1) {
-                        const nextRow = quoteGrid.rows[rowIdx + 1];
-                        const nextInput = table.querySelector(`textarea[data-row-id="${nextRow.id}"][data-col-id="${colId}"]`);
-                        if (nextInput) {
-                            nextInput.focus();
-                            // 光标定位到末尾
-                            const len = nextInput.value.length;
-                            nextInput.setSelectionRange(len, len);
-                        }
-                    }
-                } else if (e.key === 'Tab') {
+                    // 恢复原值
+                    const r = quoteGrid.rows.find(rr => rr.id === rowId);
+                    if (r) r.cells[colId] = editingCell.originalValue;
+                    finishEditing(false);
+                    return;
+                }
+                // Alt+Enter：换行
+                if (e.key === 'Enter' && e.altKey) {
+                    return; // 让浏览器默认换行
+                }
+                // Enter：保存并跳到下一行
+                if (e.key === 'Enter') {
                     e.preventDefault();
-                    const rowId = parseInt(inp.dataset.rowId);
-                    const colId = parseInt(inp.dataset.colId);
-                    const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
-                    const delta = e.shiftKey ? -1 : 1;
-                    const newIdx = colIdx + delta;
-                    if (newIdx >= 0 && newIdx < quoteGrid.columns.length) {
-                        const targetCol = quoteGrid.columns[newIdx];
-                        const targetInput = table.querySelector(`textarea[data-row-id="${rowId}"][data-col-id="${targetCol.id}"]`);
-                        if (targetInput) {
-                            targetInput.focus();
-                            const len = targetInput.value.length;
-                            targetInput.setSelectionRange(len, len);
-                        }
-                    }
+                    saveEdit();
+                    finishEditing(true);
+                    moveSelection(1, 0);
+                    return;
+                }
+                // Tab：保存并跳到下一列
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    saveEdit();
+                    finishEditing(true);
+                    moveSelection(0, e.shiftKey ? -1 : 1);
+                    return;
                 }
             });
-        });
 
-        // 在 table 上统一处理 mousedown（覆盖所有 td 和 input）
+            textarea.addEventListener('blur', () => {
+                // 失焦时保存
+                if (editingCell) {
+                    saveEdit();
+                    finishEditing(true);
+                }
+            });
+        }
+
+        // 退出编辑模式
+        function finishEditing(commit) {
+            if (!editingCell) return;
+            const { rowId, colId, textarea } = editingCell;
+            const td = table.querySelector(`td[data-row-id="${rowId}"][data-col-id="${colId}"]`);
+            if (td && textarea.parentNode === td) {
+                td.removeChild(textarea);
+            }
+            const displayDiv = td ? td.querySelector('.cell-display') : null;
+            if (displayDiv) {
+                displayDiv.style.display = '';
+                // 更新显示内容
+                const row = quoteGrid.rows.find(r => r.id === rowId);
+                const val = row ? (row.cells[colId] || '') : '';
+                displayDiv.innerHTML = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
+            }
+            editingCell = null;
+        }
+
+        // 移动选中
+        function moveSelection(dRow, dCol) {
+            if (!quoteSelection || quoteSelection.startRow === null) return;
+            const rowIdx = quoteGrid.rows.findIndex(r => r.id === quoteSelection.endRow);
+            const colIdx = quoteGrid.columns.findIndex(c => c.id === quoteSelection.endCol);
+            const newRowIdx = Math.max(0, Math.min(quoteGrid.rows.length - 1, rowIdx + dRow));
+            const newColIdx = Math.max(0, Math.min(quoteGrid.columns.length - 1, colIdx + dCol));
+            const newRowId = quoteGrid.rows[newRowIdx].id;
+            const newColId = quoteGrid.columns[newColIdx].id;
+            // 如果被合并覆盖，找到主单元格
+            let finalRowId = newRowId, finalColId = newColId;
+            for (const m of (quoteGrid.merges || [])) {
+                if (newRowId >= m.row && newRowId < m.row + m.rowspan &&
+                    newColId >= m.col && newColId < m.col + m.colspan) {
+                    finalRowId = m.row;
+                    finalColId = m.col;
+                    break;
+                }
+            }
+            quoteSelection = {
+                ...quoteSelection,
+                startRow: finalRowId, startCol: finalColId,
+                endRow: finalRowId, endCol: finalColId,
+                selecting: false
+            };
+            updateQuoteSelectionVisual();
+        }
+
+        // 单击：选中单元格
         table.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
-            // 避免列宽/行高调整时触发
             if (e.target.classList && (e.target.classList.contains('col-resize-handle') || e.target.classList.contains('row-resize-handle'))) return;
-            
+            if (e.target.tagName === 'TEXTAREA') return; // 编辑中不处理
+
             const td = e.target.closest('td[data-row-id][data-col-id]');
             if (!td) return;
             const rowId = parseInt(td.dataset.rowId);
             const colId = parseInt(td.dataset.colId);
             if (isHiddenByMerge(rowId, colId)) return;
-            
-            // 记录起始位置（用于判断是单击还是拖拽）
+
+            // 如果正在编辑别的单元格，先保存
+            if (editingCell && (editingCell.rowId !== rowId || editingCell.colId !== colId)) {
+                finishEditing(true);
+            }
+
             quoteSelection._startX = e.clientX;
             quoteSelection._startY = e.clientY;
             quoteSelection._startRow = rowId;
             quoteSelection._startCol = colId;
-            
-            quoteSelection = { 
+            quoteSelection = {
                 ...quoteSelection,
-                startRow: rowId, startCol: colId, 
-                endRow: rowId, endCol: colId, 
-                selecting: true 
+                startRow: rowId, startCol: colId,
+                endRow: rowId, endCol: colId,
+                selecting: true
             };
             updateQuoteSelectionVisual();
-            
-            // 总是阻止默认行为，防止 input 获得焦点进行文本选择
             e.preventDefault();
         });
 
-        // document 上的 mousemove/mouseup 只绑定一次（见函数外）
+        // 双击：进入编辑
+        table.addEventListener('dblclick', (e) => {
+            const td = e.target.closest('td[data-row-id][data-col-id]');
+            if (!td) return;
+            const rowId = parseInt(td.dataset.rowId);
+            const colId = parseInt(td.dataset.colId);
+            if (isHiddenByMerge(rowId, colId)) return;
+            startEditing(rowId, colId);
+        });
 
         // 列双击重命名
         table.querySelectorAll('.col-header').forEach(header => {
@@ -10385,31 +10535,137 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.addEventListener('mouseup', onUp);
             });
         });
-
-        // 点击单元格空白区域聚焦 textarea（flexbox 布局时 textarea 可能不占满整个 td）
-        table.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
-            td.addEventListener('click', (e) => {
-                if (e.target.tagName === 'TEXTAREA') return;
-                const ta = td.querySelector('textarea');
-                if (ta) {
-                    ta.focus();
-                    const len = ta.value.length;
-                    ta.setSelectionRange(len, len);
-                }
-            });
-        });
     }
 
-    // 报价网格全局键盘事件（Del 键清除选中单元格内容）— 只绑定一次
+    // 报价网格全局键盘事件 — 只绑定一次
     if (!quoteGridEventsBound) {
         document.addEventListener('keydown', (e) => {
             if (!quoteGrid) return;
+            const container = document.getElementById('quoteGridContainer');
+            if (!container) return;
             if (e.target.closest('#quoteGridContainer') === null) return;
-            // 如果在 textarea 内且有内容/有选中文本，让浏览器正常编辑（不拦截）
-            if (e.target.tagName === 'TEXTAREA') {
-                const ta = e.target;
-                if (ta.value !== '' || ta.selectionStart !== ta.selectionEnd) return;
+
+            // 如果正在编辑（有 textarea），大部分键不拦截（交给编辑逻辑）
+            const activeTextarea = container.querySelector('textarea[data-row-id]');
+            if (activeTextarea) return;
+
+            // F2：进入编辑
+            if (e.key === 'F2') {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                // 手动启动编辑（需要找到 bindQuoteGridEvents 内部的 startEditing）
+                // 通过触发双击事件来间接调用
+                const td = container.querySelector(`td[data-row-id="${quoteSelection.startRow}"][data-col-id="${quoteSelection.startCol}"]`);
+                if (td) {
+                    const displayDiv = td.querySelector('.cell-display');
+                    if (displayDiv) {
+                        const event = new MouseEvent('dblclick', { bubbles: true });
+                        displayDiv.dispatchEvent(event);
+                    }
+                }
+                return;
             }
+
+            // 方向键：移动选中
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                const dRow = e.key === 'ArrowDown' ? 1 : (e.key === 'ArrowUp' ? -1 : 0);
+                const dCol = e.key === 'ArrowRight' ? 1 : (e.key === 'ArrowLeft' ? -1 : 0);
+                // 模拟移动 - 直接操作 quoteSelection
+                const rowIdx = quoteGrid.rows.findIndex(r => r.id === quoteSelection.endRow);
+                const colIdx = quoteGrid.columns.findIndex(c => c.id === quoteSelection.endCol);
+                const newRowIdx = Math.max(0, Math.min(quoteGrid.rows.length - 1, rowIdx + dRow));
+                const newColIdx = Math.max(0, Math.min(quoteGrid.columns.length - 1, colIdx + dCol));
+                let newRowId = quoteGrid.rows[newRowIdx].id;
+                let newColId = quoteGrid.columns[newColIdx].id;
+                // 如果被合并覆盖，找到主单元格
+                for (const m of (quoteGrid.merges || [])) {
+                    if (newRowId >= m.row && newRowId < m.row + m.rowspan &&
+                        newColId >= m.col && newColId < m.col + m.colspan) {
+                        newRowId = m.row;
+                        newColId = m.col;
+                        break;
+                    }
+                }
+                quoteSelection = {
+                    ...quoteSelection,
+                    startRow: newRowId, startCol: newColId,
+                    endRow: newRowId, endCol: newColId,
+                    selecting: false
+                };
+                // 更新视觉
+                const table = container.querySelector('#quoteGridTable');
+                if (table) {
+                    table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
+                        const r = parseInt(cell.dataset.rowId);
+                        const c = parseInt(cell.dataset.colId);
+                        if (r === newRowId && c === newColId) {
+                            cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
+                        } else {
+                            cell.style.boxShadow = '';
+                        }
+                    });
+                }
+                return;
+            }
+
+            // Enter：进入编辑（或跳到下一行）
+            if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                // 先下移动一行，然后进入编辑
+                const rowIdx = quoteGrid.rows.findIndex(r => r.id === quoteSelection.endRow);
+                if (rowIdx < quoteGrid.rows.length - 1) {
+                    const nextRow = quoteGrid.rows[rowIdx + 1];
+                    quoteSelection = {
+                        ...quoteSelection,
+                        startRow: nextRow.id, startCol: quoteSelection.endCol,
+                        endRow: nextRow.id, endCol: quoteSelection.endCol
+                    };
+                }
+                // 触发编辑
+                const td = container.querySelector(`td[data-row-id="${quoteSelection.startRow}"][data-col-id="${quoteSelection.startCol}"]`);
+                if (td) {
+                    const displayDiv = td.querySelector('.cell-display');
+                    if (displayDiv) {
+                        const event = new MouseEvent('dblclick', { bubbles: true });
+                        displayDiv.dispatchEvent(event);
+                    }
+                }
+                return;
+            }
+
+            // Tab：跳到下一列
+            if (e.key === 'Tab') {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                const colIdx = quoteGrid.columns.findIndex(c => c.id === quoteSelection.endCol);
+                const delta = e.shiftKey ? -1 : 1;
+                const newIdx = Math.max(0, Math.min(quoteGrid.columns.length - 1, colIdx + delta));
+                const targetCol = quoteGrid.columns[newIdx];
+                quoteSelection = {
+                    ...quoteSelection,
+                    startRow: quoteSelection.endRow, startCol: targetCol.id,
+                    endRow: quoteSelection.endRow, endCol: targetCol.id
+                };
+                // 更新视觉
+                const table = container.querySelector('#quoteGridTable');
+                if (table) {
+                    table.querySelectorAll('td[data-row-id][data-col-id]').forEach(cell => {
+                        const r = parseInt(cell.dataset.rowId);
+                        const c = parseInt(cell.dataset.colId);
+                        if (r === quoteSelection.endRow && c === quoteSelection.endCol) {
+                            cell.style.boxShadow = 'inset 0 0 0 2px #409eff';
+                        } else {
+                            cell.style.boxShadow = '';
+                        }
+                    });
+                }
+                return;
+            }
+
+            // Delete/Backspace：清空选中单元格
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 if (!quoteSelection || quoteSelection.startRow === null) return;
                 e.preventDefault();
@@ -10433,6 +10689,35 @@ document.addEventListener('DOMContentLoaded', function() {
                     saveQuoteGridDebounced();
                     renderQuoteGrid();
                 }
+                return;
+            }
+
+            // 直接输入字符：进入编辑，用该字符作为起始内容
+            if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                const td = container.querySelector(`td[data-row-id="${quoteSelection.startRow}"][data-col-id="${quoteSelection.startCol}"]`);
+                if (td) {
+                    const displayDiv = td.querySelector('.cell-display');
+                    if (displayDiv) {
+                        // 先设置初始值
+                        const row = quoteGrid.rows.find(r => r.id === quoteSelection.startRow);
+                        if (row) row.cells[quoteSelection.startCol] = e.key;
+                        saveQuoteGridDebounced();
+                        // 触发编辑
+                        const event = new MouseEvent('dblclick', { bubbles: true });
+                        displayDiv.dispatchEvent(event);
+                        // 编辑启动后把光标放到末尾
+                        setTimeout(() => {
+                            const ta = td.querySelector('textarea');
+                            if (ta) {
+                                const len = ta.value.length;
+                                ta.setSelectionRange(len, len);
+                            }
+                        }, 10);
+                    }
+                }
+                return;
             }
         });
     }
@@ -10470,25 +10755,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         document.addEventListener('mouseup', (e) => {
             if (quoteSelection && quoteSelection.selecting) {
-                // 判断是否是单击（移动距离小于 5 像素）
-                const dx = Math.abs((e.clientX || 0) - (quoteSelection._startX || 0));
-                const dy = Math.abs((e.clientY || 0) - (quoteSelection._startY || 0));
-                const isClick = dx < 5 && dy < 5;
                 quoteSelection.selecting = false;
-                if (isClick && quoteSelection._startRow !== undefined) {
-                    // 单击：聚焦 textarea 进行编辑，光标定位到末尾，不选中文本
-                    setTimeout(() => {
-                        const input = document.querySelector(
-                            `textarea[data-row-id="${quoteSelection._startRow}"][data-col-id="${quoteSelection._startCol}"]`
-                        );
-                        if (input) {
-                            input.focus();
-                            // 光标定位到末尾，不选中文本
-                            const len = input.value.length;
-                            input.setSelectionRange(len, len);
-                        }
-                    }, 0);
-                }
             }
         });
         // 防止拖拽时选中文本
