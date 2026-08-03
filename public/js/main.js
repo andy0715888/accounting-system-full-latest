@@ -6150,7 +6150,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'fee'];
             const updateData = { ...targetRecord.data };
             SERVER_FIELDS.forEach(key => {
-                updateData[key] = state.copiedServerData[key] || '';
+                // 使用 ?? 而不是 ||，避免数字 0 被当作空值覆盖
+                const val = state.copiedServerData[key];
+                updateData[key] = val !== undefined && val !== null ? val : '';
             });
 
             // Move host expense details from source to target, then clear source expense
@@ -10304,7 +10306,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const key = `${rowId}_${colId}`;
             const style = quoteGrid.styles[key] || {};
             const align = style.align || 'left';
-            const valign = style.valign || 'top';
+            const valign = style.valign || (getMergeForCell(rowId, colId) ? 'middle' : 'top');
             const bold = style.bold ? 'font-weight:bold;' : '';
             const fontSize = style.fontSize ? `font-size:${style.fontSize}px;` : '';
             const fontFamily = style.fontFamily ? `font-family:${style.fontFamily};` : '';
