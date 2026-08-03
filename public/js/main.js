@@ -6882,8 +6882,9 @@ document.addEventListener('DOMContentLoaded', function() {
             scrollback: 5000,
             convertEol: false
         });
-        term.open(xtermContainer);
+        // 注意：term.open 延迟到连接成功后再执行，避免容器 display:none 时 xterm 测量到 0 尺寸
         term._initialized = false;
+        term._opened = false;
 
         // Fit 插件
         let fitAddon = null;
@@ -6980,21 +6981,31 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 隐藏占位符，显示 xterm
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
+                        if (!term._opened) {
+                            term._opened = true;
+                            term.open(xtermContainer);
+                        }
                         xtermContainer.style.display = 'block';
                         if (!term._initialized) {
                             term._initialized = true;
-                            // 延迟一帧再 fit，确保容器有实际尺寸
-                            requestAnimationFrame(() => {
+                            // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
+                            const fitAndResize = () => {
                                 if (fitAddon) {
                                     try {
                                         fitAddon.fit();
                                         const cols = term.cols;
                                         const rows = term.rows;
-                                        if (ws && ws.readyState === WebSocket.OPEN) {
+                                        if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
                                             ws.send(JSON.stringify({ type: 'resize', cols, rows }));
                                         }
                                     } catch (e) {}
                                 }
+                            };
+                            requestAnimationFrame(() => {
+                                fitAndResize();
+                                setTimeout(fitAndResize, 50);
+                                setTimeout(fitAndResize, 200);
+                                setTimeout(fitAndResize, 500);
                                 term.focus();
                             });
                         } else {
@@ -10271,6 +10282,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     cell.style.boxShadow = '';
                 }
             });
+            // 同步更新工具栏状态（显示当前字号等）
+            if (typeof updateQuoteToolbarState === 'function') updateQuoteToolbarState();
         }
 
         // 进入编辑模式
@@ -10578,8 +10591,12 @@ document.addEventListener('DOMContentLoaded', function() {
         document.addEventListener('keydown', (e) => {
             if (!quoteGrid) return;
             const container = document.getElementById('quoteGridContainer');
+            const toolbar = document.getElementById('quoteToolbar');
             if (!container) return;
-            if (e.target.closest('#quoteGridContainer') === null) return;
+            // 焦点在报价网格或工具栏内时才响应
+            const inQuote = e.target.closest('#quoteGridContainer') !== null
+                || e.target.closest('#quoteToolbar') !== null;
+            if (!inQuote) return;
 
             // 如果正在编辑（有 textarea），大部分键不拦截（交给编辑逻辑）
             const activeTextarea = container.querySelector('textarea[data-row-id]');
@@ -10890,7 +10907,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // 字号调整（A- / A+）及快捷键
-    const availableFontSizes = [12, 14, 16, 18, 20, 24, 28, 32];
+    const availableFontSizes = [12, 14, 16, 18, 20, 24, 28, 32, 36, 40];
     function adjustFontSize(delta) {
         if (!quoteSelection || quoteSelection.startRow === null) return;
         const key = `${quoteSelection.startRow}_${quoteSelection.startCol}`;

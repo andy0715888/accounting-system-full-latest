@@ -2173,6 +2173,7 @@ tr.client-row.cut-pending {
 
 .hosts-container {
     display: flex;
+    align-items: stretch;
     height: calc(100vh - 200px);
     gap: 16px;
 }
@@ -2193,6 +2194,7 @@ tr.client-row.cut-pending {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    align-self: stretch;
 }
 
 .hosts-commands-sidebar .saved-commands-section {
@@ -3593,7 +3595,6 @@ tr.client-row.cut-pending {
 .quote-grid {
     border-collapse: collapse;
     font-size: 13px;
-    min-width: 100%;
     background: #fff;
     user-select: none;
     -webkit-user-select: none;
