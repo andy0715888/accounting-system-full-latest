@@ -1,13 +1,32 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-// 加密密钥：优先从环境变量读取，否则使用基于机器特征的稳定密钥
+// 加密密钥：优先从环境变量读取，否则从密钥文件读取，最后才基于机器特征生成
 // AES-256 需要 32 字节（256 位）密钥，这里用 sha256 派生恰好 32 字节
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || (function() {
+function getEncryptionKey() {
+    if (process.env.ENCRYPTION_KEY) return process.env.ENCRYPTION_KEY;
+    // 尝试从密钥文件读取（确保服务器重启/hostname变化后密钥一致，密码不丢失）
+    try {
+        const keyFile = path.join(__dirname, '..', '.encryption_key');
+        if (fs.existsSync(keyFile)) {
+            const key = fs.readFileSync(keyFile, 'utf8').trim();
+            if (key && key.length === 64) return key; // hex 格式 64 字符 = 32 字节
+        }
+    } catch (e) {}
+    // 最后兜底：基于机器特征生成（但会保存到文件，下次就一致了）
     const os = require('os');
     const seed = os.hostname() + os.platform() + os.arch() + (os.userInfo().username || 'default');
-    // sha256 摘要为 32 字节，直接作为 AES-256 密钥（不要截断）
-    return crypto.createHash('sha256').update(seed).digest('hex');
-})();
+    const key = crypto.createHash('sha256').update(seed).digest('hex');
+    // 保存到文件，确保后续重启一致
+    try {
+        const keyFile = path.join(__dirname, '..', '.encryption_key');
+        fs.writeFileSync(keyFile, key, 'utf8');
+        try { fs.chmodSync(keyFile, 0o600); } catch (e) {}
+    } catch (e) {}
+    return key;
+}
+const ENCRYPTION_KEY = getEncryptionKey();
 
 const ALGORITHM = 'aes-256-cbc';
 

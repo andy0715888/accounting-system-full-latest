@@ -4882,7 +4882,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 if (savedHost && savedHost.id) {
-                    await API.put(`/hosts/${savedHost.id}`, { name: name || host, host, port, username, password: pwd, remark });
+                    // 编辑时：只有输入了密码才更新密码字段，否则保留原有密码
+                    const body = { name: name || host, host, port, username, remark };
+                    if (pwd) body.password = pwd;
+                    await API.put(`/hosts/${savedHost.id}`, body);
                     status.style.color = '#67c23a';
                     status.textContent = '✅ 已更新主机信息';
                     return { id: savedHost.id, name: name || host, host, port, username };
@@ -10386,7 +10389,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 // Alt+Enter：换行
                 if (e.key === 'Enter' && e.altKey) {
-                    return; // 让浏览器默认换行
+                    e.preventDefault();
+                    const start = textarea.selectionStart;
+                    const end = textarea.selectionEnd;
+                    const val = textarea.value;
+                    textarea.value = val.substring(0, start) + '\n' + val.substring(end);
+                    textarea.selectionStart = textarea.selectionEnd = start + 1;
+                    // 触发 input 事件保存并调整高度
+                    textarea.dispatchEvent(new Event('input'));
+                    return;
                 }
                 // Enter：保存并跳到下一行
                 if (e.key === 'Enter') {
@@ -10485,6 +10496,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (editingCell && (editingCell.rowId !== rowId || editingCell.colId !== colId)) {
                 finishEditing(true);
             }
+
+            // 聚焦容器，确保键盘事件（Del/方向键）能响应
+            const container = document.getElementById('quoteGridContainer');
+            if (container) container.focus({ preventScroll: true });
 
             quoteSelection._startX = e.clientX;
             quoteSelection._startY = e.clientY;

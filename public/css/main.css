@@ -2174,7 +2174,8 @@ tr.client-row.cut-pending {
 .hosts-container {
     display: flex;
     align-items: stretch;
-    height: calc(100vh - 200px);
+    flex: 1;
+    min-height: 0;
     gap: 16px;
 }
 
