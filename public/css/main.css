@@ -2537,7 +2537,8 @@ tr.client-row.cut-pending {
     font-weight: 500;
 }
 .cmd-tab-content {
-    max-height: 400px;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;

@@ -10335,7 +10335,8 @@ document.addEventListener('DOMContentLoaded', function() {
             editWrapper.style.cssText = `position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:row;${vAlignFlex}${hAlignFlex};padding:0;z-index:10;background:${bgColor};`;
             const textarea = document.createElement('textarea');
             textarea.value = currentValue;
-            textarea.style.cssText = `width:100%;min-height:32px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;`;
+            // min-height 用单元格实际高度（含合并），确保内容少时与非编辑模式位置一致
+            textarea.style.cssText = `width:100%;min-height:${h}px;border:0;outline:2px solid #409eff;box-shadow:none;padding:6px 10px;background:transparent;${fontFamily}${bold}${fontSize}${fg}text-align:${align};resize:none;overflow:auto;line-height:1.5;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;-webkit-appearance:none;appearance:none;`;
             textarea.dataset.rowId = rowId;
             textarea.dataset.colId = colId;
             editWrapper.appendChild(textarea);
@@ -10343,8 +10344,9 @@ document.addEventListener('DOMContentLoaded', function() {
             textarea.focus();
             // 初始化时自适应高度 + 光标定位
             requestAnimationFrame(() => {
-                textarea.style.height = 'auto';
-                textarea.style.height = Math.max(32, textarea.scrollHeight) + 'px';
+                // 内容多时可以扩展，少时保持单元格高度
+                const needed = textarea.scrollHeight;
+                textarea.style.height = Math.max(h, needed) + 'px';
                 // 如果是直接输入字符进入编辑，光标放到末尾；否则全选
                 if (initialValue === undefined) {
                     textarea.select();
@@ -10374,9 +10376,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const r = quoteGrid.rows.find(rr => rr.id === rowId);
                 if (r) r.cells[colId] = textarea.value;
                 saveQuoteGridDebounced();
-                // 自动调整高度
+                // 自动调整高度（保持最小单元格高度，内容多时扩展）
                 textarea.style.height = 'auto';
-                textarea.style.height = Math.max(32, textarea.scrollHeight) + 'px';
+                textarea.style.height = Math.max(h, textarea.scrollHeight) + 'px';
             });
 
             textarea.addEventListener('keydown', (e) => {
