@@ -1738,25 +1738,34 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const nowClearing = hadFilter && !isFilterActive(colKey);
                 const tw = $('#tableWrapper');
-                // 保存滚动位置和页码，清除筛选时保持位置
-                const savedScrollTop = (tw && nowClearing) ? tw.scrollTop : 0;
-                const savedPage = state.page;
+                // 获取屏幕上第一条可见记录的ID（用于清除筛选后定位）
+                let firstVisibleId = null;
+                let firstVisibleOffset = 0;
+                if (tw) {
+                    const rows = tw.querySelectorAll('tbody tr[data-id]');
+                    for (const row of rows) {
+                        const rect = row.getBoundingClientRect();
+                        const twRect = tw.getBoundingClientRect();
+                        if (rect.bottom >= twRect.top - 1) {
+                            firstVisibleId = row.dataset.id;
+                            firstVisibleOffset = rect.top - twRect.top;
+                            break;
+                        }
+                    }
+                }
                 if (!nowClearing) state.page = 1;
                 loadRecords(state.currentTabId).then(() => {
                     renderTable(false);
-                    if (tw && nowClearing) {
-                        // 尝试保持筛选前的位置：先恢复page，再恢复scrollTop
-                        if (savedPage && savedPage <= state.totalPages) state.page = savedPage;
-                        if (state.page !== savedPage) {
-                            loadRecords(state.currentTabId).then(() => {
-                                renderTable(false);
-                                requestAnimationFrame(() => {
-                                    if (tw) tw.scrollTop = savedScrollTop;
-                                });
-                            });
-                        } else {
-                            requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
-                        }
+                    if (tw && nowClearing && firstVisibleId) {
+                        // 清除筛选后：滚动到之前屏幕上第一条可见的记录
+                        requestAnimationFrame(() => {
+                            const targetRow = tw.querySelector(`tbody tr[data-id="${firstVisibleId}"]`);
+                            if (targetRow) {
+                                const twRect = tw.getBoundingClientRect();
+                                const rowRect = targetRow.getBoundingClientRect();
+                                tw.scrollTop += (rowRect.top - twRect.top) - firstVisibleOffset;
+                            }
+                        });
                     }
                 });
                 return;
@@ -1783,23 +1792,33 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (clearBtn) clearBtn.style.display = 'none';
                 }
                 const tw = $('#tableWrapper');
-                const savedScrollTop = tw ? tw.scrollTop : 0;
-                const savedPage = state.page;
+                // 获取屏幕上第一条可见记录的ID（用于清除筛选后定位）
+                let firstVisibleId = null;
+                let firstVisibleOffset = 0;
+                if (tw) {
+                    const rows = tw.querySelectorAll('tbody tr[data-id]');
+                    for (const row of rows) {
+                        const rect = row.getBoundingClientRect();
+                        const twRect = tw.getBoundingClientRect();
+                        if (rect.bottom >= twRect.top - 1) {
+                            firstVisibleId = row.dataset.id;
+                            firstVisibleOffset = rect.top - twRect.top;
+                            break;
+                        }
+                    }
+                }
                 loadRecords(state.currentTabId).then(() => {
                     renderTable(false);
-                    if (tw) {
-                        // 尝试恢复原来的页码和滚动位置
-                        if (savedPage && savedPage <= state.totalPages) state.page = savedPage;
-                        if (state.page !== savedPage) {
-                            loadRecords(state.currentTabId).then(() => {
-                                renderTable(false);
-                                requestAnimationFrame(() => {
-                                    if (tw) tw.scrollTop = savedScrollTop;
-                                });
-                            });
-                        } else {
-                            requestAnimationFrame(() => { tw.scrollTop = savedScrollTop; });
-                        }
+                    if (tw && firstVisibleId) {
+                        // 清除筛选后：滚动到之前屏幕上第一条可见的记录
+                        requestAnimationFrame(() => {
+                            const targetRow = tw.querySelector(`tbody tr[data-id="${firstVisibleId}"]`);
+                            if (targetRow) {
+                                const twRect = tw.getBoundingClientRect();
+                                const rowRect = targetRow.getBoundingClientRect();
+                                tw.scrollTop += (rowRect.top - twRect.top) - firstVisibleOffset;
+                            }
+                        });
                     }
                 });
                 return;
@@ -6909,25 +6928,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // 右键菜单：复制选中内容
-        xtermContainer.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            const selection = term.getSelection();
-            if (selection) {
-                try {
-                    navigator.clipboard.writeText(selection).then(() => setStatus('已复制选中内容'));
-                } catch (err) {
-                    // 兼容旧浏览器
-                    const ta = document.createElement('textarea');
-                    ta.value = selection;
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try { document.execCommand('copy'); setStatus('已复制选中内容'); } catch(e) {}
-                    document.body.removeChild(ta);
-                }
-            }
-        });
-
         // 点击 xterm 时确保获得焦点（全屏程序如 apt dialog 需要焦点在终端上）
         xtermContainer.addEventListener('mousedown', () => {
             setTimeout(() => term.focus(), 10);
@@ -8999,6 +8999,7 @@ document.addEventListener('DOMContentLoaded', function() {
         terminalCtxMenu.style.display = 'none';
         terminalCtxMenu.style.minWidth = '140px';
         terminalCtxMenu.innerHTML = `
+            <div class="context-menu-item" data-action="copy">📋 复制选中</div>
             <div class="context-menu-item" data-action="clear">🗑️ 清屏</div>
             <div class="context-menu-item" data-action="paste">📋 粘贴并运行</div>
         `;
@@ -9010,6 +9011,21 @@ document.addEventListener('DOMContentLoaded', function() {
             terminalCtxMenu.style.display = 'block';
             terminalCtxMenu.style.left = e.clientX + 'px';
             terminalCtxMenu.style.top = e.clientY + 'px';
+            // 根据是否有选中文本控制"复制选中"的可用性
+            const conn = getActiveConn();
+            const hasSelection = conn && conn.xterm && conn.xterm.getSelection && conn.xterm.getSelection();
+            const copyItem = terminalCtxMenu.querySelector('[data-action="copy"]');
+            if (copyItem) {
+                if (hasSelection) {
+                    copyItem.style.opacity = '1';
+                    copyItem.style.pointerEvents = 'auto';
+                    copyItem.style.color = '';
+                } else {
+                    copyItem.style.opacity = '0.4';
+                    copyItem.style.pointerEvents = 'none';
+                    copyItem.style.color = '#999';
+                }
+            }
             // 防止超出视口
             setTimeout(() => {
                 const rect = terminalCtxMenu.getBoundingClientRect();
@@ -9029,7 +9045,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 const action = item.dataset.action;
                 terminalCtxMenu.style.display = 'none';
                 const conn = getActiveConn();
-                if (action === 'clear') {
+                if (action === 'copy') {
+                    // 复制选中内容
+                    if (conn && conn.xterm) {
+                        const selection = conn.xterm.getSelection();
+                        if (selection) {
+                            try {
+                                await navigator.clipboard.writeText(selection);
+                                setStatus('已复制选中内容');
+                            } catch (err) {
+                                const ta = document.createElement('textarea');
+                                ta.value = selection;
+                                document.body.appendChild(ta);
+                                ta.select();
+                                try { document.execCommand('copy'); setStatus('已复制选中内容'); } catch(e) {}
+                                document.body.removeChild(ta);
+                            }
+                        }
+                    }
+                } else if (action === 'clear') {
                     if (conn && conn.xterm) conn.xterm.clear();
                     if (conn) conn.terminalContent = '';
                 } else if (action === 'paste') {

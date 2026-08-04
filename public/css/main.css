@@ -3271,6 +3271,7 @@ tr.client-row.cut-pending {
     background: #fff;
     border: 1px solid #e4e7ed;
     border-radius: 8px;
+    flex-shrink: 0;
 }
 
 .memo-tab-bar {
@@ -3365,6 +3366,7 @@ tr.client-row.cut-pending {
     background: #fff;
     border: 1px solid #e4e7ed;
     border-radius: 8px;
+    flex-shrink: 0;
 }
 
 .memos-list {
@@ -3556,7 +3558,11 @@ tr.client-row.cut-pending {
     display: none;
 }
 .memo-sub-panel.active {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 /* 网络报价 Excel 式网格 */
