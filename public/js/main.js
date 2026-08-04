@@ -5634,6 +5634,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 用 background 覆盖 CSS 中的渐变（linear-gradient）
         if (navbar && colors.navbar) navbar.style.background = colors.navbar;
         if (menubar && colors.menubar) menubar.style.background = colors.menubar;
+        // 存到 localStorage，刷新时立即应用（避免闪烁）
+        try { localStorage.setItem('header_colors', JSON.stringify(colors)); } catch (e) {}
     }
 
     // --- 事件绑定 ---
@@ -6905,6 +6907,30 @@ document.addEventListener('DOMContentLoaded', function() {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'input', data: data }));
             }
+        });
+
+        // 右键菜单：复制选中内容
+        xtermContainer.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const selection = term.getSelection();
+            if (selection) {
+                try {
+                    navigator.clipboard.writeText(selection).then(() => setStatus('已复制选中内容'));
+                } catch (err) {
+                    // 兼容旧浏览器
+                    const ta = document.createElement('textarea');
+                    ta.value = selection;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); setStatus('已复制选中内容'); } catch(e) {}
+                    document.body.removeChild(ta);
+                }
+            }
+        });
+
+        // 点击 xterm 时确保获得焦点（全屏程序如 apt dialog 需要焦点在终端上）
+        xtermContainer.addEventListener('mousedown', () => {
+            setTimeout(() => term.focus(), 10);
         });
 
         // 窗口大小变化时调整终端
@@ -10734,6 +10760,75 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     });
                 }
+                return;
+            }
+
+            // Ctrl+C：复制选中区域（TSV格式，支持粘贴到Excel）
+            if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
+                const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
+                const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
+                const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+                const lines = [];
+                for (let ri = r1; ri <= r2; ri++) {
+                    const row = quoteGrid.rows.find(r => r.id === ri);
+                    if (!row) continue;
+                    const cells = [];
+                    for (let ci = c1; ci <= c2; ci++) {
+                        if (isHiddenByMerge(ri, ci)) continue;
+                        cells.push(row.cells[ci] || '');
+                    }
+                    lines.push(cells.join('\t'));
+                }
+                const text = lines.join('\n');
+                try {
+                    navigator.clipboard.writeText(text).then(() => setStatus('已复制 ' + lines.length + ' 行'));
+                } catch (err) {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); setStatus('已复制 ' + lines.length + ' 行'); } catch(e) {}
+                    document.body.removeChild(ta);
+                }
+                return;
+            }
+
+            // Ctrl+V：粘贴（支持 TSV/CSV 格式）
+            if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+                if (!quoteSelection || quoteSelection.startRow === null) return;
+                e.preventDefault();
+                const startRow = quoteSelection.startRow;
+                const startCol = quoteSelection.startCol;
+                const applyPaste = (text) => {
+                    const lines = text.replace(/\r\n/g, '\n').split('\n').filter(l => l.length > 0 || l === '');
+                    let changed = false;
+                    lines.forEach((line, i) => {
+                        const rowId = startRow + i;
+                        const row = quoteGrid.rows.find(r => r.id === rowId);
+                        if (!row) return;
+                        let cells = line.split('\t');
+                        if (cells.length === 1) cells = line.split(','); // 兼容 CSV
+                        cells.forEach((val, j) => {
+                            const colId = startCol + j;
+                            if (!quoteGrid.columns.find(c => c.id === colId)) return;
+                            if (isHiddenByMerge(rowId, colId)) return;
+                            if (row.cells[colId] !== val) {
+                                row.cells[colId] = val;
+                                changed = true;
+                            }
+                        });
+                    });
+                    if (changed) {
+                        saveQuoteGridDebounced();
+                        renderQuoteGrid();
+                    }
+                };
+                try {
+                    navigator.clipboard.readText().then(applyPaste).catch(() => setStatus('粘贴失败，请授权剪贴板权限'));
+                } catch (err) { setStatus('粘贴失败：' + err.message); }
                 return;
             }
 

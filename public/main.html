@@ -9,6 +9,23 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script>
+        // 立即应用标题栏颜色，避免刷新时闪烁（在DOM渲染前设置CSS）
+        (function() {
+            try {
+                var raw = localStorage.getItem('header_colors');
+                if (raw) {
+                    var c = JSON.parse(raw);
+                    var style = document.createElement('style');
+                    var css = '';
+                    if (c.navbar) css += '.navbar{background:' + c.navbar + ' !important;}';
+                    if (c.menubar) css += '.top-menu{background:' + c.menubar + ' !important;}';
+                    style.textContent = css;
+                    document.head.appendChild(style);
+                }
+            } catch (e) {}
+        })();
+    </script>
 </head>
 <body>
     <header class="navbar">
