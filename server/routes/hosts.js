@@ -32,11 +32,12 @@ router.post('/', requireAuth, async (req, res) => {
         if (!host) return res.status(400).json({ error: '请输入主机地址' });
         if (!username) return res.status(400).json({ error: '请输入用户名' });
 
-        const maxOrder = await queryOne(
-            'SELECT MAX(sort_order) as max_order FROM hosts WHERE user_id = ?',
+        // 新添加的服务器排到最前面：将已有服务器的 sort_order 都 +1
+        await execute(
+            'UPDATE hosts SET sort_order = sort_order + 1 WHERE user_id = ?',
             [userId]
         );
-        const order = (maxOrder?.max_order ?? -1) + 1;
+        const order = 0; // 新添加的始终是 sort_order 最小值（排在最前）
 
         const result = await execute(`
             INSERT INTO hosts (user_id, name, host, port, username, password, remark, sort_order)

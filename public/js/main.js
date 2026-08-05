@@ -6670,6 +6670,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="cmd-item" data-id="${c.id}">
                             <span class="cmd-name" title="点击执行">${escapeHtml(c.name)}</span>
                             <div class="cmd-actions">
+                                <button class="cmd-copy-btn" data-id="${c.id}" title="复制命令">📋</button>
                                 <button class="cmd-edit-btn" data-id="${c.id}" title="编辑">✏️</button>
                                 <button class="cmd-delete-btn" data-id="${c.id}" title="删除">🗑️</button>
                             </div>
@@ -6886,7 +6887,6 @@ document.addEventListener('DOMContentLoaded', function() {
         xtermContainer.style.cssText = 'width:100%;flex:1;min-height:0;display:none;';
         xtermContainer.dataset.connId = connId;
         terminal.appendChild(xtermContainer);
-
         const savedBg = localStorage.getItem('sshTerminalBg') || '#1e1e1e';
         const term = new Terminal({
             cursorBlink: true,
@@ -7016,7 +7016,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             term._opened = true;
                             term.open(xtermContainer);
                         }
-                        xtermContainer.style.display = 'block';
+                        xtermContainer.style.display = 'flex';
                         if (!term._initialized) {
                             term._initialized = true;
                             // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
@@ -7243,15 +7243,15 @@ document.addEventListener('DOMContentLoaded', function() {
             // 隐藏占位符，显示 xterm
             const placeholder = terminal.querySelector('.terminal-placeholder');
             if (placeholder) placeholder.style.display = 'none';
-            // 显示当前连接的 xterm 容器
-            conn.xtermContainer.style.display = 'block';
+            // 显示当前连接的 xterm 容器（用 flex 保持布局一致性）
+            conn.xtermContainer.style.display = 'flex';
             // 如果有后台缓冲的数据，一次性写入
             if (conn.terminalContent && conn.terminalContent.length > 0) {
                 term.write(conn.terminalContent);
                 conn.terminalContent = '';
             }
-            if (!term._initialized) {
-                term._initialized = true;
+            // 每次切换都重新 fit（容器从 none 变为可见时尺寸可能不准）
+            setTimeout(() => {
                 if (conn.fitAddon) {
                     try {
                         conn.fitAddon.fit();
@@ -7262,7 +7262,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     } catch (e) {}
                 }
-            }
+            }, 100);
             term.focus();
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
@@ -8814,6 +8814,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const cmdName = e.target.closest('.cmd-name');
             const editCmdBtn = e.target.closest('.cmd-edit-btn');
             const delCmdBtn = e.target.closest('.cmd-delete-btn');
+            const copyCmdBtn = e.target.closest('.cmd-copy-btn');
 
             if (e.target.closest('.folder-header') && !addCmdBtn && !editFolderBtn && !delFolderBtn && !moveUpBtn && !moveDownBtn && folderItem) {
                 const cmds = folderItem.querySelector('.folder-commands');
@@ -8872,6 +8873,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     sendCommand(cmd.command);
                 } else if (!getActiveWs()) {
                     setStatus('⚠️ 请先连接主机');
+                }
+            } else if (copyCmdBtn) {
+                const id = parseInt(copyCmdBtn.dataset.id);
+                let cmd = null;
+                for (const f of commandFolders) {
+                    cmd = (f.commands || []).find(c => c.id === id);
+                    if (cmd) break;
+                }
+                if (cmd) {
+                    try {
+                        await navigator.clipboard.writeText(cmd.command || '');
+                        setStatus('✅ 命令已复制');
+                    } catch (err) {
+                        const ta = document.createElement('textarea');
+                        ta.value = cmd.command || '';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        try { document.execCommand('copy'); setStatus('✅ 命令已复制'); } catch(e) {}
+                        document.body.removeChild(ta);
+                    }
                 }
             } else if (editCmdBtn) {
                 const id = parseInt(editCmdBtn.dataset.id);

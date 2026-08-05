@@ -2927,6 +2927,7 @@ tr.client-row.cut-pending {
     padding: 0 8px;
     flex-wrap: wrap;
     gap: 2px;
+    flex-shrink: 0;
 }
 
 .ssh-tab {
@@ -3015,6 +3016,7 @@ tr.client-row.cut-pending {
     color: #fff;
     font-size: 13px;
     font-weight: 500;
+    flex-shrink: 0;
 }
 
 .terminal-actions {
@@ -3058,6 +3060,7 @@ tr.client-row.cut-pending {
     padding: 10px 16px;
     background: #2d2d2d;
     border-top: 1px solid #404040;
+    flex-shrink: 0;
 }
 
 .terminal-input-area input {
