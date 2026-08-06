@@ -50,6 +50,10 @@ document.addEventListener('DOMContentLoaded', function() {
         copiedClientRecordId: null,
         // 服务器信息复制
         copiedServerData: null,
+        // 提取的客户信息（含收入明细）
+        extractedClientData: null,
+        // 提取的服务器+客户全量信息
+        extractedBothData: null,
         // 列定义缓存
         columnsCache: {},
         // 行管理模式
@@ -859,6 +863,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const ctxPasteClient = $('#ctxPasteClient');
     const ctxCopyServer = $('#ctxCopyServer');
     const ctxPasteServer = $('#ctxPasteServer');
+    const ctxExtractClient = $('#ctxExtractClient');
+    const ctxPasteExtractedClient = $('#ctxPasteExtractedClient');
+    const ctxExtractBoth = $('#ctxExtractBoth');
+    const ctxPasteBoth = $('#ctxPasteBoth');
     const ctxDeleteRecord = $('#ctxDeleteRecord');
     const ctxBatchPaste = $('#ctxBatchPaste');
     const insertMultiRowModal = $('#insertMultiRowModal');
@@ -1020,6 +1028,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 切换标签时重置剪切/复制状态
         state.copiedClientRecordId = null;
         state.copiedServerData = null;
+        state.extractedClientData = null;
+        state.extractedBothData = null;
         // 恢复目标标签的筛选状态
         state.filters = state.tabFilters[tabId] ? { ...state.tabFilters[tabId] } : {};
         renderTabs();
@@ -3818,7 +3828,10 @@ document.addEventListener('DOMContentLoaded', function() {
             html += `
                 <div class="column-item" draggable="true" data-id="${col.id}">
                     <div class="col-info">
-                        <span><strong>${escapeHtml(col.col_name)}</strong></span>
+                        <span class="col-name-wrapper">
+                            <strong class="col-name-display" data-id="${col.id}" style="cursor:pointer;" title="双击编辑列名">${escapeHtml(col.col_name)}</strong>
+                            <input type="text" class="col-name-input" data-id="${col.id}" style="display:none;min-width:120px;padding:2px 4px;border:1px solid #4a6cf7;border-radius:4px;font-size:13px;" />
+                        </span>
                         <span class="col-key">(${escapeHtml(col.col_key)})</span>
                         <button class="income-toggle ${isIncome === 1 ? 'active-income' : (isIncome === 2 ? 'active-expense' : '')}" data-id="${col.id}">${incomeLabel || '普通'}</button>
                         <span style="color:#999;font-size:12px;">${col.col_visible === 1 ? '👁️' : '🙈'}</span>
@@ -3917,6 +3930,66 @@ document.addEventListener('DOMContentLoaded', function() {
                     renderTable(false);
                     setStatus('✅ 标记已更新');
                 } catch (err) { setStatus('❌ 更新失败: ' + err.message); }
+            });
+        });
+
+        // 双击列名 → 编辑列名
+        columnList.querySelectorAll('.col-name-display').forEach(display => {
+            display.addEventListener('dblclick', function(e) {
+                e.stopPropagation();
+                const id = parseInt(this.dataset.id);
+                const col = state.columns.find(c => c.id === id);
+                if (!col) return;
+                const wrapper = this.closest('.col-name-wrapper');
+                if (!wrapper) return;
+                const input = wrapper.querySelector('.col-name-input');
+                if (!input) return;
+                input.value = col.col_name;
+                this.style.display = 'none';
+                input.style.display = 'inline-block';
+                input.focus();
+                input.select();
+            });
+        });
+        columnList.querySelectorAll('.col-name-input').forEach(input => {
+            const saveEdit = async () => {
+                const id = parseInt(input.dataset.id);
+                const col = state.columns.find(c => c.id === id);
+                if (!col) return;
+                const wrapper = input.closest('.col-name-wrapper');
+                const display = wrapper ? wrapper.querySelector('.col-name-display') : null;
+                const newName = input.value.trim();
+                if (!newName || newName === col.col_name) {
+                    if (display) display.style.display = '';
+                    input.style.display = 'none';
+                    return;
+                }
+                try {
+                    await API.put('/columns/' + id, { col_name: newName });
+                    col.col_name = newName;
+                    updateTabCache(state.currentTabId);
+                    renderColumnList();
+                    renderTable(false);
+                    setStatus('✅ 列名已更新');
+                } catch (err) {
+                    setStatus('❌ 更新失败: ' + err.message);
+                    if (display) {
+                        display.textContent = escapeHtml(col.col_name);
+                        display.style.display = '';
+                    }
+                    input.style.display = 'none';
+                }
+            };
+            input.addEventListener('blur', saveEdit);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    const wrapper = input.closest('.col-name-wrapper');
+                    const display = wrapper ? wrapper.querySelector('.col-name-display') : null;
+                    if (display) display.style.display = '';
+                    input.style.display = 'none';
+                }
             });
         });
     }
@@ -5970,8 +6043,42 @@ document.addEventListener('DOMContentLoaded', function() {
         // 服务器行剪切/粘贴（独享、共享、记账标签都支持，跨标签粘贴）
         const isServerRow = recordType === 'server';
         const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
+        // 判断空行收入/支出列都是0（用于粘贴条件）
+        const incomeTotal = targetRec ? (targetRec._incomeTotal || 0) : 0;
+        const expenseTotal = targetRec ? (targetRec._expenseTotal || 0) : 0;
+        const isIncomeExpenseEmpty = incomeTotal === 0 && expenseTotal === 0;
         ctxCopyServer.style.display = isServerRow ? 'block' : 'none';
         ctxPasteServer.style.display = (isServerRow && state.copiedServerData && isEmptyRow) ? 'block' : 'none';
+
+        // ===== 新功能：提取/粘贴客户信息（含收入）、服务器+客户全量信息 =====
+        // 客户行：提取客户信息（含收入明细）
+        const canExtractClient = recordType === 'client';
+        ctxExtractClient.style.display = (isShared || isDedicated) && canExtractClient ? 'block' : 'none';
+        // 服务器行（或任意行）：如果提取了客户信息 + 收入支出都为0 → 可以粘贴
+        ctxPasteExtractedClient.style.display = (isShared || isDedicated) && state.extractedClientData && isIncomeExpenseEmpty ? 'block' : 'none';
+        // 服务器行（且有客户关联，或记账标签的任意有数据的行）：提取服务器+客户信息（整行+明细）
+        const hasData = targetRec && (targetRec.data.ip_address || targetRec.data.provider || incomeTotal > 0 || expenseTotal > 0);
+        ctxExtractBoth.style.display = (isShared || isDedicated) && hasData ? 'block' : 'none';
+        ctxPasteBoth.style.display = (isShared || isDedicated) && state.extractedBothData && isEmptyRow ? 'block' : 'none';
+
+        // 互斥：当提取了某种信息，其他类型的粘贴选项应隐藏
+        const hasExtractClient = !!state.extractedClientData;
+        const hasExtractBoth = !!state.extractedBothData;
+        const hasOldCopyServer = !!state.copiedServerData;
+        const hasOldCopyClient = !!state.copiedClientRecordId;
+        // 互斥显示：同一时刻只能有一种提取的粘贴
+        if (hasExtractClient) {
+            ctxPasteServer.style.display = 'none';
+            ctxPasteClient.style.display = 'none';
+            ctxPasteBoth.style.display = 'none';
+        } else if (hasExtractBoth) {
+            ctxPasteServer.style.display = 'none';
+            ctxPasteClient.style.display = 'none';
+            ctxPasteExtractedClient.style.display = 'none';
+        } else if (hasOldCopyServer || hasOldCopyClient) {
+            ctxPasteExtractedClient.style.display = 'none';
+            ctxPasteBoth.style.display = 'none';
+        }
         // 共享标签：服务器行不显示删除（有客户关联），客户行可以删除；独享标签不显示删除
         const canDelete = isShared ? (recordType === 'client') : false;
         ctxDeleteRecord.style.display = canDelete ? 'block' : 'none';
@@ -6194,6 +6301,159 @@ document.addEventListener('DOMContentLoaded', function() {
             updateTabCache(state.currentTabId);
             renderTable(false);
             setStatus('服务器信息已粘贴，原行支出已清零');
+        } catch (err) { setStatus('粘贴失败: ' + err.message); }
+    });
+
+    // ===== 新功能：提取/粘贴 客户信息（含收入明细） =====
+    ctxExtractClient.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId) return;
+        const record = state.records.find(r => r.id === contextTargetId);
+        if (!record) return;
+        // 提取客户相关字段：客户购买/到期/剩余、客户名、单价备注、收入
+        const keys = ['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'fee', 'income'];
+        const clientData = {};
+        keys.forEach(k => { if (record.data[k] !== undefined) clientData[k] = record.data[k]; });
+        state.extractedClientData = {
+            recordId: record.id,
+            tabId: state.currentTabId,
+            recordType: record.record_type,
+            parentId: record.parent_id || null,
+            data: clientData
+        };
+        // 清空其他提取类型，保持互斥
+        state.copiedClientRecordId = null;
+        state.copiedServerData = null;
+        state.copiedServerRecordId = null;
+        state.extractedBothData = null;
+        $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+        const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
+        if (tr) tr.classList.add('cut-pending');
+        setStatus('客户信息（含收入）已提取 ✂️，请在收入/支出都为0的行上右键粘贴');
+    });
+
+    ctxPasteExtractedClient.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.extractedClientData || !state.currentTabId) {
+            setStatus('无法粘贴：缺少目标或提取的数据');
+            return;
+        }
+        const targetRec = state.records.find(r => r.id === contextTargetId);
+        if (!targetRec) return;
+        // 条件校验：收入列和支出列都是0才能粘贴
+        const incomeTotal = targetRec._incomeTotal || 0;
+        const expenseTotal = targetRec._expenseTotal || 0;
+        if (incomeTotal !== 0 || expenseTotal !== 0) {
+            setStatus('粘贴失败：目标行收入或支出不为0');
+            return;
+        }
+        try {
+            setStatus('粘贴客户信息中...');
+            const src = state.extractedClientData;
+            // 1. 收入明细迁移
+            if (src.recordId !== contextTargetId) {
+                try { await API.post('/income/migrate', { from_record_id: src.recordId, to_record_id: contextTargetId }); } catch(e) { /* 无收入明细时忽略 */ }
+            }
+            // 2. 将客户字段写入目标行 data
+            const updateData = { ...targetRec.data };
+            Object.keys(src.data).forEach(k => {
+                if (k !== 'income') { // income 列是显示字段，由收入明细自动计算
+                    updateData[k] = src.data[k];
+                }
+            });
+            await API.put('/records/' + contextTargetId, { data: updateData });
+            // 3. 清空原行的客户字段（移动语义）
+            if (src.recordId !== contextTargetId) {
+                const srcRec = state.records.find(r => r.id === src.recordId);
+                if (srcRec) {
+                    const clearData = { ...srcRec.data };
+                    ['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'fee'].forEach(k => {
+                        clearData[k] = '';
+                    });
+                    try { await API.put('/records/' + src.recordId, { data: clearData }); } catch(e) {}
+                }
+            }
+            state.extractedClientData = null;
+            $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('客户信息（含收入）已粘贴 ✓');
+        } catch (err) { setStatus('粘贴客户信息失败: ' + err.message); }
+    });
+
+    // ===== 新功能：提取/粘贴 服务器+客户 全量信息（移动整行） =====
+    ctxExtractBoth.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId) return;
+        const record = state.records.find(r => r.id === contextTargetId);
+        if (!record) return;
+        // 提取：整行 data + record_type
+        state.extractedBothData = {
+            recordId: record.id,
+            tabId: state.currentTabId,
+            recordType: record.record_type || 'server',
+            parentId: record.parent_id || null,
+            data: { ...record.data }
+        };
+        // 清空其他提取类型
+        state.copiedClientRecordId = null;
+        state.copiedServerData = null;
+        state.copiedServerRecordId = null;
+        state.extractedClientData = null;
+        $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+        const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
+        if (tr) tr.classList.add('cut-pending');
+        setStatus('服务器+客户信息已提取 ✂️，请在空白行右键粘贴');
+    });
+
+    ctxPasteBoth.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!contextTargetId || !state.extractedBothData || !state.currentTabId) {
+            setStatus('无法粘贴：缺少目标或数据');
+            return;
+        }
+        const targetRec = state.records.find(r => r.id === contextTargetId);
+        if (!targetRec) return;
+        // 条件校验：空白行（无 ip、provider，且收入/支出都为0）
+        const incomeTotal = targetRec._incomeTotal || 0;
+        const expenseTotal = targetRec._expenseTotal || 0;
+        const isEmptyRow = !targetRec.data.ip_address && !targetRec.data.provider && incomeTotal === 0 && expenseTotal === 0;
+        if (!isEmptyRow) {
+            setStatus('粘贴失败：目标行不是空白行或存在收入/支出数据');
+            return;
+        }
+        try {
+            setStatus('粘贴服务器+客户信息中...');
+            const src = state.extractedBothData;
+            // 1. 收入明细迁移
+            if (src.recordId !== contextTargetId) {
+                try { await API.post('/income/migrate', { from_record_id: src.recordId, to_record_id: contextTargetId }); } catch(e) {}
+                try { await API.post('/host-expense/move', { from_record_id: src.recordId, to_record_id: contextTargetId }); } catch(e) {}
+            }
+            // 2. 将整行 data 写入目标行
+            const updateData = { ...targetRec.data };
+            Object.keys(src.data).forEach(k => {
+                const val = src.data[k];
+                updateData[k] = val !== undefined && val !== null ? val : '';
+            });
+            await API.put('/records/' + contextTargetId, { data: updateData });
+            // 3. 清空原行所有 data（移动语义）
+            if (src.recordId !== contextTargetId) {
+                const srcRec = state.records.find(r => r.id === src.recordId);
+                if (srcRec) {
+                    // 清空所有 data 字段，但保留 sort 相关字段？不，把 data 所有字段置空
+                    const emptyData = {};
+                    Object.keys(srcRec.data || {}).forEach(k => { emptyData[k] = ''; });
+                    try { await API.put('/records/' + src.recordId, { data: emptyData }); } catch(e) {}
+                }
+            }
+            state.extractedBothData = null;
+            $$('tr.client-row.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+            await loadRecords(state.currentTabId);
+            updateTabCache(state.currentTabId);
+            renderTable(false);
+            setStatus('服务器+客户信息已粘贴，原行已清空 ✓');
         } catch (err) { setStatus('粘贴失败: ' + err.message); }
     });
 
