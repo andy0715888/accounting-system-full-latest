@@ -3188,6 +3188,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const confirmBtn = document.getElementById('addRowConfirm');
         const cancelBtn = document.getElementById('addRowCancel');
         const closeBtn = document.getElementById('closeAddRowModal');
+        const customInput = document.getElementById('addRowCustomCount');
+
+        // 每次打开默认勾选第一个（添加1行）
+        const radios = document.querySelectorAll('input[name="addRowCount"]');
+        radios.forEach(r => { r.checked = r.value === '1'; });
+        if (customInput) customInput.value = 3;
 
         modal.classList.add('show');
 
@@ -3200,13 +3206,15 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         const onConfirm = async () => {
-            const radios = document.querySelectorAll('input[name="addRowCount"]');
+            const checked = document.querySelector('input[name="addRowCount"]:checked');
             let count = 1;
-            for (const radio of radios) {
-                if (radio.checked) {
-                    count = parseInt(radio.value);
-                    break;
-                }
+            if (checked && checked.value === 'custom' && customInput) {
+                let n = parseInt(customInput.value);
+                if (isNaN(n) || n < 1) n = 1;
+                if (n > 50) n = 50;
+                count = n;
+            } else {
+                count = checked ? (parseInt(checked.value) || 1) : 1;
             }
             closeModal();
             await addRow(count);
@@ -3214,6 +3222,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const onKeyDown = (e) => {
             if (e.key === 'Enter') {
+                // 如果光标在自定义输入框里 → Enter 直接确认
+                if (document.activeElement && document.activeElement.id === 'addRowCustomCount') {
+                    // 自动切换到 custom 选项再确认
+                    const customRadio = document.querySelector('input[name="addRowCount"][value="custom"]');
+                    if (customRadio) customRadio.checked = true;
+                }
                 e.preventDefault();
                 onConfirm();
             } else if (e.key === 'Escape') {
@@ -3366,6 +3380,8 @@ document.addEventListener('DOMContentLoaded', function() {
         ];
 
         try {
+            // 严格按收入弹窗顶部单价（不走明细合计）
+            const getIncomePrice = await buildIncomePriceMap();
             if (format === 'excel') {
                 exportClientStatus.textContent = '🔄 导出中...';
                 if (typeof XLSX === 'undefined') await loadXLSX();
@@ -3380,7 +3396,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             return formatDisplayDate(r.data[f.key]);
                         }
                         if (f.key === 'income_total') {
-                            return Math.round(r._incomeTotal || 0);
+                            const v = getIncomePrice(r.id);
+                            if (v === '' || v === null || v === undefined) return '';
+                            return Math.round(Number(v));
                         }
                         return r.data[f.key] ?? '';
                     });
@@ -3413,7 +3431,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(() => exportClientInfoModal.classList.remove('show'), 1500);
             } else {
                 exportClientStatus.textContent = '🔄 生成图片中...';
-                await exportClientInfoAsImage(clientRecords, exportFields);
+                await exportClientInfoAsImage(clientRecords, exportFields, getIncomePrice);
                 exportClientStatus.textContent = '✅ 图片已复制到剪贴板';
                 setTimeout(() => exportClientInfoModal.classList.remove('show'), 2000);
             }
@@ -3422,29 +3440,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function buildIncomePriceMap(tabId) {
-        let allIncomeRecords = [];
-        try {
-            allIncomeRecords = await API.get('/income/by-tab/' + tabId);
-        } catch(e) { allIncomeRecords = []; }
-        const incomeMap = {};
-        allIncomeRecords.forEach(r => {
-            if (!incomeMap[r.record_id]) incomeMap[r.record_id] = [];
-            incomeMap[r.record_id].push(r);
-        });
+    async function buildIncomePriceMap() {
+        // 严格以"收入弹窗最上面的单价输入框（即 localStorage 保存的 incomeLastAmount_*）为准
+        // 如果里面空白 → 返回 ''，不去拉取下面明细的单价
         return (recordId) => {
             try {
                 const saved = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
-                if (saved && !isNaN(parseFloat(saved))) return parseFloat(saved);
+                if (saved === '') return ''; // 空白也返回空字符串，而不是 0 或 fallback 明细
+                if (saved !== null && saved !== undefined) {
+                    const n = parseFloat(saved);
+                    if (!isNaN(n)) return n;
+                }
             } catch(e) {}
-            const list = incomeMap[recordId] || [];
-            if (list.length === 0) return 0;
-            const sorted = [...list].sort((a, b) => {
-                const da = new Date(a.income_date || 0).getTime();
-                const db = new Date(b.income_date || 0).getTime();
-                return db - da;
-            });
-            return sorted[0].amount || 0;
+            return ''; // 用户没有在弹窗上面输入过 → 导出空白
         };
     }
 
@@ -3461,7 +3469,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const now = new Date();
             const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
 
-            const getBillPrice = await buildIncomePriceMap(state.currentTabId);
+            const getBillPrice = await buildIncomePriceMap();
 
             function addOneMonth(dateStr) {
                 if (!dateStr) return '';
@@ -3484,8 +3492,14 @@ document.addEventListener('DOMContentLoaded', function() {
             let totalAmount = 0;
             const dataRows = records
                 .map((r, idx) => {
-                    const price = Math.round(getBillPrice(r.id));
-                    totalAmount += price;
+                    let rawPrice = getBillPrice(r.id);
+                    let price;
+                    if (rawPrice === '' || rawPrice === null || rawPrice === undefined) {
+                        price = ''; // 空白输入框 → 导出空白（不显示0）
+                    } else {
+                        price = Math.round(Number(rawPrice));
+                        totalAmount += price;
+                    }
                     return [
                         idx + 1,
                         r.data.ip_info || r.data.ip_address || '',
@@ -3666,8 +3680,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (f.key === 'client_purchase' || f.key === 'client_expire') {
                     return formatDisplayDate(r.data[f.key]);
                 }
-                if (f.key === 'price' && getPriceFn) {
-                    return Math.round(getPriceFn(r.id));
+                if ((f.key === 'price' || f.key === 'income_total') && getPriceFn) {
+                    const v = getPriceFn(r.id);
+                    if (v === '' || v === null || v === undefined) return '';
+                    return Math.round(Number(v));
                 }
                 if (f.key === 'ip_info') {
                     return r.data.ip_info || r.data.ip_address || '';
@@ -5354,25 +5370,40 @@ document.addEventListener('DOMContentLoaded', function() {
             const bestMonth = filteredMonths.length ? filteredMonths.reduce((best, item) => item.net > best.net ? item : best, filteredMonths[0]) : null;
             const worstMonth = filteredMonths.length ? filteredMonths.reduce((worst, item) => item.net < worst.net ? item : worst, filteredMonths[0]) : null;
 
-            const monthRows = recentMonths.map(item => `
+            // 辅助：利润率（净额 / 收入），收入为 0 时显示 —
+            function profitRateText(income, net) {
+                const inAmt = Number(income) || 0;
+                if (inAmt <= 0) return '—';
+                const rate = (Number(net) || 0) / inAmt * 100;
+                return rate.toFixed(1) + '%';
+            }
+            const monthRows = recentMonths.map(item => {
+                const rateTxt = profitRateText(item.income, item.net);
+                const rateClass = (Number(item.income) || 0) > 0 && (Number(item.net) || 0) >= 0 ? 'positive' : 'negative';
+                return `
                 <tr>
                     <td>${escapeHtml(item.label)}</td>
                     <td class="positive">${formatMoney(item.income)}</td>
                     <td class="negative">${formatMoney(item.expense)}</td>
                     <td class="${item.net >= 0 ? 'positive' : 'negative'}">${formatMoney(item.net)}</td>
+                    <td class="${rateClass}">${rateTxt}</td>
                     <td>${item.count}</td>
                 </tr>
-            `).join('');
+            `}).join('');
 
-            const yearRows = recentYears.map(item => `
+            const yearRows = recentYears.map(item => {
+                const rateTxt = profitRateText(item.income, item.net);
+                const rateClass = (Number(item.income) || 0) > 0 && (Number(item.net) || 0) >= 0 ? 'positive' : 'negative';
+                return `
                 <tr>
                     <td>${escapeHtml(item.label)}</td>
                     <td class="positive">${formatMoney(item.income)}</td>
                     <td class="negative">${formatMoney(item.expense)}</td>
                     <td class="${item.net >= 0 ? 'positive' : 'negative'}">${formatMoney(item.net)}</td>
+                    <td class="${rateClass}">${rateTxt}</td>
                     <td>${item.count}</td>
                 </tr>
-            `).join('');
+            `}).join('');
 
             const hidden = state.statsHidden;
             const maskVal = () => '••••••';
@@ -5455,12 +5486,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 <div class="stats-detail premium-table">
                     <div class="stats-detail-header"><h3>年度对比</h3><select class="stats-range-select" data-range-type="year" style="margin-left:8px;padding:2px 6px;font-size:13px;border-radius:4px;border:1px solid #dcdfe6;"><option value="6" ${yearRange===6?'selected':''}>近6年</option><option value="12" ${yearRange===12?'selected':''}>近12年</option><option value="0" ${yearRange===0?'selected':''}>所有年份</option></select></div>
-                    <table><thead><tr><th>年份</th><th>收入</th><th>支出</th><th>净额</th><th>记录数</th></tr></thead><tbody>${yearRows}</tbody></table>
+                    <table><thead><tr><th>年份</th><th>收入</th><th>支出</th><th>净额</th><th>利润率</th><th>记录数</th></tr></thead><tbody>${yearRows}</tbody></table>
                 </div>
 
                 <div class="stats-detail premium-table">
                     <div class="stats-detail-header"><h3>月份明细</h3><select class="stats-range-select" data-range-type="month" style="margin-left:8px;padding:2px 6px;font-size:13px;border-radius:4px;border:1px solid #dcdfe6;"><option value="6" ${monthRange===6?'selected':''}>近6月</option><option value="12" ${monthRange===12?'selected':''}>近12月</option><option value="24" ${monthRange===24?'selected':''}>近24月</option><option value="0" ${monthRange===0?'selected':''}>所有月份</option></select></div>
-                    <table><thead><tr><th>月份</th><th>收入</th><th>支出</th><th>净额</th><th>记录数</th></tr></thead><tbody>${monthRows}</tbody></table>
+                    <table><thead><tr><th>月份</th><th>收入</th><th>支出</th><th>净额</th><th>利润率</th><th>记录数</th></tr></thead><tbody>${monthRows}</tbody></table>
                 </div>
             `;
         } catch (err) {
@@ -6356,18 +6387,15 @@ document.addEventListener('DOMContentLoaded', function() {
             // 迁移支出明细
             if (sourceId && sourceId !== contextTargetId) {
                 try { await API.post('/host-expense/move', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
-                // 清空原行服务器字段
+                // 清空原行：只清空支出弹窗内的支出明细（已通过host-expense/move移走），服务器列和客户列等保留
                 const srcRec = state.records.find(r => r.id === sourceId);
-                if (srcRec) {
-                    if (isDedicatedTab) {
-                        const clearData = { ...srcRec.data };
-                        SERVER_FIELDS.forEach(k => { clearData[k] = ''; });
-                        try { await API.put('/records/' + sourceId, { data: clearData }); } catch(e) {}
-                    } else {
-                        const sourceData = { ...srcRec.data, expense: '0' };
-                        try { await API.put('/records/' + sourceId, { data: sourceData }); } catch(e) {}
-                    }
+                if (srcRec && !isDedicatedTab) {
+                    // 共享/简单标签：保持旧逻辑，把 expense 显示清零
+                    const sourceData = { ...srcRec.data, expense: '0' };
+                    try { await API.put('/records/' + sourceId, { data: sourceData }); } catch(e) {}
                 }
+                // 独享标签：不动原行服务器列信息（服务商/月数/购买/到期/IP/密码等都保留），
+                // 只依赖 host-expense/move API 把支出明细迁移走，其他信息不清空
             }
             await API.put('/records/' + contextTargetId, { data: updateData });
             state.copiedServerData = null;
@@ -7429,6 +7457,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         ws.onerror = () => {
+            if (conn.ws === ws) conn.ws = null;
             if (activeConnId === connId) {
                 title.textContent = '连接失败';
                 term.writeln('\r\n\x1b[31mWebSocket 连接失败\x1b[0m');
@@ -7444,6 +7473,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         ws.onclose = () => {
+            if (conn.ws === ws) conn.ws = null;
             clearInterval(clientPing);
             stopMonitor(connId);
             window.removeEventListener('resize', handleResize);
@@ -7465,6 +7495,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!conn) return;
         if (conn.ws) {
             try { conn.ws.close(); } catch(e) {}
+            conn.ws = null;
         }
         if (conn.clientPing) clearInterval(conn.clientPing);
         stopMonitor(connId);
@@ -10409,7 +10440,9 @@ document.addEventListener('DOMContentLoaded', function() {
             colWidths: {},   // colId -> px
             rowHeights: {},  // rowId -> px
             styles: {},      // "rowId_colId" -> { align, bold, fontSize, fg, bg }
-            merges: []       // [{ row, col, rowspan, colspan }]
+            merges: [],      // [{ row, col, rowspan, colspan }]
+            hiddenRows: [],  // [rowId]  不显示在生成图片中
+            hiddenCols: []   // [colId]  不显示在生成图片中
         };
     }
 
@@ -10423,7 +10456,9 @@ document.addEventListener('DOMContentLoaded', function() {
             colWidths: data.colWidths || {},
             rowHeights: data.rowHeights || {},
             styles: data.styles || {},
-            merges: Array.isArray(data.merges) ? data.merges : []
+            merges: Array.isArray(data.merges) ? data.merges : [],
+            hiddenRows: Array.isArray(data.hiddenRows) ? data.hiddenRows : [],
+            hiddenCols: Array.isArray(data.hiddenCols) ? data.hiddenCols : []
         };
     }
 
@@ -10570,13 +10605,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const g = quoteGrid;
+        // 隐藏态辅助
+        const isRowHidden = (id) => Array.isArray(g.hiddenRows) && g.hiddenRows.indexOf(id) >= 0;
+        const isColHidden = (id) => Array.isArray(g.hiddenCols) && g.hiddenCols.indexOf(id) >= 0;
+
         let html = '<table class="quote-grid" id="quoteGridTable"><thead><tr>';
-        html += '<th class="corner-cell" style="width:50px;min-width:50px;"></th>';
+        html += '<th class="corner-cell" style="width:50px;min-width:50px;position:relative;" data-quote-context="corner"></th>';
         g.columns.forEach(col => {
             const w = g.colWidths[col.id] || 120;
-            html += `<th data-col-id="${col.id}" style="width:${w}px;min-width:${w}px;position:relative;">
+            const colHidden = isColHidden(col.id);
+            const title = colHidden ? '（该列不显示在生成的图片中）' : '';
+            html += `<th data-col-id="${col.id}" data-quote-context="col-header" style="width:${w}px;min-width:${w}px;position:relative;${colHidden ? 'opacity:0.55;' : ''}" title="${title}">
                 <div class="col-header" data-col-id="${col.id}">
-                    <span class="col-name" data-col-id="${col.id}">${escapeHtml(col.name)}</span>
+                    <span class="col-name" data-col-id="${col.id}">${colHidden ? '👁‍🗨 ' : ''}${escapeHtml(col.name)}</span>
                 </div>
                 <div class="col-resize-handle" data-col-id="${col.id}" style="position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;"></div>
             </th>`;
@@ -10585,8 +10626,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         g.rows.forEach((row, rowIdx) => {
             const h = g.rowHeights[row.id] || 32;
-            html += `<tr data-row-id="${row.id}" style="height:${h}px;">`;
-            html += `<td class="row-header" data-row-id="${row.id}" style="height:${h}px;position:relative;">${rowIdx + 1}
+            const rowHidden = isRowHidden(row.id);
+            const title = rowHidden ? '（该行不显示在生成的图片中）' : '';
+            html += `<tr data-row-id="${row.id}" style="height:${h}px;${rowHidden ? 'opacity:0.55;' : ''}" title="${title}">`;
+            html += `<td class="row-header" data-row-id="${row.id}" data-quote-context="row-header" style="height:${h}px;position:relative;">${rowHidden ? '👁‍🗨 ' : ''}${rowIdx + 1}
                 <div class="row-resize-handle" data-row-id="${row.id}" style="position:absolute;left:0;bottom:0;width:100%;height:5px;cursor:row-resize;"></div>
             </td>`;
             g.columns.forEach(col => {
@@ -11010,6 +11053,200 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.addEventListener('mouseup', onUp);
             });
         });
+
+        // 右键菜单
+        table.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showQuoteContextMenu(e);
+        });
+    }
+
+    // 在选中范围的基础行/列插入多行/多列（before: true -> 在前面插入）
+    function insertQuoteRows(baseRowIdx, n, before) {
+        if (!quoteGrid) return;
+        n = Math.max(1, Math.min(100, parseInt(n) || 1));
+        // 先准备新行对象，再 splice 到 rows 数组中
+        const newRows = [];
+        for (let i = 0; i < n; i++) {
+            const row = { id: quoteGrid.nextRowId++, cells: {} };
+            quoteGrid.columns.forEach(col => { row.cells[col.id] = ''; });
+            newRows.push(row);
+        }
+        // insert at baseRowIdx (before) 或 baseRowIdx+1 (after)
+        const insertAt = before ? baseRowIdx : baseRowIdx + 1;
+        quoteGrid.rows.splice(insertAt, 0, ...newRows);
+        // 合并区域里行号在 splice 之后的 row/rowspan 修正（只针对以 splice 点之后为主行的合并 + 跨越 splice 点的 rowspan 扩展）
+        for (const m of (quoteGrid.merges || [])) {
+            const mainIdx = quoteGrid.rows.findIndex(r => r.id === m.row);
+            // 原始主行在 insertAt 之前，且合并范围覆盖 insertAt → rowspan 增加 n
+            if (mainIdx >= 0 && mainIdx < insertAt && mainIdx + m.rowspan > insertAt) {
+                m.rowspan += n;
+            }
+        }
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
+    }
+    function insertQuoteCols(baseColIdx, n, before) {
+        if (!quoteGrid) return;
+        n = Math.max(1, Math.min(100, parseInt(n) || 1));
+        const newCols = [];
+        for (let i = 0; i < n; i++) {
+            const col = { id: quoteGrid.nextColId++, name: '列' + (quoteGrid.columns.length + newCols.length + 1) };
+            newCols.push(col);
+            quoteGrid.colWidths[col.id] = 120;
+        }
+        const insertAt = before ? baseColIdx : baseColIdx + 1;
+        quoteGrid.columns.splice(insertAt, 0, ...newCols);
+        // 现有每行给新列补空值
+        quoteGrid.rows.forEach(row => {
+            newCols.forEach(col => { row.cells[col.id] = ''; });
+        });
+        // 合并列跨越 insertAt 时 colspan 扩展
+        for (const m of (quoteGrid.merges || [])) {
+            const mainIdx = quoteGrid.columns.findIndex(c => c.id === m.col);
+            if (mainIdx >= 0 && mainIdx < insertAt && mainIdx + m.colspan > insertAt) {
+                m.colspan += n;
+            }
+        }
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
+    }
+    // 切换行/列的隐藏（不显示在图片中）
+    function toggleQuoteRowHidden(rowId) {
+        if (!quoteGrid) return;
+        if (!Array.isArray(quoteGrid.hiddenRows)) quoteGrid.hiddenRows = [];
+        const idx = quoteGrid.hiddenRows.indexOf(rowId);
+        if (idx >= 0) quoteGrid.hiddenRows.splice(idx, 1);
+        else quoteGrid.hiddenRows.push(rowId);
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
+    }
+    function toggleQuoteColHidden(colId) {
+        if (!quoteGrid) return;
+        if (!Array.isArray(quoteGrid.hiddenCols)) quoteGrid.hiddenCols = [];
+        const idx = quoteGrid.hiddenCols.indexOf(colId);
+        if (idx >= 0) quoteGrid.hiddenCols.splice(idx, 1);
+        else quoteGrid.hiddenCols.push(colId);
+        saveQuoteGridDebounced();
+        renderQuoteGrid();
+    }
+
+    let quoteCtxMenuEl = null;
+    function closeQuoteContextMenu() {
+        if (quoteCtxMenuEl && quoteCtxMenuEl.parentNode) quoteCtxMenuEl.parentNode.removeChild(quoteCtxMenuEl);
+        quoteCtxMenuEl = null;
+    }
+    function showQuoteContextMenu(e) {
+        closeQuoteContextMenu();
+        if (!quoteGrid) return;
+        const target = e.target;
+        // 判断上下文：行头 / 列头 / 单元格
+        let ctx = null; // {type:'row', rowIdx, rowId?} | {type:'col', colIdx, colId?} | {type:'cell', rowIdx, colIdx}
+        const rowHeaderEl = target.closest ? target.closest('td.row-header[data-row-id]') : null;
+        const colHeaderEl = target.closest ? target.closest('th[data-col-id]') : null;
+        const cellEl = target.closest ? target.closest('td[data-row-id][data-col-id]') : null;
+        if (rowHeaderEl) {
+            const rowId = parseInt(rowHeaderEl.dataset.rowId);
+            const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
+            if (rowIdx >= 0) ctx = { type: 'row', rowIdx, rowId };
+        } else if (colHeaderEl && !colHeaderEl.classList.contains('corner-cell')) {
+            const colId = parseInt(colHeaderEl.dataset.colId);
+            const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
+            if (colIdx >= 0) ctx = { type: 'col', colIdx, colId };
+        } else if (cellEl) {
+            const rowId = parseInt(cellEl.dataset.rowId);
+            const colId = parseInt(cellEl.dataset.colId);
+            const rowIdx = quoteGrid.rows.findIndex(r => r.id === rowId);
+            const colIdx = quoteGrid.columns.findIndex(c => c.id === colId);
+            if (rowIdx >= 0 && colIdx >= 0) ctx = { type: 'cell', rowIdx, colIdx, rowId, colId };
+        } else {
+            return;
+        }
+        const askN = (labelText, cb) => {
+            const n = prompt(labelText, '1');
+            if (n === null) return;
+            let num = parseInt(n);
+            if (isNaN(num) || num < 1) num = 1;
+            if (num > 100) num = 100;
+            cb(num);
+        };
+        const items = [];
+        if (ctx.type === 'row' || ctx.type === 'cell') {
+            const idx = ctx.rowIdx;
+            items.push({ label: '⬆ 上方插入 1 行', action: () => insertQuoteRows(idx, 1, true) });
+            items.push({ label: '⬆ 上方插入 N 行...', action: () => askN('请输入要插入的行数（1-100）：', (n) => insertQuoteRows(idx, n, true)) });
+            items.push({ label: '⬇ 下方插入 1 行', action: () => insertQuoteRows(idx, 1, false) });
+            items.push({ label: '⬇ 下方插入 N 行...', action: () => askN('请输入要插入的行数（1-100）：', (n) => insertQuoteRows(idx, n, false)) });
+            if (ctx.type === 'row') {
+                const hidden = (quoteGrid.hiddenRows || []).indexOf(ctx.rowId) >= 0;
+                items.push({ separator: true });
+                items.push({ label: hidden ? '显示该行（生成图片中显示）' : '隐藏该行（生成图片中不显示）', action: () => toggleQuoteRowHidden(ctx.rowId) });
+            }
+        }
+        if (ctx.type === 'col' || ctx.type === 'cell') {
+            if (items.length > 0) items.push({ separator: true });
+            const idx = ctx.colIdx;
+            items.push({ label: '⬅ 左侧插入 1 列', action: () => insertQuoteCols(idx, 1, true) });
+            items.push({ label: '⬅ 左侧插入 N 列...', action: () => askN('请输入要插入的列数（1-100）：', (n) => insertQuoteCols(idx, n, true)) });
+            items.push({ label: '➡ 右侧插入 1 列', action: () => insertQuoteCols(idx, 1, false) });
+            items.push({ label: '➡ 右侧插入 N 列...', action: () => askN('请输入要插入的列数（1-100）：', (n) => insertQuoteCols(idx, n, false)) });
+            if (ctx.type === 'col') {
+                const hidden = (quoteGrid.hiddenCols || []).indexOf(ctx.colId) >= 0;
+                items.push({ separator: true });
+                items.push({ label: hidden ? '显示该列（生成图片中显示）' : '隐藏该列（生成图片中不显示）', action: () => toggleQuoteColHidden(ctx.colId) });
+            }
+        }
+        // 生成菜单 DOM
+        const menu = document.createElement('div');
+        menu.className = 'ctx-menu';
+        menu.style.cssText = `position:fixed;z-index:99999;left:${e.clientX}px;top:${e.clientY}px;min-width:200px;background:#fff;border:1px solid #dcdfe6;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:6px 0;font-size:13px;color:#303133;`;
+        items.forEach((it) => {
+            if (it.separator) {
+                const hr = document.createElement('div');
+                hr.style.cssText = 'height:1px;background:#ebeef5;margin:6px 0;';
+                menu.appendChild(hr);
+                return;
+            }
+            const div = document.createElement('div');
+            div.textContent = it.label;
+            div.style.cssText = 'padding:7px 14px;cursor:pointer;white-space:nowrap;';
+            div.onmouseenter = () => { div.style.background = '#f0f7ff'; div.style.color = '#409eff'; };
+            div.onmouseleave = () => { div.style.background = ''; div.style.color = ''; };
+            div.onclick = () => {
+                closeQuoteContextMenu();
+                try { it.action(); } catch (err) { console.error(err); }
+            };
+            menu.appendChild(div);
+        });
+        document.body.appendChild(menu);
+        quoteCtxMenuEl = menu;
+        // 位置修正
+        requestAnimationFrame(() => {
+            const rect = menu.getBoundingClientRect();
+            let left = e.clientX, top = e.clientY;
+            const vw = window.innerWidth, vh = window.innerHeight;
+            if (left + rect.width > vw - 4) left = vw - rect.width - 4;
+            if (top + rect.height > vh - 4) top = vh - rect.height - 4;
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+        });
+        // 关闭逻辑
+        const onDocDown = (ev) => {
+            if (quoteCtxMenuEl && quoteCtxMenuEl.contains && !quoteCtxMenuEl.contains(ev.target)) {
+                closeQuoteContextMenu();
+                document.removeEventListener('mousedown', onDocDown, true);
+                document.removeEventListener('keydown', onKeyEsc, true);
+            }
+        };
+        const onKeyEsc = (ev) => {
+            if (ev.key === 'Escape') {
+                closeQuoteContextMenu();
+                document.removeEventListener('mousedown', onDocDown, true);
+                document.removeEventListener('keydown', onKeyEsc, true);
+            }
+        };
+        document.addEventListener('mousedown', onDocDown, true);
+        document.addEventListener('keydown', onKeyEsc, true);
     }
 
     // 报价网格全局键盘事件 — 只绑定一次
@@ -11542,12 +11779,23 @@ document.addEventListener('DOMContentLoaded', function() {
             const padding = 20;
             const defaultRowH = 32;
 
-            // 计算列宽
-            const colWidths = g.columns.map(c => g.colWidths[c.id] || 120);
+            // 生成图片时，剔除 hiddenRows / hiddenCols
+            const hiddenRows = new Set(Array.isArray(g.hiddenRows) ? g.hiddenRows : []);
+            const hiddenCols = new Set(Array.isArray(g.hiddenCols) ? g.hiddenCols : []);
+            const visibleColumns = g.columns.filter(c => !hiddenCols.has(c.id));
+            const visibleRows = g.rows.filter(r => !hiddenRows.has(r.id));
+            // 原始 idx 到可视数组 idx 的映射（用于合并范围计算）
+            const colIdxMap = {};
+            visibleColumns.forEach((c, i) => { const orig = g.columns.findIndex(cc => cc.id === c.id); colIdxMap[c.id] = orig; colIdxMap['vi_' + orig] = i; });
+            const rowIdxMap = {};
+            visibleRows.forEach((r, i) => { const orig = g.rows.findIndex(rr => rr.id === r.id); rowIdxMap[r.id] = orig; rowIdxMap['vi_' + orig] = i; });
+
+            // 计算列宽（只看可见列）
+            const colWidths = visibleColumns.map(c => g.colWidths[c.id] || 120);
             const totalWidth = colWidths.reduce((a, b) => a + b, 0) + padding * 2;
 
-            // 计算行高
-            const rowHeights = g.rows.map(r => g.rowHeights[r.id] || defaultRowH);
+            // 计算行高（只看可见行）
+            const rowHeights = visibleRows.map(r => g.rowHeights[r.id] || defaultRowH);
             const totalHeight = rowHeights.reduce((a, b) => a + b, 0) + padding * 2;
 
             canvas.width = totalWidth;
@@ -11559,33 +11807,79 @@ document.addEventListener('DOMContentLoaded', function() {
             ctx.strokeStyle = '#dcdfe6';
             ctx.lineWidth = 1;
 
-            // 绘制数据行（不包含列名和行号）
+            // 判断某个合并在可见区域的主单元格是否仍是当前行列（用于绘制合并的可见范围）
+            function visibleMergeInfo(rowId, colId) {
+                const m = getMergeForCell(rowId, colId);
+                if (!m) return null;
+                // 主行/主列不在可见范围内 → 该合并被整体隐藏（绘制时不应在此画）
+                if (hiddenRows.has(m.row) || hiddenCols.has(m.col)) return null;
+                // 计算该合并在可见行/列范围内的 rowspan / colspan
+                const origRowStart = g.rows.findIndex(r => r.id === m.row);
+                const origColStart = g.columns.findIndex(c => c.id === m.col);
+                let visRowStart = null, visRowEnd = -1;
+                for (let ri = 0; ri < m.rowspan; ri++) {
+                    const row = g.rows[origRowStart + ri];
+                    if (!row) continue;
+                    if (hiddenRows.has(row.id)) continue;
+                    const vi = rowIdxMap['vi_' + (origRowStart + ri)];
+                    if (vi === undefined) continue;
+                    if (visRowStart === null) visRowStart = vi;
+                    visRowEnd = vi;
+                }
+                let visColStart = null, visColEnd = -1;
+                for (let ci = 0; ci < m.colspan; ci++) {
+                    const col = g.columns[origColStart + ci];
+                    if (!col) continue;
+                    if (hiddenCols.has(col.id)) continue;
+                    const vi = colIdxMap['vi_' + (origColStart + ci)];
+                    if (vi === undefined) continue;
+                    if (visColStart === null) visColStart = vi;
+                    visColEnd = vi;
+                }
+                if (visRowStart === null || visColStart === null) return null;
+                const currentOrigRow = g.rows.findIndex(r => r.id === rowId);
+                const currentOrigCol = g.columns.findIndex(c => c.id === colId);
+                const currentViRow = rowIdxMap['vi_' + currentOrigRow];
+                const currentViCol = colIdxMap['vi_' + currentOrigCol];
+                // 仅在可见区域的"主单元格"才返回合并信息，其他在可见区域的子格视为被合并隐藏
+                if (currentViRow === visRowStart && currentViCol === visColStart) {
+                    return { visRowStart, visColStart, visRowspan: visRowEnd - visRowStart + 1, visColspan: visColEnd - visColStart + 1 };
+                }
+                return { covered: true };
+            }
+            function isCellCoveredInVisible(rowId, colId) {
+                if (isHiddenByMerge(rowId, colId)) return true;
+                const info = visibleMergeInfo(rowId, colId);
+                return !!(info && info.covered);
+            }
+
+            // 绘制数据行（只绘制可见行列，不包含列名和行号）
             let y = padding;
-            g.rows.forEach((row, rowIdx) => {
+            visibleRows.forEach((row, rowIdx) => {
                 let x = padding;
                 const rh = rowHeights[rowIdx];
 
-                g.columns.forEach((col, colIdx) => {
+                visibleColumns.forEach((col, colIdx) => {
                     const cw = colWidths[colIdx];
                     const skey = `${row.id}_${col.id}`;
                     const style = g.styles[skey] || {};
 
-                    // 检查是否被合并隐藏
-                    if (isHiddenByMerge(row.id, col.id)) {
+                    // 检查在可见范围内是否被合并覆盖
+                    if (isCellCoveredInVisible(row.id, col.id)) {
                         x += cw;
                         return;
                     }
 
-                    // 检查合并
-                    const merge = getMergeForCell(row.id, col.id);
+                    // 检查合并（在可见范围内）
+                    const vmi = visibleMergeInfo(row.id, col.id);
                     let cellW = cw;
                     let cellH = rh;
-                    if (merge) {
-                        for (let i = 1; i < merge.colspan; i++) {
+                    if (vmi && !vmi.covered) {
+                        for (let i = 1; i < vmi.visColspan; i++) {
                             const ci = colIdx + i;
                             if (ci < colWidths.length) cellW += colWidths[ci];
                         }
-                        for (let i = 1; i < merge.rowspan; i++) {
+                        for (let i = 1; i < vmi.visRowspan; i++) {
                             const ri = rowIdx + i;
                             if (ri < rowHeights.length) cellH += rowHeights[ri];
                         }

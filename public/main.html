@@ -847,13 +847,19 @@
                 <button class="modal-close" id="closeAddRowModal">✕</button>
             </div>
             <div class="modal-body">
-                <div class="add-row-options">
-                    <label><input type="radio" name="addRowCount" value="1" checked> 添加 1 行</label>
-                    <label><input type="radio" name="addRowCount" value="3"> 添加 3 行</label>
-                    <label><input type="radio" name="addRowCount" value="5"> 添加 5 行</label>
-                    <label><input type="radio" name="addRowCount" value="10"> 添加 10 行</label>
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;padding:8px 0;font-size:14px;cursor:pointer;">
+                        <input type="radio" name="addRowCount" value="1" checked /> 默认添加 1 行
+                    </label>
                 </div>
-                <div class="add-row-actions">
+                <div>
+                    <label style="display:block;padding:4px 0;font-size:14px;">
+                        <input type="radio" name="addRowCount" value="custom" />
+                        添加 <input type="number" id="addRowCustomCount" value="3" min="1" max="50" style="width:80px;padding:4px 6px;margin:0 4px;border:1px solid #dcdfe6;border-radius:4px;" /> 行
+                        <span style="color:#999;font-size:12px;">（最多 50 行）</span>
+                    </label>
+                </div>
+                <div class="add-row-actions" style="margin-top:24px;">
                     <button class="tool-btn primary" id="addRowConfirm">确定</button>
                     <button class="tool-btn" id="addRowCancel">取消</button>
                 </div>
