@@ -3299,8 +3299,9 @@ document.addEventListener('DOMContentLoaded', function() {
         ids.forEach(id => {
             const r = state.records.find(x => x.id === id);
             if (!r) return;
-            const hostTotal = r._hostExpenseTotal || 0;
-            if (hostTotal > 0) {
+            const expenseTotal = r._hostExpenseTotal || r._expenseTotal || 0;
+            const incomeTotal = r._incomeTotal || 0;
+            if (expenseTotal !== 0 || incomeTotal !== 0) {
                 blocked.push(id);
             } else {
                 deletable.push(id);
@@ -3309,10 +3310,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (blocked.length > 0) {
             if (deletable.length === 0) {
-                await showConfirm('当前有支出,不可以删除');
+                await showConfirm('存在支出或收入记录,不可以删除（支出和收入都为 0 才能删除）');
                 return;
             }
-            if (!await showConfirm(`选中的 ${ids.length} 条记录中，有 ${blocked.length} 条存在支出记录将被跳过，确定删除剩余 ${deletable.length} 条？`)) return;
+            if (!await showConfirm(`选中的 ${ids.length} 条记录中，有 ${blocked.length} 条存在支出/收入记录将被跳过，确定删除剩余 ${deletable.length} 条？（只有支出和收入都为 0 才能删除）`)) return;
         } else {
             if (!await showConfirm(`确定删除 ${ids.length} 条记录吗？`)) return;
         }
@@ -4333,15 +4334,64 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // 保存收入/支出弹窗顶部单价到数据库 record.data（localStorage 仅作备份，数据库才可靠）
+    async function persistModalTopPrice(recordId, key, value) {
+        try {
+            if (!recordId) return;
+            const rec = state.records.find(r => r.id === recordId);
+            if (!rec) return;
+            const newData = { ...(rec.data || {}) };
+            if (value === '' || value === null || value === undefined) {
+                delete newData[key];
+            } else {
+                newData[key] = String(value);
+            }
+            // 写回内存缓存（避免下一次 loadRecords 之前读旧值）
+            rec.data = newData;
+            await API.put('/records/' + recordId, { data: newData });
+        } catch (e) {
+            console.warn('持久化单价失败:', e);
+            // 失败静默，不影响用户体验；localStorage 仍会备份
+        }
+    }
+    let _incomePriceSaveTimer = null;
+    let _expensePriceSaveTimer = null;
+    function scheduleIncomePricePersist() {
+        if (!state.incomeRecordId) return;
+        // 立即写 localStorage 兜底
+        try { localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, incomeAmountInput.value); } catch(e) {}
+        // 防抖写数据库
+        if (_incomePriceSaveTimer) clearTimeout(_incomePriceSaveTimer);
+        _incomePriceSaveTimer = setTimeout(() => {
+            persistModalTopPrice(state.incomeRecordId, 'income_unit_price', incomeAmountInput.value);
+        }, 450);
+    }
+    function scheduleExpensePricePersist() {
+        if (!state.expenseRecordId) return;
+        try { localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, expenseAmountInput.value); } catch(e) {}
+        if (_expensePriceSaveTimer) clearTimeout(_expensePriceSaveTimer);
+        _expensePriceSaveTimer = setTimeout(() => {
+            persistModalTopPrice(state.expenseRecordId, 'expense_unit_price', expenseAmountInput.value);
+        }, 450);
+    }
+
     async function openIncomeModal(recordId) {
         state.incomeRecordId = recordId;
         state.incomeRecords = [];
         incomeTotalDisplay.textContent = '0';
         renderIncomeList();
-        try {
-            const savedAmount = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
-            incomeAmountInput.value = savedAmount || '';
-        } catch(e) { incomeAmountInput.value = ''; }
+        // 优先读数据库 record.data.income_unit_price，localStorage 仅作旧数据兜底
+        const rec = state.records.find(r => r.id === recordId);
+        let savedAmount = '';
+        if (rec && rec.data && rec.data.income_unit_price !== undefined && rec.data.income_unit_price !== '') {
+            savedAmount = String(rec.data.income_unit_price);
+        } else {
+            try {
+                const fromLs = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
+                savedAmount = fromLs || '';
+            } catch(e) { savedAmount = ''; }
+        }
+        incomeAmountInput.value = savedAmount;
         incomeRemarkInput.value = '';
         incomeDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         setIncomeStatus('');
@@ -4477,9 +4527,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 income_date: date,
                 remark: incomeRemarkInput.value.trim()
             });
-            try {
-                localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, String(amount));
-            } catch(e) {}
+            // 双重保存：localStorage + 数据库（确保单价不会因清缓存/换设备丢失）
+            try { localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, String(amount)); } catch(e) {}
+            await persistModalTopPrice(state.incomeRecordId, 'income_unit_price', String(amount));
             incomeRemarkInput.value = '';
             await loadIncomeRecords(state.incomeRecordId);
             await loadRecords(state.currentTabId);
@@ -4511,10 +4561,18 @@ document.addEventListener('DOMContentLoaded', function() {
         state.expenseRecords = [];
         expenseTotalDisplay.textContent = '0';
         renderExpenseList();
-        try {
-            const savedAmount = localStorage.getItem('expenseLastAmount_' + state.userId + '_' + recordId);
-            expenseAmountInput.value = savedAmount || '';
-        } catch(e) { expenseAmountInput.value = ''; }
+        // 优先读数据库 record.data.expense_unit_price，localStorage 仅作旧数据兜底
+        const rec = state.records.find(r => r.id === recordId);
+        let savedAmount = '';
+        if (rec && rec.data && rec.data.expense_unit_price !== undefined && rec.data.expense_unit_price !== '') {
+            savedAmount = String(rec.data.expense_unit_price);
+        } else {
+            try {
+                const fromLs = localStorage.getItem('expenseLastAmount_' + state.userId + '_' + recordId);
+                savedAmount = fromLs || '';
+            } catch(e) { savedAmount = ''; }
+        }
+        expenseAmountInput.value = savedAmount;
         expenseRemarkInput.value = '';
         expenseDateInput.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
         setExpenseStatus('');
@@ -4650,9 +4708,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 expense_date: date,
                 remark: expenseRemarkInput.value.trim()
             });
-            try {
-                localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, String(amount));
-            } catch(e) {}
+            // 双重保存：localStorage + 数据库（确保单价不会因清缓存/换设备丢失）
+            try { localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, String(amount)); } catch(e) {}
+            await persistModalTopPrice(state.expenseRecordId, 'expense_unit_price', String(amount));
             expenseRemarkInput.value = '';
             await loadExpenseRecords(state.expenseRecordId);
             await loadRecords(state.currentTabId);
@@ -5707,6 +5765,85 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { providerStatus.textContent = '❌ 添加失败: ' + err.message; }
     }
 
+    // --- 应用 LOGO（登录页 + 左上角 网络管理系统前图标）---
+    function applyAppLogo(logoValue) {
+        const logoIcon = document.getElementById('navLogoIcon');
+        const previewImg = document.getElementById('appLogoPreviewImg');
+        const previewDefault = document.getElementById('appLogoPreviewDefault');
+        const logoUrl = (() => {
+            if (!logoValue) return null;
+            if (logoValue.type === 'url') return logoValue.url;
+            if (logoValue.type === 'local') return logoValue.path;
+            return null;
+        })();
+        // 左上角（主界面）
+        if (logoIcon) {
+            if (logoUrl) {
+                logoIcon.innerHTML = `<img src="${cssUrl(logoUrl)}" alt="logo" style="height:24px;width:auto;max-width:48px;object-fit:contain;display:block;" onerror="this.parentNode.innerHTML='🌐';" />`;
+            } else {
+                logoIcon.innerHTML = '🌐';
+            }
+        }
+        // 设置里的预览
+        if (previewImg) {
+            if (logoUrl) {
+                previewImg.src = cssUrl(logoUrl);
+                previewImg.style.display = 'inline-block';
+            } else {
+                previewImg.style.display = 'none';
+                previewImg.removeAttribute('src');
+            }
+        }
+        if (previewDefault) {
+            previewDefault.style.display = logoUrl ? 'none' : 'inline-block';
+        }
+    }
+    async function uploadAppLogoFromUrl() {
+        const input = document.getElementById('appLogoUrlInput');
+        const status = document.getElementById('appLogoStatus');
+        const url = (input ? input.value : '').trim();
+        if (!url) { if (status) status.textContent = '⚠️ 请输入图片 URL'; return; }
+        if (!/^https?:\/\//i.test(url)) { if (status) status.textContent = '⚠️ URL 必须是 http(s):// 开头'; return; }
+        try {
+            if (status) status.textContent = '🔄 保存中...';
+            await API.post('/settings', { key: 'app_logo', value: { type: 'url', url } });
+            applyAppLogo({ type: 'url', url });
+            if (status) status.textContent = '✅ 已应用 LOGO（刷新浏览器登录页也会生效）';
+            setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+        } catch (err) { if (status) status.textContent = '❌ 设置失败: ' + err.message; }
+    }
+    async function uploadAppLogoFromFile() {
+        const fileInput = document.getElementById('appLogoFileInput');
+        const status = document.getElementById('appLogoStatus');
+        const file = fileInput ? fileInput.files[0] : null;
+        if (!file) { if (status) status.textContent = '⚠️ 请先选择图片'; return; }
+        try {
+            if (status) status.textContent = '🔄 上传中...';
+            const formData = new FormData();
+            formData.append('image', file);
+            const res = await fetch('/api/upload', { method: 'POST', credentials: 'include', body: formData });
+            const data = await res.json().catch(() => ({ error: '上传返回格式错误' }));
+            if (!res.ok || data.error) throw new Error(data.error || '上传失败');
+            if (!data.success) throw new Error(data.error || '上传失败');
+            await API.post('/settings', { key: 'app_logo', value: { type: 'local', path: data.url } });
+            applyAppLogo({ type: 'local', path: data.url });
+            if (status) status.textContent = '✅ LOGO 已保存（刷新浏览器登录页也会生效）';
+            setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+        } catch (err) { if (status) status.textContent = '❌ 上传失败: ' + err.message; }
+    }
+    async function removeAppLogo() {
+        const status = document.getElementById('appLogoStatus');
+        try {
+            if (!await showConfirm('确定恢复默认 🌐 图标吗？')) return;
+            await API.post('/settings', { key: 'app_logo', value: null });
+            applyAppLogo(null);
+            const urlInput = document.getElementById('appLogoUrlInput');
+            if (urlInput) urlInput.value = '';
+            if (status) status.textContent = '✅ 已恢复默认';
+            setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+        } catch (err) { if (status) status.textContent = '❌ 移除失败: ' + err.message; }
+    }
+
     // --- Favicon ---
     async function uploadFavicon() {
         const fileInput = document.getElementById('faviconFileInput');
@@ -5765,6 +5902,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             } catch (e) { /* 忽略旧版本没有这个设置的情况 */ }
+            // 加载 LOGO（应用到左上角 + 设置预览）
+            try {
+                const logo = await API.get('/settings/app_logo');
+                if (logo.value) applyAppLogo(logo.value);
+                else applyAppLogo(null);
+            } catch (e) { /* 旧版本忽略 */ }
             await loadRegisterSwitch();
             await loadSuffixSettings();
             await loadProviderOptions();
@@ -5973,8 +6116,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Escape') providerModal.classList.remove('show');
     });
     addIncomeBtn.addEventListener('click', addIncomeRecord);
-    incomeAmountInput.addEventListener('input', () => {
-        try { localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, incomeAmountInput.value); } catch(e) {}
+    // 收入单价：输入+失焦都立即（防抖）持久化到数据库，不再依赖脆弱的 localStorage 单点保存
+    incomeAmountInput.addEventListener('input', scheduleIncomePricePersist);
+    incomeAmountInput.addEventListener('blur', () => {
+        if (_incomePriceSaveTimer) { clearTimeout(_incomePriceSaveTimer); _incomePriceSaveTimer = null; }
+        persistModalTopPrice(state.incomeRecordId, 'income_unit_price', incomeAmountInput.value);
     });
     incomeAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addIncomeRecord();
@@ -5982,8 +6128,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     closeExpenseModal.addEventListener('click', () => expenseModal.classList.remove('show'));
     addExpenseBtn.addEventListener('click', addExpenseRecord);
-    expenseAmountInput.addEventListener('input', () => {
-        try { localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, expenseAmountInput.value); } catch(e) {}
+    // 支出单价：输入+失焦都立即（防抖）持久化到数据库
+    expenseAmountInput.addEventListener('input', scheduleExpensePricePersist);
+    expenseAmountInput.addEventListener('blur', () => {
+        if (_expensePriceSaveTimer) { clearTimeout(_expensePriceSaveTimer); _expensePriceSaveTimer = null; }
+        persistModalTopPrice(state.expenseRecordId, 'expense_unit_price', expenseAmountInput.value);
     });
     expenseAmountInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addExpenseRecord();
@@ -6556,9 +6705,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!contextTargetId) return;
         const r = state.records.find(x => x.id === contextTargetId);
         if (r) {
-            const hostTotal = r._hostExpenseTotal || 0;
-            if (hostTotal > 0) {
-                await showConfirm('当前有支出,不可以删除');
+            const expenseTotal = r._hostExpenseTotal || r._expenseTotal || 0;
+            const incomeTotal = r._incomeTotal || 0;
+            if (expenseTotal !== 0 || incomeTotal !== 0) {
+                await showConfirm('当前有支出或收入记录,不可以删除（支出和收入都为 0 才能删除）');
                 return;
             }
         }
@@ -6681,6 +6831,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('uploadFaviconBtn').addEventListener('click', uploadFavicon);
     document.getElementById('faviconFileInput').addEventListener('change', () => document.getElementById('faviconStatus').textContent = '');
+    // 网站 LOGO 控件
+    try {
+        const setLogoUrl = document.getElementById('setAppLogoUrlBtn');
+        if (setLogoUrl) setLogoUrl.addEventListener('click', uploadAppLogoFromUrl);
+        const uploadLogoBtn = document.getElementById('uploadAppLogoBtn');
+        if (uploadLogoBtn) uploadLogoBtn.addEventListener('click', uploadAppLogoFromFile);
+        const removeLogoBtn = document.getElementById('removeAppLogoBtn');
+        if (removeLogoBtn) removeLogoBtn.addEventListener('click', removeAppLogo);
+        const appLogoFileInput = document.getElementById('appLogoFileInput');
+        if (appLogoFileInput) appLogoFileInput.addEventListener('change', () => { const s = document.getElementById('appLogoStatus'); if (s) s.textContent = ''; });
+        const appLogoUrlInput = document.getElementById('appLogoUrlInput');
+        if (appLogoUrlInput) appLogoUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); uploadAppLogoFromUrl(); } });
+    } catch (e) { /* 旧版本页面 DOM 缺元素时忽略 */ }
     saveRegisterSwitchBtn.addEventListener('click', saveRegisterSwitch);
     saveSuffixBtn.addEventListener('click', saveSuffixSettings);
 

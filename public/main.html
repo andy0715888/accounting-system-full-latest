@@ -30,7 +30,10 @@
 <body>
     <header class="navbar">
         <div class="nav-left">
-            <span class="nav-logo">🌐 网络管理系统</span>
+            <span class="nav-logo" id="navLogo">
+                <span id="navLogoIcon" style="display:inline-flex;align-items:center;margin-right:4px;">🌐</span>
+                <span>网络管理系统</span>
+            </span>
             <span class="server-status" id="serverStatus" title="服务器资源使用情况">
                 <span class="ss-item"><span class="ss-icon">⚙️</span>CPU <span class="ss-value" id="ssCpu">-</span></span>
                 <span class="ss-item"><span class="ss-icon">🧠</span>内存 <span class="ss-value" id="ssMem">-</span></span>
@@ -90,11 +93,11 @@
                         <span class="tool-divider"></span>
                         <button class="tool-btn" id="importBtn">📥 导入</button>
                         <button class="tool-btn" id="exportBtn">📤 导出</button>
-                        <button class="tool-btn" id="exportInfoBtn">📋 导出信息</button>
-                        <span class="tool-divider"></span>
                         <button class="tool-btn" id="refreshBtn">🔄 刷新</button>
                         <span class="tool-divider"></span>
-                        <button class="tool-btn" id="manageColumnsBtn">📋 列管理</button>
+                        <button class="tool-btn" id="exportInfoBtn">📋 导出信息</button>
+                        <span class="tool-divider"></span>
+                        <button class="tool-btn" id="manageColumnsBtn">📋 列头管理</button>
                         <button class="tool-btn" id="conditionalFormatBtn">🎨 视觉管理</button>
                         <button class="tool-btn" id="incomeExpenseStatsBtn">📊 收支统计</button>
                     </div>
@@ -457,6 +460,27 @@
                             <span id="faviconStatus"></span>
                         </div>
                     </div>
+                    <div class="setting-group">
+                        <h3>🏷️ 网站 LOGO（网络管理系统前图标）</h3>
+                        <p class="setting-desc">支持上传图片或填写 URL，会显示在登录界面和主界面左上角；留空则显示默认 🌐 图标</p>
+                        <div class="favicon-setting">
+                            <div id="appLogoPreview" style="margin-bottom:10px;display:flex;align-items:center;gap:10px;min-height:48px;">
+                                <span>当前预览：</span>
+                                <img id="appLogoPreviewImg" alt="" style="display:none;max-width:180px;max-height:48px;object-fit:contain;border:1px solid #eee;border-radius:4px;padding:2px;" />
+                                <span id="appLogoPreviewDefault" style="font-size:32px;">🌐</span>
+                            </div>
+                            <div>
+                                <input type="text" id="appLogoUrlInput" placeholder="图片 URL（https://...）" style="width:320px;padding:6px 10px;margin-right:6px;border:1px solid #dcdfe6;border-radius:4px;" />
+                                <button class="tool-btn" id="setAppLogoUrlBtn">应用 URL</button>
+                            </div>
+                            <div style="margin-top:8px;">
+                                <input type="file" id="appLogoFileInput" accept="image/*" />
+                                <button class="tool-btn primary" id="uploadAppLogoBtn">上传图片</button>
+                                <button class="tool-btn danger" id="removeAppLogoBtn" style="margin-left:8px;">恢复默认 🌐</button>
+                            </div>
+                            <span id="appLogoStatus" style="margin-left:8px;"></span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -465,7 +489,7 @@
     <div class="modal-overlay" id="columnModal">
         <div class="modal">
             <div class="modal-header">
-                <h2>📋 列管理 - <span id="columnModalTabName"></span></h2>
+                <h2>📋 列头管理 - <span id="columnModalTabName"></span></h2>
                 <button class="modal-close" id="closeColumnModal">✕</button>
             </div>
             <div class="modal-body">

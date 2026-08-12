@@ -63,6 +63,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     loadBackground();
 
+    // 加载网站 LOGO
+    function loadAppLogo() {
+        fetch('/api/settings/public/logo')
+            .then(res => res.json())
+            .then(data => {
+                const logoIcon = document.getElementById('loginLogoIcon');
+                if (!logoIcon) return;
+                let logoUrl = null;
+                if (data && data.value) {
+                    if (data.value.type === 'url') logoUrl = data.value.url;
+                    else if (data.value.type === 'local') logoUrl = data.value.path;
+                }
+                if (logoUrl) {
+                    logoIcon.innerHTML = `<img src="${cssUrl(logoUrl)}" alt="logo" style="height:44px;width:auto;max-height:64px;max-width:140px;object-fit:contain;display:block;" onerror="this.parentNode.textContent='🌐';" />`;
+                } else {
+                    logoIcon.textContent = '🌐';
+                }
+            })
+            .catch(() => {});
+    }
+    loadAppLogo();
+
     function showError(msg) {
         errorMsg.textContent = msg;
         errorMsg.classList.add('show');

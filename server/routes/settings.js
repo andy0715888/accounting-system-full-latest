@@ -5,7 +5,7 @@ const path = require('path');
 
 const router = express.Router();
 const SYSTEM_USER_ID = 1;
-const SYSTEM_SETTING_KEYS = new Set(['allow_register', 'background']);
+const SYSTEM_SETTING_KEYS = new Set(['allow_register', 'background', 'app_logo']);
 
 function requireAuth(req, res, next) {
     if (!req.session.userId) return res.status(401).json({ error: '请先登录' });
@@ -76,6 +76,32 @@ router.get('/public/background', async (req, res) => {
     }
 });
 
+// 公开读取应用 LOGO（供登录页和主界面左上角显示）
+router.get('/public/logo', async (req, res) => {
+    try {
+        const value = await getSettingValue(SYSTEM_USER_ID, 'app_logo');
+        res.json({ value });
+    } catch (err) {
+        console.error('获取公开LOGO错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+function normalizeAppLogo(value) {
+    if (!value || typeof value !== 'object') return null;
+    if (value.type === 'url') {
+        const url = String(value.url || '').trim();
+        if (!/^https?:\/\//i.test(url)) return null;
+        return { type: 'url', url };
+    }
+    if (value.type === 'local') {
+        const localPath = String(value.path || '').trim();
+        if (!localPath.startsWith('/uploads/')) return null;
+        return { type: 'local', path: localPath };
+    }
+    return null;
+}
+
 router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
@@ -88,6 +114,9 @@ router.get('/', requireAuth, async (req, res) => {
 
         const background = await getSettingValue(SYSTEM_USER_ID, 'background');
         if (background) result.background = background;
+
+        const appLogo = await getSettingValue(SYSTEM_USER_ID, 'app_logo');
+        if (appLogo) result.app_logo = appLogo;
 
         res.json(result);
     } catch (err) {
@@ -137,6 +166,32 @@ router.post('/', requireAuth, async (req, res) => {
             return res.json({ success: true, message: '背景已保存' });
         }
 
+        if (key === 'app_logo') {
+            if (userId !== SYSTEM_USER_ID) {
+                return res.status(403).json({ error: '只有管理员可以修改LOGO' });
+            }
+            // value 允许为 null（删除 LOGO），否则必须通过 normalizeAppLogo 校验
+            if (value === null || value === undefined) {
+                const old = await getSettingValue(SYSTEM_USER_ID, key);
+                if (old && old.type === 'local' && old.path) {
+                    const p = getUploadedFilePath(old.path);
+                    if (p && fs.existsSync(p)) fs.unlinkSync(p);
+                }
+                await execute('DELETE FROM settings WHERE user_id = ? AND key = ?', [SYSTEM_USER_ID, key]);
+                return res.json({ success: true, message: 'LOGO 已移除' });
+            }
+            const logo = normalizeAppLogo(value);
+            if (!logo) return res.status(400).json({ error: 'LOGO 设置格式错误' });
+            // 若之前有旧的 local 类型，删除旧文件
+            const old = await getSettingValue(SYSTEM_USER_ID, key);
+            if (old && old.type === 'local' && old.path && !(logo.type === 'local' && logo.path === old.path)) {
+                const p = getUploadedFilePath(old.path);
+                if (p && fs.existsSync(p)) fs.unlinkSync(p);
+            }
+            await saveSettingValue(SYSTEM_USER_ID, key, logo);
+            return res.json({ success: true, message: 'LOGO 已保存' });
+        }
+
         await saveSettingValue(userId, key, value);
         res.json({ success: true, message: '设置已保存' });
     } catch (err) {
@@ -172,6 +227,30 @@ router.post('/batch', requireAuth, async (req, res) => {
                 if (!bg) return res.status(400).json({ error: '背景设置格式错误' });
                 await removeStoredBackgroundFile();
                 await saveSettingValue(SYSTEM_USER_ID, key, bg);
+                continue;
+            }
+
+            if (key === 'app_logo') {
+                if (userId !== SYSTEM_USER_ID) {
+                    return res.status(403).json({ error: '只有管理员可以修改LOGO' });
+                }
+                if (value === null || value === undefined) {
+                    const old = await getSettingValue(SYSTEM_USER_ID, key);
+                    if (old && old.type === 'local' && old.path) {
+                        const p = getUploadedFilePath(old.path);
+                        if (p && fs.existsSync(p)) fs.unlinkSync(p);
+                    }
+                    await execute('DELETE FROM settings WHERE user_id = ? AND key = ?', [SYSTEM_USER_ID, key]);
+                    continue;
+                }
+                const logo = normalizeAppLogo(value);
+                if (!logo) return res.status(400).json({ error: 'LOGO 设置格式错误' });
+                const old = await getSettingValue(SYSTEM_USER_ID, key);
+                if (old && old.type === 'local' && old.path && !(logo.type === 'local' && logo.path === old.path)) {
+                    const p = getUploadedFilePath(old.path);
+                    if (p && fs.existsSync(p)) fs.unlinkSync(p);
+                }
+                await saveSettingValue(SYSTEM_USER_ID, key, logo);
                 continue;
             }
 
