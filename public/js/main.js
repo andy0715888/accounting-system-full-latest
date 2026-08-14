@@ -3442,18 +3442,32 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function buildIncomePriceMap() {
-        // 严格以"收入弹窗最上面的单价输入框（即 localStorage 保存的 incomeLastAmount_*）为准
-        // 如果里面空白 → 返回 ''，不去拉取下面明细的单价
+        // 优先级：
+        // 1) 数据库 record.data.income_unit_price（用户在收入弹窗顶部输入并持久化后的值，换设备/清缓存仍然可靠）
+        // 2) localStorage incomeLastAmount_* （旧版本、未重新打开弹窗过的历史记录兜底）
+        // 3) 收入明细合计 record._incomeTotal（用户只通过明细添加金额，没填顶部单价时兜底）
+        // 以上都没有有效数字 → 返回 ''（导出显示空白，而不是假造 0）
         return (recordId) => {
+            const r = state.records.find(x => x.id === recordId);
+            // 1) 优先读数据库持久化字段（这是本轮修复的核心：之前丢失就是因为只看 localStorage，不读 record.data）
+            if (r && r.data && r.data.income_unit_price !== undefined && r.data.income_unit_price !== '') {
+                const n = parseFloat(r.data.income_unit_price);
+                if (!isNaN(n)) return n;
+            }
+            // 2) localStorage 旧数据兼容
             try {
                 const saved = localStorage.getItem('incomeLastAmount_' + state.userId + '_' + recordId);
-                if (saved === '') return ''; // 空白也返回空字符串，而不是 0 或 fallback 明细
-                if (saved !== null && saved !== undefined) {
+                if (saved !== null && saved !== undefined && saved !== '') {
                     const n = parseFloat(saved);
                     if (!isNaN(n)) return n;
                 }
             } catch(e) {}
-            return ''; // 用户没有在弹窗上面输入过 → 导出空白
+            // 3) 明细兜底：用户没有填过弹窗顶部单价，但是手动添加了明细记录 → 明细合计就是单价（避免合计永远为 0）
+            if (r) {
+                const incomeTotal = Number(r._incomeTotal) || 0;
+                if (incomeTotal > 0) return incomeTotal;
+            }
+            return '';
         };
     }
 
