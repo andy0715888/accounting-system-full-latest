@@ -3442,14 +3442,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function buildIncomePriceMap() {
-        // 优先级：
-        // 1) 数据库 record.data.income_unit_price（用户在收入弹窗顶部输入并持久化后的值，换设备/清缓存仍然可靠）
-        // 2) localStorage incomeLastAmount_* （旧版本、未重新打开弹窗过的历史记录兜底）
-        // 3) 收入明细合计 record._incomeTotal（用户只通过明细添加金额，没填顶部单价时兜底）
-        // 以上都没有有效数字 → 返回 ''（导出显示空白，而不是假造 0）
+        // 严格只取"收入弹窗顶部单价"，不取明细合计或其他地方：
+        // 1) 数据库 record.data.income_unit_price（用户在收入弹窗顶部输入并持久化后的值）
+        // 2) localStorage incomeLastAmount_*（旧版本兼容，同样是弹窗顶部单价的备份）
+        // 顶部单价为空白 → 返回 ''（导出也空白，不取明细、不取 0）
         return (recordId) => {
             const r = state.records.find(x => x.id === recordId);
-            // 1) 优先读数据库持久化字段（这是本轮修复的核心：之前丢失就是因为只看 localStorage，不读 record.data）
+            // 1) 优先读数据库持久化字段
             if (r && r.data && r.data.income_unit_price !== undefined && r.data.income_unit_price !== '') {
                 const n = parseFloat(r.data.income_unit_price);
                 if (!isNaN(n)) return n;
@@ -3462,11 +3461,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (!isNaN(n)) return n;
                 }
             } catch(e) {}
-            // 3) 明细兜底：用户没有填过弹窗顶部单价，但是手动添加了明细记录 → 明细合计就是单价（避免合计永远为 0）
-            if (r) {
-                const incomeTotal = Number(r._incomeTotal) || 0;
-                if (incomeTotal > 0) return incomeTotal;
-            }
+            // 顶部单价为空白 → 返回 ''（不取明细，不取 0）
             return '';
         };
     }
