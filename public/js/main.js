@@ -1035,12 +1035,17 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
-        // 切换标签时重置剪切/复制状态
+        // 跨标签剪切/粘贴服务器信息：切换标签时不再清空 copiedServerData/copiedServerRecordId
+        // （刷新键才清空）；其他提取状态保持原逻辑重置
         state.copiedClientRecordId = null;
-        state.copiedServerData = null;
-        state.copiedServerRecordId = null;
         state.extractedClientData = null;
         state.extractedBothData = null;
+        $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+        // 如果有跨标签的服务器剪切，回到来源标签时重新给那行加 cut-pending 样式
+        if (state.copiedServerRecordId) {
+            const tr = document.querySelector(`tr[data-id="${state.copiedServerRecordId}"]`);
+            if (tr) tr.classList.add('cut-pending');
+        }
         // 恢复目标标签的筛选状态
         state.filters = state.tabFilters[tabId] ? { ...state.tabFilters[tabId] } : {};
         renderTabs();
@@ -1554,6 +1559,20 @@ document.addEventListener('DOMContentLoaded', function() {
         bindTableEvents();
         bindFilterEvents();
         bindSpecialEvents();
+
+        // 跨标签剪切：当前表格渲染完成后，给当前标签下的剪切来源行重新补 cut-pending 样式
+        if (state.copiedServerRecordId) {
+            const tr = document.querySelector(`tr[data-id="${state.copiedServerRecordId}"]`);
+            if (tr) tr.classList.add('cut-pending');
+        }
+        if (state.extractedClientData && state.extractedClientData.recordId) {
+            const tr = document.querySelector(`tr[data-id="${state.extractedClientData.recordId}"]`);
+            if (tr) tr.classList.add('cut-pending');
+        }
+        if (state.extractedBothData && state.extractedBothData.recordId) {
+            const tr = document.querySelector(`tr[data-id="${state.extractedBothData.recordId}"]`);
+            if (tr) tr.classList.add('cut-pending');
+        }
 
         if (shouldAutoFit) autoFitColumns();
     }
@@ -5901,14 +5920,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 const headerColors = await API.get('/settings/header_colors');
                 if (headerColors.value) {
                     applyHeaderColors(headerColors.value);
-                    if (headerColors.value.navbar) {
-                        document.getElementById('navbarColorInput').value = headerColors.value.navbar;
-                        document.getElementById('navbarColorText').value = headerColors.value.navbar;
-                    }
-                    if (headerColors.value.menubar) {
-                        document.getElementById('menubarColorInput').value = headerColors.value.menubar;
-                        document.getElementById('menubarColorText').value = headerColors.value.menubar;
-                    }
+                    const DEFAULTS = DEFAULT_HEADER_COLORS || { navbar:'#1a1a2e', navbarText:'#ffffff', menubar:'#16213e', menubarText:'#ffffff' };
+                    if (document.getElementById('navbarColorInput')) document.getElementById('navbarColorInput').value = headerColors.value.navbar || DEFAULTS.navbar;
+                    if (document.getElementById('navbarColorText')) document.getElementById('navbarColorText').value = headerColors.value.navbar || DEFAULTS.navbar;
+                    if (document.getElementById('navbarTextColorInput')) document.getElementById('navbarTextColorInput').value = headerColors.value.navbarText || DEFAULTS.navbarText;
+                    if (document.getElementById('navbarTextColorText')) document.getElementById('navbarTextColorText').value = headerColors.value.navbarText || DEFAULTS.navbarText;
+                    if (document.getElementById('menubarColorInput')) document.getElementById('menubarColorInput').value = headerColors.value.menubar || DEFAULTS.menubar;
+                    if (document.getElementById('menubarColorText')) document.getElementById('menubarColorText').value = headerColors.value.menubar || DEFAULTS.menubar;
+                    if (document.getElementById('menubarTextColorInput')) document.getElementById('menubarTextColorInput').value = headerColors.value.menubarText || DEFAULTS.menubarText;
+                    if (document.getElementById('menubarTextColorText')) document.getElementById('menubarTextColorText').value = headerColors.value.menubarText || DEFAULTS.menubarText;
                 }
             } catch (e) { /* 忽略旧版本没有这个设置的情况 */ }
             // 加载 LOGO（应用到左上角 + 设置预览）
@@ -5933,6 +5953,27 @@ document.addEventListener('DOMContentLoaded', function() {
         // 用 background 覆盖 CSS 中的渐变（linear-gradient）
         if (navbar && colors.navbar) navbar.style.background = colors.navbar;
         if (menubar && colors.menubar) menubar.style.background = colors.menubar;
+        // 导航栏字体颜色（给 navbar 下主要文字类直接设置）
+        if (navbar) {
+            if (colors.navbarText) {
+                navbar.style.color = colors.navbarText;
+                navbar.querySelectorAll('.nav-logo, .nav-logo span, .server-status, .ss-item, .nav-right, .user-info, .nav-user-menu, .ss-value').forEach(el => el.style.color = colors.navbarText);
+                navbar.querySelectorAll('button, a').forEach(el => el.style.color = colors.navbarText);
+            } else {
+                navbar.style.color = '';
+                navbar.querySelectorAll('.nav-logo, .nav-logo span, .server-status, .ss-item, .nav-right, .user-info, .nav-user-menu, .ss-value, button, a').forEach(el => el.style.color = '');
+            }
+        }
+        // 菜单栏字体颜色
+        if (menubar) {
+            if (colors.menubarText) {
+                menubar.style.color = colors.menubarText;
+                menubar.querySelectorAll('.menu-item, .top-menu-title, .menu-group, .tab-label, button, a').forEach(el => el.style.color = colors.menubarText);
+            } else {
+                menubar.style.color = '';
+                menubar.querySelectorAll('.menu-item, .top-menu-title, .menu-group, .tab-label, button, a').forEach(el => el.style.color = '');
+            }
+        }
         // 存到 localStorage，刷新时立即应用（避免闪烁）
         try { localStorage.setItem('header_colors', JSON.stringify(colors)); } catch (e) {}
     }
@@ -6063,11 +6104,20 @@ document.addEventListener('DOMContentLoaded', function() {
     exportClientCancel.addEventListener('click', () => exportClientInfoModal.classList.remove('show'));
     importBtn.addEventListener('click', showImportModal);
     refreshBtn.addEventListener('click', function() {
+        // 按刷新键：清除剪切/提取的服务器/客户信息（用户要求：剪切后不想粘贴了按刷新清除）
+        state.copiedServerData = null;
+        state.copiedServerRecordId = null;
+        state.copiedClientRecordId = null;
+        state.extractedClientData = null;
+        state.extractedBothData = null;
+        $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
         if (state.currentTabId) {
             showTableLoading();
             state.page = 1;
             invalidateCurrentTabCache();
             loadRecords(state.currentTabId).then(() => { renderTable(false); hideTableLoading(); });
+        } else {
+            setStatus('✅ 已清除剪切信息');
         }
     });
     manageColumnsBtn.addEventListener('click', showColumnManager);
@@ -6528,6 +6578,23 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             setStatus('粘贴服务器信息中...');
             const sourceId = state.copiedServerRecordId;
+            // 跨标签：找出剪切来源记录所在的 tabId（不是当前 tab 时，粘贴后需要刷新来源 tab 的数据）
+            let sourceTabId = null;
+            if (sourceId) {
+                const srcInCurrent = state.records.find(r => r.id === sourceId);
+                if (srcInCurrent) sourceTabId = state.currentTabId;
+                else {
+                    // 在所有 tab 的缓存里找
+                    for (const t of state.tabs) {
+                        const cache = state.tabRecordCache && state.tabRecordCache[t.id];
+                        if (cache && Array.isArray(cache) && cache.some(r => r.id === sourceId)) {
+                            sourceTabId = t.id;
+                            break;
+                        }
+                    }
+                    if (!sourceTabId) sourceTabId = null; // 找不到就不强求刷新
+                }
+            }
             const updateData = { ...targetRecord.data };
             if (isDedicatedTab) {
                 // 独享标签：只写服务器字段
@@ -6545,15 +6612,33 @@ document.addEventListener('DOMContentLoaded', function() {
             // 迁移支出明细
             if (sourceId && sourceId !== contextTargetId) {
                 try { await API.post('/host-expense/move', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
-                // 清空原行：只清空支出弹窗内的支出明细（已通过host-expense/move移走），服务器列和客户列等保留
-                const srcRec = state.records.find(r => r.id === sourceId);
-                if (srcRec && !isDedicatedTab) {
-                    // 共享/简单标签：保持旧逻辑，把 expense 显示清零
-                    const sourceData = { ...srcRec.data, expense: '0' };
-                    try { await API.put('/records/' + sourceId, { data: sourceData }); } catch(e) {}
+                // 清空原行：共享/简单标签需要把原行 expense 显示清零（即使是跨标签也调用 API 清 display field）
+                if (!isDedicatedTab) {
+                    try {
+                        // 先尝试从当前内存里找，找不到也没关系，直接用 record API 拉原行再写回去
+                        const srcRec = state.records.find(r => r.id === sourceId);
+                        let sourceData;
+                        if (srcRec) {
+                            sourceData = { ...srcRec.data, expense: '0' };
+                        } else {
+                            // 跨标签：获取当前 source 记录完整 data 再更新 expense 字段
+                            try {
+                                const r = await API.get('/records/single/' + sourceId).catch(async () => {
+                                    // 没有 single 接口时，查询所有 tab 的记录兜底（逐 tab 扫描成本高，就只写 expense=0 加上之前 copiedServerData 里其他字段）
+                                    return null;
+                                });
+                                if (r && r.data) {
+                                    sourceData = { ...r.data, expense: '0' };
+                                }
+                            } catch(e) { sourceData = null; }
+                            // 兜底：用之前 copiedServerData 写回 expense=0
+                            if (!sourceData) {
+                                sourceData = { ...state.copiedServerData, expense: '0' };
+                            }
+                        }
+                        await API.put('/records/' + sourceId, { data: sourceData });
+                    } catch(e) {}
                 }
-                // 独享标签：不动原行服务器列信息（服务商/月数/购买/到期/IP/密码等都保留），
-                // 只依赖 host-expense/move API 把支出明细迁移走，其他信息不清空
             }
             await API.put('/records/' + contextTargetId, { data: updateData });
             state.copiedServerData = null;
@@ -6562,7 +6647,17 @@ document.addEventListener('DOMContentLoaded', function() {
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            setStatus('服务器信息已粘贴 ✓');
+            // 跨标签：刷新来源 tab 的缓存，保证用户切回去时数据已更新
+            if (sourceTabId && sourceTabId !== state.currentTabId) {
+                updateTabCache(sourceTabId); // 旧缓存标记失效
+                try {
+                    const invalidate = window.invalidateCurrentTabCache || (() => {});
+                    invalidate(sourceTabId);
+                } catch(e) {}
+                setStatus('服务器信息已粘贴 ✓（跨标签：来源标签已刷新缓存）');
+            } else {
+                setStatus('服务器信息已粘贴 ✓');
+            }
         } catch (err) { setStatus('粘贴失败: ' + err.message); }
     });
 
@@ -6857,44 +6952,59 @@ document.addEventListener('DOMContentLoaded', function() {
     saveSuffixBtn.addEventListener('click', saveSuffixSettings);
 
     // 标题栏颜色设置
-    const DEFAULT_HEADER_COLORS = { navbar: '#1a1a2e', menubar: '#16213e' };
+    const DEFAULT_HEADER_COLORS = { navbar: '#1a1a2e', navbarText: '#ffffff', menubar: '#16213e', menubarText: '#ffffff' };
     const navbarInput = document.getElementById('navbarColorInput');
     const navbarText = document.getElementById('navbarColorText');
+    const navbarTextInput = document.getElementById('navbarTextColorInput');
+    const navbarTextText = document.getElementById('navbarTextColorText');
     const menubarInput = document.getElementById('menubarColorInput');
     const menubarText = document.getElementById('menubarColorText');
+    const menubarTextInput = document.getElementById('menubarTextColorInput');
+    const menubarTextText = document.getElementById('menubarTextColorText');
 
-    // 颜色选择器和文本框联动
-    if (navbarInput && navbarText) {
-        navbarInput.addEventListener('input', () => { navbarText.value = navbarInput.value; });
-        navbarText.addEventListener('input', () => {
-            if (/^#[0-9a-fA-F]{6}$/.test(navbarText.value)) navbarInput.value = navbarText.value;
+    // 颜色选择器和文本框联动（底色+字体色各一组）
+    function bindColorPair(colorInput, textInput) {
+        if (!colorInput || !textInput) return;
+        colorInput.addEventListener('input', () => { textInput.value = colorInput.value; });
+        textInput.addEventListener('input', () => {
+            if (/^#[0-9a-fA-F]{6}$/.test(textInput.value)) colorInput.value = textInput.value;
         });
     }
-    if (menubarInput && menubarText) {
-        menubarInput.addEventListener('input', () => { menubarText.value = menubarInput.value; });
-        menubarText.addEventListener('input', () => {
-            if (/^#[0-9a-fA-F]{6}$/.test(menubarText.value)) menubarInput.value = menubarText.value;
-        });
-    }
+    bindColorPair(navbarInput, navbarText);
+    bindColorPair(navbarTextInput, navbarTextText);
+    bindColorPair(menubarInput, menubarText);
+    bindColorPair(menubarTextInput, menubarTextText);
 
     // 重置按钮
     const resetNavbar = document.getElementById('resetNavbarColor');
+    const resetNavbarText = document.getElementById('resetNavbarTextColor');
     const resetMenubar = document.getElementById('resetMenubarColor');
+    const resetMenubarText = document.getElementById('resetMenubarTextColor');
     if (resetNavbar) resetNavbar.addEventListener('click', () => {
-        navbarInput.value = DEFAULT_HEADER_COLORS.navbar;
-        navbarText.value = DEFAULT_HEADER_COLORS.navbar;
+        if (navbarInput) navbarInput.value = DEFAULT_HEADER_COLORS.navbar;
+        if (navbarText) navbarText.value = DEFAULT_HEADER_COLORS.navbar;
+    });
+    if (resetNavbarText) resetNavbarText.addEventListener('click', () => {
+        if (navbarTextInput) navbarTextInput.value = DEFAULT_HEADER_COLORS.navbarText;
+        if (navbarTextText) navbarTextText.value = DEFAULT_HEADER_COLORS.navbarText;
     });
     if (resetMenubar) resetMenubar.addEventListener('click', () => {
-        menubarInput.value = DEFAULT_HEADER_COLORS.menubar;
-        menubarText.value = DEFAULT_HEADER_COLORS.menubar;
+        if (menubarInput) menubarInput.value = DEFAULT_HEADER_COLORS.menubar;
+        if (menubarText) menubarText.value = DEFAULT_HEADER_COLORS.menubar;
+    });
+    if (resetMenubarText) resetMenubarText.addEventListener('click', () => {
+        if (menubarTextInput) menubarTextInput.value = DEFAULT_HEADER_COLORS.menubarText;
+        if (menubarTextText) menubarTextText.value = DEFAULT_HEADER_COLORS.menubarText;
     });
 
     // 保存按钮
     const saveHeaderBtn = document.getElementById('saveHeaderColorBtn');
     if (saveHeaderBtn) saveHeaderBtn.addEventListener('click', async () => {
         const colors = {
-            navbar: navbarInput.value,
-            menubar: menubarInput.value
+            navbar: navbarInput ? navbarInput.value : DEFAULT_HEADER_COLORS.navbar,
+            navbarText: navbarTextInput ? navbarTextInput.value : DEFAULT_HEADER_COLORS.navbarText,
+            menubar: menubarInput ? menubarInput.value : DEFAULT_HEADER_COLORS.menubar,
+            menubarText: menubarTextInput ? menubarTextInput.value : DEFAULT_HEADER_COLORS.menubarText
         };
         try {
             await API.post('/settings', { key: 'header_colors', value: colors });
@@ -8979,104 +9089,154 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         while (i < text.length) {
-            if (text.charCodeAt(i) === 27 && text.charAt(i + 1) === '[') {
-                // 找到 CSI 序列
-                let j = i + 2;
-                let params = '';
-                while (j < text.length) {
-                    const c = text.charCodeAt(j);
-                    if ((c >= 0x30 && c <= 0x3F) || c === 59) {
-                        params += text.charAt(j);
-                        j++;
-                    } else if (c >= 0x40 && c <= 0x7E) {
-                        // 终止符
-                        const cmd = text.charAt(j);
-                        if (cmd === 'm') {
-                            const codes = params.split(';').map(Number);
-                            if (codes.length === 0 || (codes.length === 1 && isNaN(codes[0]))) {
-                                // 重置
-                                currentFg = ''; currentBg = ''; currentBold = false;
-                                closeSpan();
-                            } else {
-                                for (let k = 0; k < codes.length; k++) {
-                                    const code = codes[k];
-                                    if (code === 0) { currentFg = ''; currentBg = ''; currentBold = false; closeSpan(); }
-                                    else if (code === 1) { currentBold = true; }
-                                    else if (code === 22) { currentBold = false; }
-                                    else if (code >= 30 && code <= 37) { currentFg = colorMap[code]; }
-                                    else if (code >= 40 && code <= 47) { currentBg = bgColorMap[code]; }
-                                    else if (code >= 90 && code <= 97) { currentFg = colorMap[code]; }
-                                    else if (code >= 100 && code <= 107) { currentBg = bgColorMap[code]; }
-                                    else if (code === 38 && codes[k + 1] === 5 && k + 2 < codes.length) {
-                                        // 256色前景色
-                                        const idx = codes[k + 2];
-                                        if (idx >= 0 && idx <= 15) {
-                                            const map256 = {0:'#000000',1:'#800000',2:'#008000',3:'#808000',4:'#000080',5:'#800080',6:'#008080',7:'#c0c0c0',8:'#808080',9:'#ff0000',10:'#00ff00',11:'#ffff00',12:'#0000ff',13:'#ff00ff',14:'#00ffff',15:'#ffffff'};
-                                            currentFg = map256[idx] || '#e5e5e5';
-                                        } else if (idx >= 16 && idx <= 231) {
-                                            const r = Math.floor((idx - 16) / 36); const g = Math.floor(((idx - 16) % 36) / 6); const b = (idx - 16) % 6;
-                                            const rv = r === 0 ? 0 : 55 + r * 40; const gv = g === 0 ? 0 : 55 + g * 40; const bv = b === 0 ? 0 : 55 + b * 40;
-                                            currentFg = 'rgb(' + rv + ',' + gv + ',' + bv + ')';
-                                        } else if (idx >= 232 && idx <= 255) {
-                                            const gray = 8 + (idx - 232) * 10;
-                                            currentFg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
-                                        }
-                                        k += 2;
-                                    } else if (code === 38 && codes[k + 1] === 2 && k + 4 < codes.length) {
-                                        // RGB前景色
-                                        currentFg = 'rgb(' + codes[k + 2] + ',' + codes[k + 3] + ',' + codes[k + 4] + ')';
-                                        k += 4;
-                                    } else if (code === 48 && codes[k + 1] === 5 && k + 2 < codes.length) {
-                                        const idx = codes[k + 2];
-                                        if (idx >= 0 && idx <= 15) {
-                                            const map256 = {0:'#000000',1:'#800000',2:'#008000',3:'#808000',4:'#000080',5:'#800080',6:'#008080',7:'#c0c0c0',8:'#808080',9:'#ff0000',10:'#00ff00',11:'#ffff00',12:'#0000ff',13:'#ff00ff',14:'#00ffff',15:'#ffffff'};
-                                            currentBg = map256[idx] || '#000000';
-                                        } else if (idx >= 16 && idx <= 231) {
-                                            const r = Math.floor((idx - 16) / 36); const g = Math.floor(((idx - 16) % 36) / 6); const b = (idx - 16) % 6;
-                                            const rv = r === 0 ? 0 : 55 + r * 40; const gv = g === 0 ? 0 : 55 + g * 40; const bv = b === 0 ? 0 : 55 + b * 40;
-                                            currentBg = 'rgb(' + rv + ',' + gv + ',' + bv + ')';
-                                        } else if (idx >= 232 && idx <= 255) {
-                                            const gray = 8 + (idx - 232) * 10;
-                                            currentBg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
-                                        }
-                                        k += 2;
-                                    } else if (code === 48 && codes[k + 1] === 2 && k + 4 < codes.length) {
-                                        currentBg = 'rgb(' + codes[k + 2] + ',' + codes[k + 3] + ',' + codes[k + 4] + ')';
-                                        k += 4;
-                                    }
-                                }
-                                openSpan();
-                            }
-                        } else if (cmd === 'J' || cmd === 'K' || cmd === 'H') {
-                            // 清屏/清除行/光标定位 - 忽略
+            const code = text.charCodeAt(i);
+
+            // ==== C0 控制字符的过滤（避免乱码显示原始字节）====
+            if (code === 27 /* ESC */) {
+                // 处理 ESC 开头的序列：CSI (ESC [)、SS2/SS3、OSC 等
+                const next = text.charAt(i + 1);
+                if (next === '[') {
+                    // CSI 序列：ESC [ ... 终止字节 (0x40 - 0x7E)
+                    let j = i + 2;
+                    let params = '';
+                    let hasPrivate = false;
+                    // 跳过可选 private 前缀字符 (? / > 等 0x3C-0x3F)
+                    while (j < text.length) {
+                        const c = text.charCodeAt(j);
+                        if (c >= 0x3C && c <= 0x3F && params.length === 0) {
+                            hasPrivate = true;
+                            params += text.charAt(j);
+                            j++;
+                            continue;
                         }
-                        j++;
                         break;
-                    } else {
+                    }
+                    while (j < text.length) {
+                        const c = text.charCodeAt(j);
+                        // 参数字节 0x30-0x39 ; 0x30-0x3F (包含分号/问号/<>=等)
+                        if ((c >= 0x30 && c <= 0x3F) || c === 0x3A) {
+                            params += text.charAt(j);
+                            j++;
+                        } else if (c >= 0x20 && c <= 0x2F) {
+                            // 中间字节
+                            j++;
+                        } else if (c >= 0x40 && c <= 0x7E) {
+                            // 终止符：命令字节
+                            const cmd = text.charAt(j);
+                            if (cmd === 'm') {
+                                // SGR 颜色/样式
+                                const sgrParams = params.replace(/^[?<>]/, '');
+                                const codes = sgrParams === '' ? [0] : sgrParams.split(';').map(x => {
+                                    const n = parseInt(x, 10);
+                                    return isNaN(n) ? 0 : n;
+                                });
+                                if (codes.length === 0 || (codes.length === 1 && codes[0] === 0)) {
+                                    currentFg = ''; currentBg = ''; currentBold = false;
+                                    closeSpan();
+                                } else {
+                                    for (let k = 0; k < codes.length; k++) {
+                                        const cd = codes[k];
+                                        if (cd === 0) { currentFg = ''; currentBg = ''; currentBold = false; closeSpan(); }
+                                        else if (cd === 1) { currentBold = true; }
+                                        else if (cd === 22) { currentBold = false; }
+                                        else if (cd >= 30 && cd <= 37) { currentFg = colorMap[cd]; }
+                                        else if (cd >= 40 && cd <= 47) { currentBg = bgColorMap[cd]; }
+                                        else if (cd >= 90 && cd <= 97) { currentFg = colorMap[cd]; }
+                                        else if (cd >= 100 && cd <= 107) { currentBg = bgColorMap[cd]; }
+                                        else if (cd === 38 && codes[k + 1] === 5 && k + 2 < codes.length) {
+                                            const idx = codes[k + 2];
+                                            if (idx >= 0 && idx <= 15) {
+                                                const map256 = {0:'#000000',1:'#800000',2:'#008000',3:'#808000',4:'#000080',5:'#800080',6:'#008080',7:'#c0c0c0',8:'#808080',9:'#ff0000',10:'#00ff00',11:'#ffff00',12:'#0000ff',13:'#ff00ff',14:'#00ffff',15:'#ffffff'};
+                                                currentFg = map256[idx] || '#e5e5e5';
+                                            } else if (idx >= 16 && idx <= 231) {
+                                                const r = Math.floor((idx - 16) / 36); const g = Math.floor(((idx - 16) % 36) / 6); const b = (idx - 16) % 6;
+                                                const rv = r === 0 ? 0 : 55 + r * 40; const gv = g === 0 ? 0 : 55 + g * 40; const bv = b === 0 ? 0 : 55 + b * 40;
+                                                currentFg = 'rgb(' + rv + ',' + gv + ',' + bv + ')';
+                                            } else if (idx >= 232 && idx <= 255) {
+                                                const gray = 8 + (idx - 232) * 10;
+                                                currentFg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
+                                            }
+                                            k += 2;
+                                        } else if (cd === 38 && codes[k + 1] === 2 && k + 4 < codes.length) {
+                                            currentFg = 'rgb(' + codes[k + 2] + ',' + codes[k + 3] + ',' + codes[k + 4] + ')';
+                                            k += 4;
+                                        } else if (cd === 48 && codes[k + 1] === 5 && k + 2 < codes.length) {
+                                            const idx = codes[k + 2];
+                                            if (idx >= 0 && idx <= 15) {
+                                                const map256 = {0:'#000000',1:'#800000',2:'#008000',3:'#808000',4:'#000080',5:'#800080',6:'#008080',7:'#c0c0c0',8:'#808080',9:'#ff0000',10:'#00ff00',11:'#ffff00',12:'#0000ff',13:'#ff00ff',14:'#00ffff',15:'#ffffff'};
+                                                currentBg = map256[idx] || '#000000';
+                                            } else if (idx >= 16 && idx <= 231) {
+                                                const r = Math.floor((idx - 16) / 36); const g = Math.floor(((idx - 16) % 36) / 6); const b = (idx - 16) % 6;
+                                                const rv = r === 0 ? 0 : 55 + r * 40; const gv = g === 0 ? 0 : 55 + g * 40; const bv = b === 0 ? 0 : 55 + b * 40;
+                                                currentBg = 'rgb(' + rv + ',' + gv + ',' + bv + ')';
+                                            } else if (idx >= 232 && idx <= 255) {
+                                                const gray = 8 + (idx - 232) * 10;
+                                                currentBg = 'rgb(' + gray + ',' + gray + ',' + gray + ')';
+                                            }
+                                            k += 2;
+                                        } else if (cd === 48 && codes[k + 1] === 2 && k + 4 < codes.length) {
+                                            currentBg = 'rgb(' + codes[k + 2] + ',' + codes[k + 3] + ',' + codes[k + 4] + ')';
+                                            k += 4;
+                                        }
+                                    }
+                                    openSpan();
+                                }
+                            }
+                            // 其他 CSI 命令（光标移动、清屏、滚动区、保存/恢复光标等）统一忽略，不再渲染为可见字符
+                            j++;
+                            break;
+                        } else {
+                            j++;
+                        }
+                    }
+                    i = j;
+                    continue;
+                } else if (next === ']') {
+                    // OSC 序列：ESC ] ... BEL (0x07) 或 ESC \ (ST)
+                    let j = i + 2;
+                    while (j < text.length) {
+                        if (text.charCodeAt(j) === 0x07) { j++; break; }
+                        if (text.charCodeAt(j) === 27 && text.charAt(j + 1) === '\\') { j += 2; break; }
                         j++;
                     }
+                    i = j;
+                    continue;
+                } else {
+                    // 单字节 ESC 后非 [/] 控制：直接跳过 ESC + 下一字符（避免乱码）
+                    i += 2;
+                    continue;
                 }
-                i = j;
-            } else {
-                const ch = text.charAt(i);
-                if (ch === '\r' && text.charAt(i + 1) !== '\n') {
-                    // 单独的回车符（后面不是换行）：将 result 截断到当前行最后一个 \n 之后
-                    const lastNl = result.lastIndexOf('\n');
-                    if (lastNl >= 0) {
-                        result = result.substring(0, lastNl + 1);
-                    } else {
-                        result = '';
-                        closeSpan();
-                    }
-                    i++;
-                } else if (ch === '\r') {
-                    // \r\n 的 \r，跳过，后面的 \n 会正常处理换行
-                    i++;
-                } else if (ch === '<') { result += '&lt;'; i++; }
-                else if (ch === '>') { result += '&gt;'; i++; }
-                else if (ch === '&') { result += '&amp;'; i++; }
-                else { result += ch; i++; }
             }
+
+            // 过滤掉除 \n \t 之外的其他 C0 控制字节（BEL/BS/DC1-4/SI/SO 等），避免显示成方块乱码
+            if (code < 0x20 && code !== 0x0A /* \n */ && code !== 0x09 /* \t */) {
+                i++;
+                continue;
+            }
+            // DEL (0x7F) 也跳过
+            if (code === 0x7F) {
+                i++;
+                continue;
+            }
+
+            const ch = text.charAt(i);
+            if (ch === '\r' && text.charAt(i + 1) !== '\n') {
+                // 单独的回车符（后面不是换行）：将 result 截断到当前行最后一个 \n 之后
+                const lastNl = result.lastIndexOf('\n');
+                if (lastNl >= 0) {
+                    result = result.substring(0, lastNl + 1);
+                } else {
+                    result = '';
+                    closeSpan();
+                }
+                i++;
+            } else if (ch === '\r') {
+                // \r\n 的 \r，跳过，后面的 \n 会正常处理换行
+                i++;
+            } else if (ch === '<') { result += '&lt;'; i++; }
+            else if (ch === '>') { result += '&gt;'; i++; }
+            else if (ch === '&') { result += '&amp;'; i++; }
+            else { result += ch; i++; }
         }
         closeSpan();
         return result;
@@ -9655,6 +9815,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 const conn = getActiveConn();
                 if (conn && conn.xterm) conn.xterm.focus();
             });
+            // 强制滚动条可用：显式转发 wheel 事件给当前可滚动区域
+            // 避免某些浏览器/布局下滚轮无法滚动终端输出
+            tc.addEventListener('wheel', (e) => {
+                const output = document.getElementById('terminalOutput');
+                if (output && output.contains(e.target)) {
+                    // terminal-output 自身的 overflow 会处理；这里只在默认被阻止的兜底
+                    if (e.defaultPrevented) return;
+                    return; // 让原生 overflow-y:auto 正常生效
+                }
+                // 如果当前是 xterm 连接（xterm 内部有自己的滚轮缓冲）
+                // 这里不拦截，xterm 库自己会处理滚轮
+            }, { passive: true });
         }
 
         const terminalBgColor = document.getElementById('terminalBgColor');
@@ -10856,13 +11028,80 @@ document.addEventListener('DOMContentLoaded', function() {
         bindQuoteGridEvents();
     }
 
+    // === 辅助：将 rowId/colId 转成 index，供所有范围/合并运算使用 ===
+    function rowIdToIdx(rowId) {
+        if (!quoteGrid) return -1;
+        return quoteGrid.rows.findIndex(r => r.id === rowId);
+    }
+    function colIdToIdx(colId) {
+        if (!quoteGrid) return -1;
+        return quoteGrid.columns.findIndex(c => c.id === colId);
+    }
+
+    // 将 quoteSelection（rowId/colId 格式）统一展开为「索引矩形 + 自动扩展到合并边界」
+    function getSelectionRect() {
+        if (!quoteSelection || quoteSelection.startRow === null) return null;
+        let r1i = rowIdToIdx(Math.min(quoteSelection.startRow, quoteSelection.endRow));
+        let r2i = rowIdToIdx(Math.max(quoteSelection.startRow, quoteSelection.endRow));
+        let c1i = colIdToIdx(Math.min(quoteSelection.startCol, quoteSelection.endCol));
+        let c2i = colIdToIdx(Math.max(quoteSelection.startCol, quoteSelection.endCol));
+        if (r1i < 0 || r2i < 0 || c1i < 0 || c2i < 0) return null;
+        // 将矩形向外扩展，直到完全包含所有与当前矩形相交的合并块
+        // （避免用户选到合并块的一部分，造成合并/拆分混乱）
+        const merges = quoteGrid.merges || [];
+        let expanded = true;
+        let guard = 0;
+        while (expanded && guard < 100) {
+            expanded = false;
+            guard++;
+            for (const m of merges) {
+                const mRi = rowIdToIdx(m.row);
+                const mCi = colIdToIdx(m.col);
+                if (mRi < 0 || mCi < 0) continue;
+                const mR2i = mRi + m.rowspan - 1;
+                const mC2i = mCi + m.colspan - 1;
+                // 相交：不是 (m 完全在当前左边 或 右边 或 上边 或 下边)
+                const intersect = !(mR2i < r1i || mRi > r2i || mC2i < c1i || mCi > c2i);
+                if (intersect) {
+                    const nr1 = Math.min(r1i, mRi);
+                    const nr2 = Math.max(r2i, mR2i);
+                    const nc1 = Math.min(c1i, mCi);
+                    const nc2 = Math.max(c2i, mC2i);
+                    if (nr1 !== r1i || nr2 !== r2i || nc1 !== c1i || nc2 !== c2i) {
+                        r1i = nr1; r2i = nr2; c1i = nc1; c2i = nc2;
+                        expanded = true;
+                    }
+                }
+            }
+        }
+        return { r1i, r2i, c1i, c2i };
+    }
+
     function isCellSelected(rowId, colId) {
-        if (!quoteSelection || quoteSelection.startRow === null) return false;
-        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
-        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
-        return rowId >= r1 && rowId <= r2 && colId >= c1 && colId <= c2;
+        const rect = getSelectionRect();
+        if (!rect) return false;
+        const ri = rowIdToIdx(rowId);
+        const ci = colIdToIdx(colId);
+        if (ri < 0 || ci < 0) return false;
+        return ri >= rect.r1i && ri <= rect.r2i && ci >= rect.c1i && ci <= rect.c2i;
+    }
+
+    // 找到包含 (rowId, colId) 的合并块（无论是主单元格还是被覆盖单元格）
+    function findMergeContaining(rowId, colId) {
+        if (!quoteGrid.merges) return null;
+        const ri = rowIdToIdx(rowId);
+        const ci = colIdToIdx(colId);
+        if (ri < 0 || ci < 0) return null;
+        for (const m of quoteGrid.merges) {
+            const mRi = rowIdToIdx(m.row);
+            const mCi = colIdToIdx(m.col);
+            if (mRi < 0 || mCi < 0) continue;
+            if (ri >= mRi && ri < mRi + m.rowspan &&
+                ci >= mCi && ci < mCi + m.colspan) {
+                return m;
+            }
+        }
+        return null;
     }
 
     function getMergeForCell(rowId, colId) {
@@ -10872,20 +11111,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function isHiddenByMerge(rowId, colId) {
         if (!quoteGrid.merges) return false;
-        return quoteGrid.merges.some(m => {
-            if (rowId >= m.row && rowId < m.row + m.rowspan &&
-                colId >= m.col && colId < m.col + m.colspan &&
-                (rowId !== m.row || colId !== m.col)) return true;
-            return false;
-        });
+        // 如果是合并块的主单元格，不隐藏
+        if (getMergeForCell(rowId, colId)) return false;
+        // 其他被合并块覆盖的单元格才隐藏
+        return findMergeContaining(rowId, colId) !== null;
     }
 
     // 判断某一行是否完全被合并覆盖（非主行，用于隐藏该行的边框）
     function isRowCoveredByMerge(rowId) {
         if (!quoteGrid.merges) return false;
+        const ri = rowIdToIdx(rowId);
+        if (ri < 0) return false;
         return quoteGrid.merges.some(m => {
-            if (rowId > m.row && rowId < m.row + m.rowspan) return true;
-            return false;
+            const mRi = rowIdToIdx(m.row);
+            if (mRi < 0) return false;
+            // 主行 ri 在 合并主行 mRi 之后，且在合并范围之内（但不是合并主行）
+            return ri > mRi && ri < mRi + m.rowspan;
         });
     }
 
@@ -11555,20 +11796,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Ctrl+C：复制选中区域（TSV格式，支持粘贴到Excel）
             if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-                if (!quoteSelection || quoteSelection.startRow === null) return;
+                const rect = getSelectionRect();
+                if (!rect) return;
                 e.preventDefault();
-                const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-                const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
-                const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-                const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+                const { r1i, r2i, c1i, c2i } = rect;
                 const lines = [];
-                for (let ri = r1; ri <= r2; ri++) {
-                    const row = quoteGrid.rows.find(r => r.id === ri);
+                for (let ri = r1i; ri <= r2i; ri++) {
+                    const row = quoteGrid.rows[ri];
                     if (!row) continue;
+                    const rowId = row.id;
                     const cells = [];
-                    for (let ci = c1; ci <= c2; ci++) {
-                        if (isHiddenByMerge(ri, ci)) continue;
-                        cells.push(row.cells[ci] || '');
+                    for (let ci = c1i; ci <= c2i; ci++) {
+                        const col = quoteGrid.columns[ci];
+                        if (!col) continue;
+                        const colId = col.id;
+                        if (isHiddenByMerge(rowId, colId)) continue;
+                        cells.push(row.cells[colId] || '');
                     }
                     lines.push(cells.join('\t'));
                 }
@@ -11588,23 +11831,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Ctrl+V：粘贴（支持 TSV/CSV 格式）
             if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
-                if (!quoteSelection || quoteSelection.startRow === null) return;
+                const rect = getSelectionRect();
+                if (!rect) return;
                 e.preventDefault();
-                const startRow = quoteSelection.startRow;
-                const startCol = quoteSelection.startCol;
+                const startRi = rect.r1i;
+                const startCi = rect.c1i;
                 const applyPaste = (text) => {
-                    const lines = text.replace(/\r\n/g, '\n').split('\n').filter(l => l.length > 0 || l === '');
+                    const lines = text.replace(/\r\n/g, '\n').split('\n');
                     let changed = false;
                     lines.forEach((line, i) => {
-                        const rowId = startRow + i;
-                        const row = quoteGrid.rows.find(r => r.id === rowId);
+                        const targetRi = startRi + i;
+                        if (targetRi >= quoteGrid.rows.length) return;
+                        const row = quoteGrid.rows[targetRi];
                         if (!row) return;
                         let cells = line.split('\t');
-                        if (cells.length === 1) cells = line.split(','); // 兼容 CSV
+                        if (cells.length === 1 && line.indexOf(',') >= 0) cells = line.split(','); // 兼容 CSV
                         cells.forEach((val, j) => {
-                            const colId = startCol + j;
-                            if (!quoteGrid.columns.find(c => c.id === colId)) return;
-                            if (isHiddenByMerge(rowId, colId)) return;
+                            const targetCi = startCi + j;
+                            if (targetCi >= quoteGrid.columns.length) return;
+                            const colId = quoteGrid.columns[targetCi].id;
+                            if (isHiddenByMerge(row.id, colId)) return;
                             if (row.cells[colId] !== val) {
                                 row.cells[colId] = val;
                                 changed = true;
@@ -11624,17 +11870,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Delete/Backspace：清空选中单元格
             if (e.key === 'Delete' || e.key === 'Backspace') {
-                if (!quoteSelection || quoteSelection.startRow === null) return;
+                const rect = getSelectionRect();
+                if (!rect) return;
                 e.preventDefault();
-                const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-                const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
-                const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-                const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
+                const { r1i, r2i, c1i, c2i } = rect;
                 let changed = false;
-                for (const row of quoteGrid.rows) {
-                    if (row.id < r1 || row.id > r2) continue;
-                    for (const col of quoteGrid.columns) {
-                        if (col.id < c1 || col.id > c2) continue;
+                for (let ri = r1i; ri <= r2i; ri++) {
+                    const row = quoteGrid.rows[ri];
+                    if (!row) continue;
+                    for (let ci = c1i; ci <= c2i; ci++) {
+                        const col = quoteGrid.columns[ci];
+                        if (!col) continue;
                         if (isHiddenByMerge(row.id, col.id)) continue;
                         if (row.cells[col.id] !== '') {
                             row.cells[col.id] = '';
@@ -11723,13 +11969,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 对选中区域应用样式
     function applyQuoteStyle(key, value) {
-        if (!quoteSelection || quoteSelection.startRow === null) return;
-        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
-        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
-        for (let rid of quoteGrid.rows.filter(r => r.id >= r1 && r.id <= r2).map(r => r.id)) {
-            for (let cid of quoteGrid.columns.filter(c => c.id >= c1 && c.id <= c2).map(c => c.id)) {
+        const rect = getSelectionRect();
+        if (!rect) return;
+        const { r1i, r2i, c1i, c2i } = rect;
+        for (let ri = r1i; ri <= r2i; ri++) {
+            const rid = quoteGrid.rows[ri].id;
+            for (let ci = c1i; ci <= c2i; ci++) {
+                const cid = quoteGrid.columns[ci].id;
                 const skey = `${rid}_${cid}`;
                 if (!quoteGrid.styles[skey]) quoteGrid.styles[skey] = {};
                 // 空值或 null/undefined 表示清除该样式
@@ -11768,10 +12014,61 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const quoteDelRowBtn = document.getElementById('quoteDelRowBtn');
     if (quoteDelRowBtn) quoteDelRowBtn.addEventListener('click', () => {
-        if (!quoteSelection || quoteSelection.startRow === null) { setStatus('请先选中要删除的行'); return; }
-        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
-        quoteGrid.rows = quoteGrid.rows.filter(r => r.id < r1 || r.id > r2);
+        if (!quoteGrid) return;
+        const rect = getSelectionRect();
+        if (!rect) { setStatus('请先选中要删除的行'); return; }
+        const { r1i, r2i } = rect;
+        if (r2i - r1i + 1 >= quoteGrid.rows.length) { setStatus('至少需要保留1行'); return; }
+        // 收集要删除的行 id
+        const removedIds = new Set();
+        for (let i = r1i; i <= r2i; i++) removedIds.add(quoteGrid.rows[i].id);
+        // 调整 merges：
+        //   1) 合并主行在删除范围内 → 整条合并删除
+        //   2) 合并主行在删除范围之上，但合并范围跨入删除范围 → 缩短 rowspan
+        //   3) 合并主行在删除范围之下 → 合并主行 row idx 不变（但因为我们 splice 上方，rowId 不变 => 无需调整 row/col id）
+        quoteGrid.merges = (quoteGrid.merges || []).filter(m => {
+            const mRi = rowIdToIdx(m.row);
+            if (mRi < 0) return false;
+            const mR2i = mRi + m.rowspan - 1;
+            if (mRi >= r1i && mRi <= r2i) return false; // 主行被删
+            if (mR2i < r1i || mRi > r2i) {
+                // 完全在删除范围之上或之下；需要检查跨删除区的情况
+                if (mRi < r1i && mR2i > r2i) {
+                    // 完全跨越删除区：缩短 rowspan
+                    m.rowspan -= (r2i - r1i + 1);
+                    return true;
+                }
+                if (mRi < r1i && mR2i >= r1i) {
+                    // 尾部被切：rowspan = 删除起始点前的剩余
+                    m.rowspan = r1i - mRi;
+                    return true;
+                }
+                return true; // 完全不相交（上面/下面）
+            }
+            // 剩下的情况：合并主行在删除区上方，但合并块部分进入删除区
+            if (mRi < r1i) {
+                m.rowspan = r1i - mRi;
+                return true;
+            }
+            return false;
+        });
+        quoteGrid.rows = quoteGrid.rows.filter(r => !removedIds.has(r.id));
+        // hiddenRows 同步清理
+        if (Array.isArray(quoteGrid.hiddenRows)) {
+            quoteGrid.hiddenRows = quoteGrid.hiddenRows.filter(id => !removedIds.has(id));
+        }
+        // rowHeights 清理
+        if (quoteGrid.rowHeights) {
+            removedIds.forEach(id => delete quoteGrid.rowHeights[id]);
+        }
+        // styles 清理
+        if (quoteGrid.styles) {
+            Object.keys(quoteGrid.styles).forEach(k => {
+                const [ridStr] = k.split('_');
+                const rid = parseInt(ridStr);
+                if (removedIds.has(rid)) delete quoteGrid.styles[k];
+            });
+        }
         quoteSelection = { startRow: null, startCol: null, endRow: null, endCol: null, selecting: false };
         saveQuoteGridDebounced();
         renderQuoteGrid();
@@ -11779,13 +12076,53 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const quoteDelColBtn = document.getElementById('quoteDelColBtn');
     if (quoteDelColBtn) quoteDelColBtn.addEventListener('click', () => {
-        if (!quoteSelection || quoteSelection.startCol === null) { setStatus('请先选中要删除的列'); return; }
-        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
-        quoteGrid.columns = quoteGrid.columns.filter(c => c.id < c1 || c.id > c2);
-        quoteGrid.rows.forEach(row => {
-            for (let cid = c1; cid <= c2; cid++) delete row.cells[cid];
+        if (!quoteGrid) return;
+        const rect = getSelectionRect();
+        if (!rect) { setStatus('请先选中要删除的列'); return; }
+        const { c1i, c2i } = rect;
+        if (c2i - c1i + 1 >= quoteGrid.columns.length) { setStatus('至少需要保留1列'); return; }
+        const removedIds = new Set();
+        for (let i = c1i; i <= c2i; i++) removedIds.add(quoteGrid.columns[i].id);
+        quoteGrid.merges = (quoteGrid.merges || []).filter(m => {
+            const mCi = colIdToIdx(m.col);
+            if (mCi < 0) return false;
+            const mC2i = mCi + m.colspan - 1;
+            if (mCi >= c1i && mCi <= c2i) return false; // 主列被删
+            if (mC2i < c1i || mCi > c2i) {
+                if (mCi < c1i && mC2i > c2i) {
+                    m.colspan -= (c2i - c1i + 1);
+                    return true;
+                }
+                if (mCi < c1i && mC2i >= c1i) {
+                    m.colspan = c1i - mCi;
+                    return true;
+                }
+                return true;
+            }
+            if (mCi < c1i) {
+                m.colspan = c1i - mCi;
+                return true;
+            }
+            return false;
         });
+        quoteGrid.columns = quoteGrid.columns.filter(c => !removedIds.has(c.id));
+        quoteGrid.rows.forEach(row => {
+            removedIds.forEach(cid => delete row.cells[cid]);
+        });
+        // hiddenCols / colWidths / styles 清理
+        if (Array.isArray(quoteGrid.hiddenCols)) {
+            quoteGrid.hiddenCols = quoteGrid.hiddenCols.filter(id => !removedIds.has(id));
+        }
+        if (quoteGrid.colWidths) {
+            removedIds.forEach(id => delete quoteGrid.colWidths[id]);
+        }
+        if (quoteGrid.styles) {
+            Object.keys(quoteGrid.styles).forEach(k => {
+                const [, cidStr] = k.split('_');
+                const cid = parseInt(cidStr);
+                if (removedIds.has(cid)) delete quoteGrid.styles[k];
+            });
+        }
         quoteSelection = { startRow: null, startCol: null, endRow: null, endCol: null, selecting: false };
         saveQuoteGridDebounced();
         renderQuoteGrid();
@@ -11883,18 +12220,32 @@ document.addEventListener('DOMContentLoaded', function() {
     // 合并/拆分
     const quoteMergeBtn = document.getElementById('quoteMergeBtn');
     if (quoteMergeBtn) quoteMergeBtn.addEventListener('click', () => {
-        if (!quoteSelection || quoteSelection.startRow === null) { setStatus('请先选中要合并的单元格（鼠标拖拽选择）'); return; }
-        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-        const r2 = Math.max(quoteSelection.startRow, quoteSelection.endRow);
-        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-        const c2 = Math.max(quoteSelection.startCol, quoteSelection.endCol);
-        if (r1 === r2 && c1 === c2) { setStatus('请选中至少2个单元格'); return; }
-        // 清除范围内的旧合并
-        quoteGrid.merges = quoteGrid.merges.filter(m =>
-            !(m.row >= r1 && m.row < r2 + 1 && m.col >= c1 && m.col < c2 + 1));
-        quoteGrid.merges.push({ row: r1, col: c1, rowspan: r2 - r1 + 1, colspan: c2 - c1 + 1 });
+        if (!quoteGrid) { setStatus('表格未初始化'); return; }
+        const rect = getSelectionRect();
+        if (!rect) { setStatus('请先选中要合并的单元格（鼠标拖拽选择）'); return; }
+        const { r1i, r2i, c1i, c2i } = rect;
+        if (r1i === r2i && c1i === c2i) { setStatus('请选中至少2个单元格'); return; }
+        const mainRowId = quoteGrid.rows[r1i].id;
+        const mainColId = quoteGrid.columns[c1i].id;
+        const rowspan = r2i - r1i + 1;
+        const colspan = c2i - c1i + 1;
+        // 移除所有与目标矩形相交的旧合并（避免合并嵌套混乱）
+        quoteGrid.merges = (quoteGrid.merges || []).filter(m => {
+            const mRi = rowIdToIdx(m.row);
+            const mCi = colIdToIdx(m.col);
+            if (mRi < 0 || mCi < 0) return false; // 失效合并直接移除
+            const mR2i = mRi + m.rowspan - 1;
+            const mC2i = mCi + m.colspan - 1;
+            const intersect = !(mR2i < r1i || mRi > r2i || mC2i < c1i || mCi > c2i);
+            return !intersect;
+        });
+        // 合并前先做一次防重：没有相同主单元格的合并（上面已过滤，但防御一下）
+        const exists = quoteGrid.merges.some(m => m.row === mainRowId && m.col === mainColId);
+        if (!exists) {
+            quoteGrid.merges.push({ row: mainRowId, col: mainColId, rowspan, colspan });
+        }
         // 合并后自动设置水平垂直居中到主单元格
-        const mainKey = `${r1}_${c1}`;
+        const mainKey = `${mainRowId}_${mainColId}`;
         if (!quoteGrid.styles[mainKey]) quoteGrid.styles[mainKey] = {};
         quoteGrid.styles[mainKey].align = 'center';
         quoteGrid.styles[mainKey].valign = 'middle';
@@ -11906,12 +12257,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const quoteSplitBtn = document.getElementById('quoteSplitBtn');
     if (quoteSplitBtn) quoteSplitBtn.addEventListener('click', () => {
-        if (!quoteSelection || quoteSelection.startRow === null) { setStatus('请先选中要拆分的单元格'); return; }
-        const r1 = Math.min(quoteSelection.startRow, quoteSelection.endRow);
-        const c1 = Math.min(quoteSelection.startCol, quoteSelection.endCol);
-        const hasMerge = quoteGrid.merges.some(m => m.row === r1 && m.col === c1);
-        if (!hasMerge) { setStatus('选中的单元格没有合并'); return; }
-        quoteGrid.merges = quoteGrid.merges.filter(m => !(m.row === r1 && m.col === c1));
+        if (!quoteGrid) { setStatus('表格未初始化'); return; }
+        const rect = getSelectionRect();
+        if (!rect) { setStatus('请先选中要拆分的单元格'); return; }
+        const { r1i, r2i, c1i, c2i } = rect;
+        // 找出所有与选中矩形「相交」的合并，全部拆分
+        // （这样即使点到合并块内部任何单元格，也能正确拆分整组合并）
+        const toRemove = [];
+        for (const m of (quoteGrid.merges || [])) {
+            const mRi = rowIdToIdx(m.row);
+            const mCi = colIdToIdx(m.col);
+            if (mRi < 0 || mCi < 0) { toRemove.push(m); continue; }
+            const mR2i = mRi + m.rowspan - 1;
+            const mC2i = mCi + m.colspan - 1;
+            const intersect = !(mR2i < r1i || mRi > r2i || mC2i < c1i || mCi > c2i);
+            if (intersect) toRemove.push(m);
+        }
+        if (toRemove.length === 0) { setStatus('选中的单元格没有合并'); return; }
+        quoteGrid.merges = (quoteGrid.merges || []).filter(m => toRemove.indexOf(m) < 0);
         saveQuoteGridDebounced();
         renderQuoteGrid();
         setStatus('✅ 已拆分单元格');

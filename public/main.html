@@ -20,6 +20,15 @@
                     var css = '';
                     if (c.navbar) css += '.navbar{background:' + c.navbar + ' !important;}';
                     if (c.menubar) css += '.top-menu{background:' + c.menubar + ' !important;}';
+                    if (c.navbarText) {
+                        css += '.navbar, .navbar .nav-logo, .navbar .nav-logo span, .navbar .server-status, .navbar .ss-item, .navbar .nav-right, .navbar .user-info, .navbar .nav-user-menu { color:' + c.navbarText + ' !important; }';
+                        css += '.navbar .user-info .ss-value { color:' + c.navbarText + ' !important; }';
+                        css += '.navbar a, .navbar button { color:' + c.navbarText + ' !important; }';
+                    }
+                    if (c.menubarText) {
+                        css += '.top-menu, .top-menu .menu-item, .top-menu .top-menu-title, .top-menu .menu-group { color:' + c.menubarText + ' !important; }';
+                        css += '.top-menu button, .top-menu a, .top-menu .tab-label { color:' + c.menubarText + ' !important; }';
+                    }
                     style.textContent = css;
                     document.head.appendChild(style);
                 }
@@ -413,14 +422,22 @@
                     </div>
                     <div class="setting-group">
                         <h3>🎨 顶部标题栏</h3>
-                        <p class="setting-desc">自定义顶部导航栏和菜单栏的背景颜色</p>
+                        <p class="setting-desc">自定义顶部导航栏和菜单栏的 背景颜色 及 字体颜色（浅底色时请改字体颜色，避免文字看不见）</p>
                         <div class="header-color-setting">
                             <div class="input-group">
                                 <label>导航栏底色</label>
                                 <div style="display:flex;align-items:center;gap:10px;">
                                     <input type="color" id="navbarColorInput" value="#1a1a2e" />
                                     <input type="text" id="navbarColorText" value="#1a1a2e" style="width:120px;" />
-                                    <button class="tool-btn" id="resetNavbarColor">重置</button>
+                                    <button class="tool-btn" id="resetNavbarColor">重置底色</button>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label>导航栏字体颜色</label>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <input type="color" id="navbarTextColorInput" value="#ffffff" />
+                                    <input type="text" id="navbarTextColorText" value="#ffffff" style="width:120px;" />
+                                    <button class="tool-btn" id="resetNavbarTextColor">重置字体</button>
                                 </div>
                             </div>
                             <div class="input-group">
@@ -428,7 +445,15 @@
                                 <div style="display:flex;align-items:center;gap:10px;">
                                     <input type="color" id="menubarColorInput" value="#16213e" />
                                     <input type="text" id="menubarColorText" value="#16213e" style="width:120px;" />
-                                    <button class="tool-btn" id="resetMenubarColor">重置</button>
+                                    <button class="tool-btn" id="resetMenubarColor">重置底色</button>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label>菜单栏字体颜色</label>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <input type="color" id="menubarTextColorInput" value="#ffffff" />
+                                    <input type="text" id="menubarTextColorText" value="#ffffff" style="width:120px;" />
+                                    <button class="tool-btn" id="resetMenubarTextColor">重置字体</button>
                                 </div>
                             </div>
                             <button class="tool-btn primary" id="saveHeaderColorBtn">保存设置</button>
