@@ -12319,44 +12319,46 @@ document.addEventListener('DOMContentLoaded', function() {
             const hiddenCols = new Set(Array.isArray(g.hiddenCols) ? g.hiddenCols : []);
             const visibleColumns = g.columns.filter(c => !hiddenCols.has(c.id));
             const visibleRows = g.rows.filter(r => !hiddenRows.has(r.id));
-            // 原始 idx 到可视数组 idx 的映射（用于合并范围计算）
-            const colIdxMap = {};
-            visibleColumns.forEach((c, i) => { const orig = g.columns.findIndex(cc => cc.id === c.id); colIdxMap[c.id] = orig; colIdxMap['vi_' + orig] = i; });
-            const rowIdxMap = {};
-            visibleRows.forEach((r, i) => { const orig = g.rows.findIndex(rr => rr.id === r.id); rowIdxMap[r.id] = orig; rowIdxMap['vi_' + orig] = i; });
 
-            // 计算列宽（只看可见列）
+            // 原始 idx 到可视数组 idx 的映射
+            const colViMap = {};
+            const rowViMap = {};
+            visibleColumns.forEach((c, i) => {
+                const orig = g.columns.findIndex(cc => cc.id === c.id);
+                colViMap[c.id] = i;
+                colViMap['vi_' + orig] = i;
+            });
+            visibleRows.forEach((r, i) => {
+                const orig = g.rows.findIndex(rr => rr.id === r.id);
+                rowViMap[r.id] = i;
+                rowViMap['vi_' + orig] = i;
+            });
+
             const colWidths = visibleColumns.map(c => g.colWidths[c.id] || 120);
             const totalWidth = colWidths.reduce((a, b) => a + b, 0) + padding * 2;
-
-            // 计算行高（只看可见行）
             const rowHeights = visibleRows.map(r => g.rowHeights[r.id] || defaultRowH);
             const totalHeight = rowHeights.reduce((a, b) => a + b, 0) + padding * 2;
 
             canvas.width = totalWidth;
             canvas.height = totalHeight;
 
-            // 白色背景
             ctx.fillStyle = '#fff';
             ctx.fillRect(0, 0, totalWidth, totalHeight);
             ctx.strokeStyle = '#dcdfe6';
             ctx.lineWidth = 1;
 
-            // 判断某个合并在可见区域的主单元格是否仍是当前行列（用于绘制合并的可见范围）
-            function visibleMergeInfo(rowId, colId) {
-                const m = getMergeForCell(rowId, colId);
+            // 计算合并在可见区域内的实际跨度
+            function getVisibleMergeSpan(rowId, colId) {
+                const m = findMergeContaining(rowId, colId);
                 if (!m) return null;
-                // 主行/主列不在可见范围内 → 该合并被整体隐藏（绘制时不应在此画）
                 if (hiddenRows.has(m.row) || hiddenCols.has(m.col)) return null;
-                // 计算该合并在可见行/列范围内的 rowspan / colspan
                 const origRowStart = g.rows.findIndex(r => r.id === m.row);
                 const origColStart = g.columns.findIndex(c => c.id === m.col);
                 let visRowStart = null, visRowEnd = -1;
                 for (let ri = 0; ri < m.rowspan; ri++) {
                     const row = g.rows[origRowStart + ri];
-                    if (!row) continue;
-                    if (hiddenRows.has(row.id)) continue;
-                    const vi = rowIdxMap['vi_' + (origRowStart + ri)];
+                    if (!row || hiddenRows.has(row.id)) continue;
+                    const vi = rowViMap['vi_' + (origRowStart + ri)];
                     if (vi === undefined) continue;
                     if (visRowStart === null) visRowStart = vi;
                     visRowEnd = vi;
@@ -12364,36 +12366,116 @@ document.addEventListener('DOMContentLoaded', function() {
                 let visColStart = null, visColEnd = -1;
                 for (let ci = 0; ci < m.colspan; ci++) {
                     const col = g.columns[origColStart + ci];
-                    if (!col) continue;
-                    if (hiddenCols.has(col.id)) continue;
-                    const vi = colIdxMap['vi_' + (origColStart + ci)];
+                    if (!col || hiddenCols.has(col.id)) continue;
+                    const vi = colViMap['vi_' + (origColStart + ci)];
                     if (vi === undefined) continue;
                     if (visColStart === null) visColStart = vi;
                     visColEnd = vi;
                 }
                 if (visRowStart === null || visColStart === null) return null;
+                // 返回合并信息：如果当前 cell 是主单元格 → 返回 span；否则 → covered
                 const currentOrigRow = g.rows.findIndex(r => r.id === rowId);
                 const currentOrigCol = g.columns.findIndex(c => c.id === colId);
-                const currentViRow = rowIdxMap['vi_' + currentOrigRow];
-                const currentViCol = colIdxMap['vi_' + currentOrigCol];
-                // 仅在可见区域的"主单元格"才返回合并信息，其他在可见区域的子格视为被合并隐藏
+                const currentViRow = rowViMap['vi_' + currentOrigRow];
+                const currentViCol = colViMap['vi_' + currentOrigCol];
                 if (currentViRow === visRowStart && currentViCol === visColStart) {
                     return { visRowStart, visColStart, visRowspan: visRowEnd - visRowStart + 1, visColspan: visColEnd - visColStart + 1 };
                 }
                 return { covered: true };
             }
+
             function isCellCoveredInVisible(rowId, colId) {
-                if (isHiddenByMerge(rowId, colId)) return true;
-                const info = visibleMergeInfo(rowId, colId);
-                return !!(info && info.covered);
+                const span = getVisibleMergeSpan(rowId, colId);
+                return !!(span && span.covered);
             }
 
-            // 绘制数据行（只绘制可见行列，不包含列名和行号）
+            // 多行文本绘制工具：按 \n 分行并按宽度自动换行后绘制，与 DOM 中 cell-display（padding:6px 10px、line-height:1.5、white-space:pre-wrap、word-break:break-word）保持一致
+            function drawMultilineText(val, x, y, w, h, fs, bold, align, fg, vAlign) {
+                const paddingX = 10;
+                const paddingY = 6;
+                let effectiveFs = fs;
+                ctx.font = `${bold ? 'bold ' : ''}${effectiveFs}px -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif`;
+                ctx.fillStyle = fg;
+                const availW = Math.max(4, w - paddingX * 2);
+                const availH = Math.max(4, h - paddingY * 2);
+
+                // 按宽度将原始行拆成若干自动换行后的子行（pre-wrap：保留空白、允许任意位置换行）
+                function wrapLine(text, maxW) {
+                    const out = [];
+                    if (text === '') return [''];
+                    let cur = '';
+                    let curW = 0;
+                    for (let i = 0; i < text.length; i++) {
+                        const ch = text[i];
+                        const chW = ctx.measureText(ch).width || 0;
+                        if (curW + chW > maxW && cur.length > 0) {
+                            out.push(cur);
+                            cur = ch;
+                            curW = chW;
+                        } else {
+                            cur += ch;
+                            curW += chW;
+                        }
+                    }
+                    if (cur.length > 0) out.push(cur);
+                    return out;
+                }
+
+                // 先假设原字号，生成自动换行后的行
+                let lines = [];
+                String(val).split('\n').forEach(ln => {
+                    const wrapped = wrapLine(ln, availW);
+                    if (wrapped.length === 0) lines.push('');
+                    else lines = lines.concat(wrapped);
+                });
+
+                // 迭代缩小字号直到高度/宽度都能容纳
+                let effLineHeight = effectiveFs * 1.5;
+                for (let guard = 0; guard < 40; guard++) {
+                    effLineHeight = effectiveFs * 1.5;
+                    const totalTextH = lines.length * effLineHeight;
+                    const maxLineW = lines.length > 0 ? Math.max(...lines.map(l => ctx.measureText(l).width)) : 0;
+                    if ((totalTextH <= availH && maxLineW <= availW) || effectiveFs <= 8) break;
+                    effectiveFs = Math.max(8, effectiveFs - 1);
+                    ctx.font = `${bold ? 'bold ' : ''}${effectiveFs}px -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif`;
+                    // 字号变化后，重新按新宽度换行
+                    lines = [];
+                    String(val).split('\n').forEach(ln => {
+                        const wrapped = wrapLine(ln, availW);
+                        if (wrapped.length === 0) lines.push('');
+                        else lines = lines.concat(wrapped);
+                    });
+                }
+
+                effLineHeight = effectiveFs * 1.5;
+                const totalTextH = lines.length * effLineHeight;
+                const lineWidths = lines.map(l => ctx.measureText(l).width);
+
+                // 垂直对齐：top / middle / bottom，与 DOM 的 align-items 行为一致
+                const vAlignMode = vAlign || 'middle';
+                let startY;
+                if (vAlignMode === 'top') {
+                    startY = y + paddingY + effectiveFs;
+                } else if (vAlignMode === 'bottom') {
+                    startY = y + h - paddingY - totalTextH + effectiveFs;
+                } else {
+                    startY = y + (h - totalTextH) / 2 + effectiveFs;
+                }
+                lines.forEach((line, i) => {
+                    const lw = lineWidths[i];
+                    let tx;
+                    if (align === 'center') tx = x + w / 2 - lw / 2;
+                    else if (align === 'right') tx = x + w - paddingX - lw;
+                    else tx = x + paddingX;
+                    ctx.fillText(line, tx, startY + i * effLineHeight);
+                });
+            }
+
+            // 绘制数据行
             let y = padding;
             visibleRows.forEach((row, rowIdx) => {
                 let x = padding;
                 const rh = rowHeights[rowIdx];
-
                 visibleColumns.forEach((col, colIdx) => {
                     const cw = colWidths[colIdx];
                     const skey = `${row.id}_${col.id}`;
@@ -12406,7 +12488,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
 
                     // 检查合并（在可见范围内）
-                    const vmi = visibleMergeInfo(row.id, col.id);
+                    const vmi = getVisibleMergeSpan(row.id, col.id);
                     let cellW = cw;
                     let cellH = rh;
                     if (vmi && !vmi.covered) {
@@ -12430,24 +12512,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     // 内容
                     const val = row.cells[col.id] || '';
                     if (val) {
-                        const bold = style.bold ? 'bold ' : '';
+                        const bold = style.bold ? true : false;
                         const fs = style.fontSize || 13;
-                        const ff = style.fontFamily ? `"${style.fontFamily}", ` : '';
-                        ctx.font = `${bold}${fs}px -apple-system, BlinkMacSystemFont, ${ff}"Microsoft YaHei", sans-serif`;
-                        ctx.fillStyle = style.fg || '#303133';
                         const align = style.align || 'left';
-                        const tw = ctx.measureText(val).width;
-                        let tx;
-                        if (align === 'center') tx = x + cellW / 2 - tw / 2;
-                        else if (align === 'right') tx = x + cellW - 8 - tw;
-                        else tx = x + 8;
-                        const ty = y + cellH / 2 + (fs / 3);
-                        // 裁剪文字防止溢出
+                        // 与 DOM 对齐：合并单元格 valign 默认 middle，否则默认 top
+                        const isMergedCell = !!(vmi && !vmi.covered && (vmi.visRowspan > 1 || vmi.visColspan > 1));
+                        const vAlign = style.valign || (isMergedCell ? 'middle' : 'top');
                         ctx.save();
                         ctx.beginPath();
                         ctx.rect(x + 2, y + 2, cellW - 4, cellH - 4);
                         ctx.clip();
-                        ctx.fillText(val, tx, ty);
+                        drawMultilineText(val, x, y, cellW, cellH, fs, bold, align, style.fg || '#303133', vAlign);
                         ctx.restore();
                     }
 
@@ -12466,13 +12541,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     throw new Error('clipboard_not_available');
                 }
             } catch (e) {
-                // 降级：下载图片（HTTP环境下剪贴板API不可用，需HTTPS）
                 const a = document.createElement('a');
                 a.href = canvas.toDataURL('image/png');
                 a.download = '网络报价.png';
                 a.click();
-                const msg = e.message === 'clipboard_not_available' 
-                    ? '当前为HTTP环境，剪贴板不可用（需HTTPS），已下载图片' 
+                const msg = e.message === 'clipboard_not_available'
+                    ? '当前为HTTP环境，剪贴板不可用（需HTTPS），已下载图片'
                     : '剪贴板写入失败，已下载图片';
                 setStatus('💾 ' + msg);
             }
