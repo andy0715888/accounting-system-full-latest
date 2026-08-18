@@ -12303,8 +12303,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { setStatus('导出失败: ' + e.message); }
     });
 
-    // 导出图片：从数据模型构建干净的表格 DOM，用 SVG foreignObject 交给浏览器原生渲染 → canvas → 剪贴板
-    // 这样字体、多行、\n 换行、自动换行、合并单元格等全部与界面所见一致
+    // 导出图片：克隆 DOM → 清理 → 浏览器重新渲染 → 精确测量 → Canvas 绘制
+    // 不再依赖 SVG foreignObject（在复杂布局下经常加载失败）
     const quoteCopyImgBtn = document.getElementById('quoteCopyImgBtn');
     if (quoteCopyImgBtn) quoteCopyImgBtn.addEventListener('click', async () => {
         if (!quoteGrid || quoteGrid.columns.length === 0) { setStatus('表格为空'); return; }
@@ -12317,211 +12317,251 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const hiddenRows = new Set(Array.isArray(g.hiddenRows) ? g.hiddenRows : []);
             const hiddenCols = new Set(Array.isArray(g.hiddenCols) ? g.hiddenCols : []);
-            const visibleColumns = g.columns.filter(c => !hiddenCols.has(c.id));
-            const visibleRows = g.rows.filter(r => !hiddenRows.has(r.id));
 
-            // ------- 第 1 步：获取原 DOM 中可见单元格的 computed style 作参考 -------
-            // 建索引：rowId_colId → td 元素
-            const cellMap = new Map();
-            table.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
-                const key = td.dataset.rowId + '_' + td.dataset.colId;
-                cellMap.set(key, td);
-            });
+            // ------- 第 1 步：克隆表格，清理掉不需要的部分 -------
+            const clone = table.cloneNode(true);
 
-            // ------- 第 2 步：构建干净的导出 HTML -------
-            // 样式映射：从原 DOM 取 computed style，内联到新 HTML
-            function getStyleStr(el) {
-                if (!el) return '';
-                const cs = window.getComputedStyle(el);
-                let raw = cs.cssText;
-                if (!raw) {
-                    let parts = [];
-                    for (let i = 0; i < cs.length; i++) {
-                        const name = cs[i];
-                        const val = cs.getPropertyValue(name);
-                        if (val) parts.push(`${name}:${val}`);
-                    }
-                    raw = parts.join(';');
+            // 1a. 删除 corner cell
+            const corner = clone.querySelector('.corner-cell');
+            if (corner) corner.remove();
+
+            // 1b. 删除 thead 中的行号列 th
+            clone.querySelectorAll('thead th.row-header').forEach(el => el.remove());
+
+            // 1c. 处理 tbody 中的每一行
+            const tbodyRows = clone.querySelectorAll('tbody tr');
+            tbodyRows.forEach(tr => {
+                const rowId = parseInt(tr.dataset.rowId);
+                if (hiddenRows.has(rowId)) {
+                    tr.remove();
+                    return;
                 }
-                // 转义：cssText 里可能含双引号（如 font-family: "Microsoft YaHei"），
-                // 必须转成 &quot; 才能安全放进 HTML 的 style="..." 属性
-                return raw.replace(/\\/g, '\\\\').replace(/"/g, '&quot;');
-            }
-
-            let html = '';
-            // 注意：不加 thead 列名头行（如 "列1/列2"），保持与之前 canvas 导出一致
-            // 用户的表格第一行数据本身就是 "区域/线路/..." 表头
-
-            // 合并跨度计算（在可见范围内）
-            function effectiveMergeSpan(m) {
-                // 计算合并在可见行列范围内的实际跨度
-                const mRi = g.rows.findIndex(r => r.id === m.row);
-                const mCi = g.columns.findIndex(c => c.id === m.col);
-                let visRowStart = null, visRowEnd = -1;
-                for (let ri = 0; ri < m.rowspan; ri++) {
-                    const row = g.rows[mRi + ri];
-                    if (!row || hiddenRows.has(row.id)) continue;
-                    const vi = visibleRows.findIndex(r => r.id === row.id);
-                    if (vi < 0) continue;
-                    if (visRowStart === null) visRowStart = vi;
-                    visRowEnd = vi;
-                }
-                let visColStart = null, visColEnd = -1;
-                for (let ci = 0; ci < m.colspan; ci++) {
-                    const col = g.columns[mCi + ci];
-                    if (!col || hiddenCols.has(col.id)) continue;
-                    const vi = visibleColumns.findIndex(c => c.id === col.id);
-                    if (vi < 0) continue;
-                    if (visColStart === null) visColStart = vi;
-                    visColEnd = vi;
-                }
-                if (visRowStart === null || visColStart === null) return null;
-                return {
-                    visRowspan: visRowEnd - visRowStart + 1,
-                    visColspan: visColEnd - visColStart + 1
-                };
-            }
-
-            // 数据行
-            html += '<tbody>';
-            const coveredCells = new Set(); // 已被合并覆盖的 cell key
-            visibleRows.forEach((row, rowIdx) => {
-                html += `<tr data-row-id="${row.id}">`;
-                visibleColumns.forEach((col, colIdx) => {
-                    const cellKey = row.id + '_' + col.id;
-
-                    // 如果此 cell 已被合并覆盖，跳过
-                    if (coveredCells.has(cellKey)) {
-                        html += '';
-                        return;
-                    }
-
-                    // 查找合并
-                    let mergeAttr = '';
-                    const m = findMergeContaining(row.id, col.id);
-                    if (m && m.row === row.id && m.col === col.id) {
-                        // 这是合并主单元格
-                        const span = effectiveMergeSpan(m);
-                        if (span && (span.visRowspan > 1 || span.visColspan > 1)) {
-                            mergeAttr = ` rowspan="${span.visRowspan}" colspan="${span.visColspan}"`;
-                            // 把被覆盖的单元格标记为 covered
-                            for (let ri = 0; ri < span.visRowspan; ri++) {
-                                for (let ci = 0; ci < span.visColspan; ci++) {
-                                    if (ri === 0 && ci === 0) continue;
-                                    const vr = visibleRows[rowIdx + ri];
-                                    const vc = visibleColumns[colIdx + ci];
-                                    if (vr && vc) coveredCells.add(vr.id + '_' + vc.id);
-                                }
-                            }
-                        }
-                    }
-
-                    // 取原单元格的 computed style
-                    const srcTd = cellMap.get(cellKey);
-                    let tdStyle = '';
-                    let displayStyle = '';
-                    if (srcTd) {
-                        tdStyle = getStyleStr(srcTd);
-                        const displayEl = srcTd.querySelector('.cell-display');
-                        if (displayEl) displayStyle = getStyleStr(displayEl);
-                    }
-
-                    const val = row.cells[col.id] || '';
-                    // 把 \n 转成 <br>，保留 pre-wrap 行为
-                    const displayVal = val !== '' ? escapeHtml(val).replace(/\n/g, '<br>') : '&nbsp;';
-                    // 从原 cell-display 中取 align，再由 <span> 控制对齐
-                    const srcDisplayEl = srcTd ? srcTd.querySelector('.cell-display') : null;
-                    let alignVal = 'left';
-                    if (srcDisplayEl) {
-                        const cs = window.getComputedStyle(srcDisplayEl);
-                        alignVal = cs.textAlign || 'left';
-                    }
-                    const spanStyle = `width:100%;text-align:${alignVal};`;
-
-                    html += `<td data-row-id="${row.id}" data-col-id="${col.id}"${mergeAttr} style="${tdStyle}">`;
-                    html += `<div class="cell-display" style="${displayStyle}">`;
-                    html += `<span style="${spanStyle}">${displayVal}</span>`;
-                    html += `</div>`;
-                    html += '</td>';
+                // 删除行号列 td.row-header
+                tr.querySelectorAll('td.row-header').forEach(el => el.remove());
+                // 删除隐藏列的单元格
+                tr.querySelectorAll('td[data-col-id]').forEach(td => {
+                    const cid = parseInt(td.dataset.colId);
+                    if (hiddenCols.has(cid)) td.remove();
                 });
-                html += '</tr>';
+                // 删除 merge-covered-cell（这些是被合并覆盖的占位单元格）
+                tr.querySelectorAll('td.merge-covered-cell').forEach(td => td.remove());
             });
-            html += '</tbody>';
 
-            // 包裹成完整 table
-            const tableStyle = getStyleStr(table);
-            const fullHTML = `<table style="${tableStyle}">${html}</table>`;
+            // 1d. 删除 thead 中隐藏列的 th
+            clone.querySelectorAll('thead th[data-col-id]').forEach(th => {
+                const cid = parseInt(th.dataset.colId);
+                if (hiddenCols.has(cid)) th.remove();
+            });
 
-            // ------- 第 3 步：用 SVG foreignObject 栅格化为 canvas -------
-            // 把 HTML 包在 SVG foreignObject 里交给浏览器渲染，然后 drawImage 到 canvas
-            const padding = 16;
+            // 1e. 删除所有装饰性子元素（resize handle 等）
+            clone.querySelectorAll('.col-resize-handle, .row-resize-handle, .col-rename-input').forEach(el => el.remove());
 
-            // 克隆 fullHTML 到一个 detached 容器，方便取 outerHTML
-            const wrap = document.createElement('div');
-            wrap.style.cssText = `position:absolute;left:-99999px;top:-99999px;display:inline-block;background:#fff;padding:${padding}px;`;
-            wrap.innerHTML = fullHTML;
-            document.body.appendChild(wrap);
-
-            // 测量渲染后的实际尺寸（包含 padding）
-            const rect = wrap.getBoundingClientRect();
-            const width = Math.ceil(rect.width);
-            const height = Math.ceil(rect.height);
-
-            // 强制 cell-display 的样式（用 style 覆盖）
-            wrap.querySelectorAll('.cell-display').forEach(el => {
+            // 1f. 把 cell-display 内部结构简化为纯文本 + <br>
+            clone.querySelectorAll('.cell-display').forEach(el => {
+                // 获取原始文本值
+                const rowId = parseInt(el.closest('td[data-row-id]').dataset.rowId);
+                const colId = parseInt(el.closest('td[data-col-id]').dataset.colId);
+                const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
+                if (val) {
+                    el.innerHTML = String(val).replace(/\n/g, '<br>');
+                } else {
+                    el.innerHTML = '&nbsp;';
+                }
+                // 清除所有可能的 flex 布局，改用简单的 white-space:pre-wrap
+                el.style.display = 'block';
                 el.style.whiteSpace = 'pre-wrap';
                 el.style.wordBreak = 'break-word';
                 el.style.lineHeight = '1.5';
             });
 
-            const finalW = width;
-            const finalH = height;
+            // ------- 第 2 步：把克隆放到临时容器中让浏览器重新渲染 -------
+            const padding = 16;
+            const tmpContainer = document.createElement('div');
+            tmpContainer.style.cssText = `position:absolute;left:-99999px;top:-99999px;background:#fff;padding:${padding}px;display:inline-block;`;
+            tmpContainer.appendChild(clone);
+            document.body.appendChild(tmpContainer);
 
-            // 用 XMLSerializer 把 wrap 序列化成合法 XML/XHTML
-            // XMLSerializer 会自动处理：自闭合 void 元素、属性值里的引号等
-            const xml = new XMLSerializer().serializeToString(wrap);
+            // 等浏览器完成渲染
+            await new Promise(r => requestAnimationFrame(() => r()));
+            await new Promise(r => requestAnimationFrame(() => r()));
 
-            // 取出 wrap 内的 <table> 部分（去掉 wrap 自身，因为我们要重新包）
-            // xml 形如：<div ...><table ...>...</table></div>
-            // 我们需要：<div xmlns="..." style="..."><table>...</table></div>
-            const m = xml.match(/<table[\s\S]*?\/table>/i);
-            if (!m) throw new Error('无法从 DOM 中提取表格');
-            const tableXML = m[0];
+            // ------- 第 3 步：测量每个单元格的精确位置 -------
+            const containerRect = tmpContainer.getBoundingClientRect();
+            const tableRect = clone.getBoundingClientRect();
 
-            const xhtml = `<div xmlns="http://www.w3.org/1999/xhtml" style="display:inline-block;background:#fff;padding:${padding}px;">${tableXML}</div>`;
+            // 收集所有需要绘制的单元格
+            const cells = [];
+            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+                const rect = td.getBoundingClientRect();
+                const x = Math.round(rect.left - containerRect.left);
+                const y = Math.round(rect.top - containerRect.top);
+                const w = Math.round(rect.width);
+                const h = Math.round(rect.height);
+                if (w <= 0 || h <= 0) return;
 
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${finalW}" height="${finalH}">
-                <foreignObject width="100%" height="100%">${xhtml}</foreignObject>
-            </svg>`;
+                const rowId = parseInt(td.dataset.rowId);
+                const colId = parseInt(td.dataset.colId);
+                const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
 
-            document.body.removeChild(wrap);
+                // 获取样式
+                const cs = window.getComputedStyle(td);
+                const displayEl = td.querySelector('.cell-display');
+                const displayCS = displayEl ? window.getComputedStyle(displayEl) : null;
 
-            // 用 data URL（比 Blob URL 更稳定，尤其在 file:// 或非 HTTPS 环境）
-            const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            let imgErr = null;
-            await new Promise((resolve) => {
-                img.onload = resolve;
-                img.onerror = (e) => { imgErr = e; resolve(); };
-                img.src = svgDataUrl;
+                cells.push({
+                    x, y, w, h, rowId, colId, val,
+                    bg: cs.backgroundColor,
+                    fg: cs.color,
+                    fontSize: parseFloat(cs.fontSize) || 13,
+                    fontWeight: cs.fontWeight,
+                    fontFamily: cs.fontFamily,
+                    textAlign: displayCS ? displayCS.textAlign : 'left',
+                    paddingLeft: parseFloat(cs.paddingLeft) || 0,
+                    paddingRight: parseFloat(cs.paddingRight) || 0,
+                    paddingTop: parseFloat(cs.paddingTop) || 0,
+                    paddingBottom: parseFloat(cs.paddingBottom) || 0,
+                    borderTop: cs.borderTopWidth,
+                    borderRight: cs.borderRightWidth,
+                    borderBottom: cs.borderBottomWidth,
+                    borderLeft: cs.borderLeftWidth,
+                    borderColor: cs.borderColor,
+                    borderStyle: cs.borderStyle,
+                });
             });
-            if (imgErr || !img.complete || img.naturalWidth === 0) {
-                throw new Error('SVG → Image 加载失败（宽度=' + img.naturalWidth + '，高度=' + img.naturalHeight + '）');
-            }
 
+            const totalW = Math.ceil(tableRect.width) + padding * 2;
+            const totalH = Math.ceil(tableRect.height) + padding * 2;
+
+            document.body.removeChild(tmpContainer);
+
+            // ------- 第 4 步：在 Canvas 上精确绘制 -------
             const scale = 2; // Retina
             const canvas = document.createElement('canvas');
-            canvas.width = finalW * scale;
-            canvas.height = finalH * scale;
+            canvas.width = totalW * scale;
+            canvas.height = totalH * scale;
             const ctx = canvas.getContext('2d');
+
             ctx.fillStyle = '#fff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.scale(scale, scale);
-            ctx.drawImage(img, 0, 0);
 
-            // ------- 第 4 步：输出到剪贴板或下载 -------
+            const FONT_STACK = '-apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif';
+
+            cells.forEach(cell => {
+                const { x, y, w, h, val } = cell;
+
+                // 绘制背景
+                if (cell.bg && cell.bg !== 'rgba(0, 0, 0, 0)' && cell.bg !== 'transparent') {
+                    ctx.fillStyle = cell.bg;
+                    ctx.fillRect(x, y, w, h);
+                }
+
+                // 绘制边框
+                if (cell.borderStyle !== 'none') {
+                    ctx.strokeStyle = cell.borderColor || '#dcdfe6';
+                    ctx.lineWidth = 1;
+                    if (parseFloat(cell.borderTop) > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, y + 0.5);
+                        ctx.lineTo(x + w, y + 0.5);
+                        ctx.stroke();
+                    }
+                    if (parseFloat(cell.borderBottom) > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, y + h - 0.5);
+                        ctx.lineTo(x + w, y + h - 0.5);
+                        ctx.stroke();
+                    }
+                    if (parseFloat(cell.borderLeft) > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(x + 0.5, y);
+                        ctx.lineTo(x + 0.5, y + h);
+                        ctx.stroke();
+                    }
+                    if (parseFloat(cell.borderRight) > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(x + w - 0.5, y);
+                        ctx.lineTo(x + w - 0.5, y + h);
+                        ctx.stroke();
+                    }
+                }
+
+                // 绘制文本
+                if (val) {
+                    const padL = cell.paddingLeft;
+                    const padR = cell.paddingRight;
+                    const padT = cell.paddingTop;
+                    const padB = cell.paddingBottom;
+                    const availW = Math.max(2, w - padL - padR);
+                    const availH = Math.max(2, h - padT - padB);
+
+                    const isBold = cell.fontWeight === 'bold' || parseInt(cell.fontWeight) >= 600;
+
+                    // 按 \n 分割成多行
+                    const rawLines = String(val).split('\n');
+
+                    // 自适应字号：如果文本超出单元格，逐步缩小字号
+                    let fs = cell.fontSize;
+                    let lh = fs * 1.5;
+                    let lines = rawLines.slice();
+
+                    // 迭代缩小字号直到适配
+                    for (let guard = 0; guard < 50; guard++) {
+                        ctx.font = `${isBold ? 'bold ' : ''}${fs}px ${FONT_STACK}`;
+                        // 检查每行宽度
+                        let maxW = 0;
+                        let totalH = lines.length * lh;
+                        let overflow = false;
+                        for (const line of lines) {
+                            const lw = ctx.measureText(line).width;
+                            if (lw > availW) { overflow = true; break; }
+                            if (lw > maxW) maxW = lw;
+                        }
+                        if (!overflow && totalH <= availH) break;
+                        if (fs <= 6) break;
+                        fs -= 0.5;
+                        lh = fs * 1.5;
+                    }
+
+                    ctx.font = `${isBold ? 'bold ' : ''}${fs}px ${FONT_STACK}`;
+                    ctx.fillStyle = cell.fg || '#303133';
+                    ctx.textBaseline = 'top';
+
+                    // 垂直对齐
+                    const totalTextH = lines.length * lh;
+                    let startY;
+                    const align = cell.textAlign;
+                    // 判断垂直对齐：如果是合并单元格（行高 > 普通 32px），默认 middle；否则 top
+                    const isMerged = h > 40;
+                    if (isMerged) {
+                        startY = y + (h - totalTextH) / 2;
+                    } else {
+                        startY = y + padT;
+                    }
+
+                    // 逐行绘制
+                    lines.forEach((line, i) => {
+                        const lw = ctx.measureText(line).width;
+                        let tx;
+                        if (align === 'center') {
+                            tx = x + w / 2 - lw / 2;
+                        } else if (align === 'right' || align === 'end') {
+                            tx = x + w - padR - lw;
+                        } else {
+                            tx = x + padL;
+                        }
+                        // clip 到单元格内
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.rect(x + 1, y + 1, w - 2, h - 2);
+                        ctx.clip();
+                        ctx.fillText(line, tx, startY + i * lh);
+                        ctx.restore();
+                    });
+                }
+            });
+
+            // ------- 第 5 步：输出到剪贴板或下载 -------
             const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
             try {
                 if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
