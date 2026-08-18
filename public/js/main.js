@@ -12333,14 +12333,19 @@ document.addEventListener('DOMContentLoaded', function() {
             function getStyleStr(el) {
                 if (!el) return '';
                 const cs = window.getComputedStyle(el);
-                if (cs.cssText) return cs.cssText;
-                let parts = [];
-                for (let i = 0; i < cs.length; i++) {
-                    const name = cs[i];
-                    const val = cs.getPropertyValue(name);
-                    if (val) parts.push(`${name}:${val}`);
+                let raw = cs.cssText;
+                if (!raw) {
+                    let parts = [];
+                    for (let i = 0; i < cs.length; i++) {
+                        const name = cs[i];
+                        const val = cs.getPropertyValue(name);
+                        if (val) parts.push(`${name}:${val}`);
+                    }
+                    raw = parts.join(';');
                 }
-                return parts.join(';');
+                // 转义：cssText 里可能含双引号（如 font-family: "Microsoft YaHei"），
+                // 必须转成 &quot; 才能安全放进 HTML 的 style="..." 属性
+                return raw.replace(/\\/g, '\\\\').replace(/"/g, '&quot;');
             }
 
             let html = '';
@@ -12448,48 +12453,65 @@ document.addEventListener('DOMContentLoaded', function() {
             const fullHTML = `<table style="${tableStyle}">${html}</table>`;
 
             // ------- 第 3 步：用 SVG foreignObject 栅格化为 canvas -------
-            // 创建临时容器测量尺寸
-            const tmpContainer = document.createElement('div');
-            tmpContainer.style.cssText = 'position:absolute;left:-99999px;top:-99999px;display:inline-block;background:#fff;padding:0;';
-            tmpContainer.innerHTML = fullHTML;
-            document.body.appendChild(tmpContainer);
+            // 把 HTML 包在 SVG foreignObject 里交给浏览器渲染，然后 drawImage 到 canvas
+            const padding = 16;
 
-            const tmpTable = tmpContainer.querySelector('table');
-            const width = Math.ceil(tmpTable.scrollWidth || tmpTable.getBoundingClientRect().width);
-            const height = Math.ceil(tmpTable.scrollHeight || tmpTable.getBoundingClientRect().height);
+            // 克隆 fullHTML 到一个 detached 容器，方便取 outerHTML
+            const wrap = document.createElement('div');
+            wrap.style.cssText = `position:absolute;left:-99999px;top:-99999px;display:inline-block;background:#fff;padding:${padding}px;`;
+            wrap.innerHTML = fullHTML;
+            document.body.appendChild(wrap);
 
-            // 确保所有 <br> 和文本节点的 white-space 正确
-            tmpContainer.querySelectorAll('.cell-display').forEach(el => {
+            // 测量渲染后的实际尺寸（包含 padding）
+            const rect = wrap.getBoundingClientRect();
+            const width = Math.ceil(rect.width);
+            const height = Math.ceil(rect.height);
+
+            // 强制 cell-display 的样式（用 style 覆盖）
+            wrap.querySelectorAll('.cell-display').forEach(el => {
                 el.style.whiteSpace = 'pre-wrap';
                 el.style.wordBreak = 'break-word';
                 el.style.lineHeight = '1.5';
             });
 
-            // 重新序列化（此时包含了 tmpContainer 中最新计算出来的 inline style）
-            const finalHTML = new XMLSerializer().serializeToString(tmpContainer.firstChild);
-            document.body.removeChild(tmpContainer);
+            const finalW = width;
+            const finalH = height;
 
-            const padding = 16;
-            const finalW = width + padding * 2;
-            const finalH = height + padding * 2;
-            const scale = 2; // Retina
+            // 用 XMLSerializer 把 wrap 序列化成合法 XML/XHTML
+            // XMLSerializer 会自动处理：自闭合 void 元素、属性值里的引号等
+            const xml = new XMLSerializer().serializeToString(wrap);
 
-            const xhtml = `<div xmlns="http://www.w3.org/1999/xhtml" style="display:inline-block;background:#fff;padding:${padding}px;">${finalHTML}</div>`;
+            // 取出 wrap 内的 <table> 部分（去掉 wrap 自身，因为我们要重新包）
+            // xml 形如：<div ...><table ...>...</table></div>
+            // 我们需要：<div xmlns="..." style="..."><table>...</table></div>
+            const m = xml.match(/<table[\s\S]*?\/table>/i);
+            if (!m) throw new Error('无法从 DOM 中提取表格');
+            const tableXML = m[0];
+
+            const xhtml = `<div xmlns="http://www.w3.org/1999/xhtml" style="display:inline-block;background:#fff;padding:${padding}px;">${tableXML}</div>`;
+
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${finalW}" height="${finalH}">
                 <foreignObject width="100%" height="100%">${xhtml}</foreignObject>
             </svg>`;
 
-            const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-            const url = URL.createObjectURL(svgBlob);
+            document.body.removeChild(wrap);
+
+            // 用 data URL（比 Blob URL 更稳定，尤其在 file:// 或非 HTTPS 环境）
+            const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 
             const img = new Image();
             img.crossOrigin = 'anonymous';
-            await new Promise((resolve, reject) => {
+            let imgErr = null;
+            await new Promise((resolve) => {
                 img.onload = resolve;
-                img.onerror = () => reject(new Error('SVG → Image 加载失败'));
-                img.src = url;
+                img.onerror = (e) => { imgErr = e; resolve(); };
+                img.src = svgDataUrl;
             });
+            if (imgErr || !img.complete || img.naturalWidth === 0) {
+                throw new Error('SVG → Image 加载失败（宽度=' + img.naturalWidth + '，高度=' + img.naturalHeight + '）');
+            }
 
+            const scale = 2; // Retina
             const canvas = document.createElement('canvas');
             canvas.width = finalW * scale;
             canvas.height = finalH * scale;
@@ -12498,7 +12520,6 @@ document.addEventListener('DOMContentLoaded', function() {
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.scale(scale, scale);
             ctx.drawImage(img, 0, 0);
-            URL.revokeObjectURL(url);
 
             // ------- 第 4 步：输出到剪贴板或下载 -------
             const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
