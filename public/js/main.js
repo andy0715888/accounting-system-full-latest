@@ -12318,17 +12318,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const hiddenRows = new Set(Array.isArray(g.hiddenRows) ? g.hiddenRows : []);
             const hiddenCols = new Set(Array.isArray(g.hiddenCols) ? g.hiddenCols : []);
 
-            // ------- 第 1 步：克隆表格，清理掉不需要的部分 -------
+            // ------- 第 1 步：克隆表格，只删除真正需要删除的部分 -------
+            // 保留：corner cell、列头(列1-7)、行号(1-6) —— 这些都是表格的一部分
             const clone = table.cloneNode(true);
 
-            // 1a. 删除 corner cell
-            const corner = clone.querySelector('.corner-cell');
-            if (corner) corner.remove();
-
-            // 1b. 删除 thead 中的行号列 th
-            clone.querySelectorAll('thead th.row-header').forEach(el => el.remove());
-
-            // 1c. 处理 tbody 中的每一行
+            // 1a. 删除隐藏行
             const tbodyRows = clone.querySelectorAll('tbody tr');
             tbodyRows.forEach(tr => {
                 const rowId = parseInt(tr.dataset.rowId);
@@ -12336,42 +12330,42 @@ document.addEventListener('DOMContentLoaded', function() {
                     tr.remove();
                     return;
                 }
-                // 删除行号列 td.row-header
-                tr.querySelectorAll('td.row-header').forEach(el => el.remove());
-                // 删除隐藏列的单元格
+                // 删除隐藏列的单元格（仅在可见数据单元格里）
                 tr.querySelectorAll('td[data-col-id]').forEach(td => {
                     const cid = parseInt(td.dataset.colId);
                     if (hiddenCols.has(cid)) td.remove();
                 });
-                // 删除 merge-covered-cell（这些是被合并覆盖的占位单元格）
+                // 删除 merge-covered-cell（display:none 的占位，会干扰测量）
                 tr.querySelectorAll('td.merge-covered-cell').forEach(td => td.remove());
             });
 
-            // 1d. 删除 thead 中隐藏列的 th
+            // 1b. 删除 thead 中隐藏列的 th
             clone.querySelectorAll('thead th[data-col-id]').forEach(th => {
                 const cid = parseInt(th.dataset.colId);
                 if (hiddenCols.has(cid)) th.remove();
             });
 
-            // 1e. 删除所有装饰性子元素（resize handle 等）
+            // 1c. 清理列头中的隐藏标记（👁‍🗨）
+            clone.querySelectorAll('th .col-header .col-name').forEach(el => {
+                el.textContent = el.textContent.replace(/👁‍🗨\s*/g, '');
+            });
+
+            // 1d. 删除装饰性子元素（resize handle 等，不影响内容）
             clone.querySelectorAll('.col-resize-handle, .row-resize-handle, .col-rename-input').forEach(el => el.remove());
 
-            // 1f. 把 cell-display 内部结构简化为纯文本 + <br>
+            // 1e. 把 cell-display 内部结构简化为纯文本（保留 <br> 实现多行）
+            // 重要：保留 display:flex 等原样式，保证对齐；只替换 innerHTML
             clone.querySelectorAll('.cell-display').forEach(el => {
-                // 获取原始文本值
-                const rowId = parseInt(el.closest('td[data-row-id]').dataset.rowId);
-                const colId = parseInt(el.closest('td[data-col-id]').dataset.colId);
+                const td = el.closest('td[data-row-id][data-col-id]');
+                if (!td) return;
+                const rowId = parseInt(td.dataset.rowId);
+                const colId = parseInt(td.dataset.colId);
                 const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
                 if (val) {
-                    el.innerHTML = String(val).replace(/\n/g, '<br>');
+                    el.innerHTML = `<span style="width:100%">${String(val).replace(/\n/g, '<br>')}</span>`;
                 } else {
                     el.innerHTML = '&nbsp;';
                 }
-                // 清除所有可能的 flex 布局，改用简单的 white-space:pre-wrap
-                el.style.display = 'block';
-                el.style.whiteSpace = 'pre-wrap';
-                el.style.wordBreak = 'break-word';
-                el.style.lineHeight = '1.5';
             });
 
             // ------- 第 2 步：把克隆放到临时容器中让浏览器重新渲染 -------
@@ -12389,33 +12383,41 @@ document.addEventListener('DOMContentLoaded', function() {
             const containerRect = tmpContainer.getBoundingClientRect();
             const tableRect = clone.getBoundingClientRect();
 
-            // 收集所有需要绘制的单元格
+            // 收集所有需要绘制的单元格（td + th，包括 corner cell、列头、行号）
             const cells = [];
-            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
-                const rect = td.getBoundingClientRect();
+            clone.querySelectorAll('td, th').forEach(el => {
+                const rect = el.getBoundingClientRect();
                 const x = Math.round(rect.left - containerRect.left);
                 const y = Math.round(rect.top - containerRect.top);
                 const w = Math.round(rect.width);
                 const h = Math.round(rect.height);
                 if (w <= 0 || h <= 0) return;
 
-                const rowId = parseInt(td.dataset.rowId);
-                const colId = parseInt(td.dataset.colId);
-                const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
+                // 用 innerText 获取实际渲染的文字（包含 <br> 转换成 \n）
+                let val = el.innerText || el.textContent || '';
+                // corner cell 保持空
+                if (el.classList.contains('corner-cell')) val = '';
 
-                // 获取样式
-                const cs = window.getComputedStyle(td);
-                const displayEl = td.querySelector('.cell-display');
-                const displayCS = displayEl ? window.getComputedStyle(displayEl) : null;
+                const cs = window.getComputedStyle(el);
+
+                // 判断对齐
+                let align = 'left';
+                const displayEl = el.querySelector('.cell-display');
+                if (displayEl) {
+                    const dcs = window.getComputedStyle(displayEl);
+                    align = dcs.textAlign || 'left';
+                } else if (el.classList.contains('row-header')) {
+                    align = 'center';
+                } else if (el.tagName === 'TH') {
+                    align = 'center';
+                }
 
                 cells.push({
-                    x, y, w, h, rowId, colId, val,
+                    x, y, w, h, val, align,
                     bg: cs.backgroundColor,
                     fg: cs.color,
                     fontSize: parseFloat(cs.fontSize) || 13,
                     fontWeight: cs.fontWeight,
-                    fontFamily: cs.fontFamily,
-                    textAlign: displayCS ? displayCS.textAlign : 'left',
                     paddingLeft: parseFloat(cs.paddingLeft) || 0,
                     paddingRight: parseFloat(cs.paddingRight) || 0,
                     paddingTop: parseFloat(cs.paddingTop) || 0,
@@ -12530,10 +12532,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     // 垂直对齐
                     const totalTextH = lines.length * lh;
                     let startY;
-                    const align = cell.textAlign;
-                    // 判断垂直对齐：如果是合并单元格（行高 > 普通 32px），默认 middle；否则 top
-                    const isMerged = h > 40;
-                    if (isMerged) {
+                    const align = cell.align;
+                    // 判断垂直对齐：如果是合并单元格（行高 > 普通 40px），默认 middle；否则 top
+                    const isTall = h > 40;
+                    if (isTall) {
                         startY = y + (h - totalTextH) / 2;
                     } else {
                         startY = y + padT;
