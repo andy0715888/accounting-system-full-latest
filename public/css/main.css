@@ -80,8 +80,8 @@ body {
 .traffic-arrow {
     font-size: 10px;
 }
-.traffic-item:first-child .traffic-arrow { color: inherit; }
-.traffic-item:last-child .traffic-arrow { color: inherit; }
+.traffic-item:first-child .traffic-arrow { color: #f5a623; }
+.traffic-item:last-child .traffic-arrow { color: #67c23a; }
 .traffic-speed {
     font-family: 'SF Mono', Monaco, monospace;
     font-weight: 500;
