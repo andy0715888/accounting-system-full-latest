@@ -12328,9 +12328,23 @@ document.addEventListener('DOMContentLoaded', function() {
             // 用户明确要求：不需要列头(列1-7)、不需要行号(1-6)、不需要corner cell
             const clone = table.cloneNode(true);
 
-            // 1a. 删除整个 thead（列1-7）
+            // 1a. 删除整个 thead（列1-7），但要保留列宽信息 → 用 colgroup 替代
             const thead = clone.querySelector('thead');
             if (thead) thead.remove();
+
+            // 1a-2. 插入 colgroup，强制每列使用用户设置的宽度（仅包含可见列）
+            // 否则 td 会按内容自动撑开，导致导出图片列宽与设置不一致
+            const visibleCols = g.columns.filter(c => !hiddenCols.has(c.id));
+            if (visibleCols.length > 0) {
+                const colgroupHtml = '<colgroup>' + visibleCols.map(c => {
+                    const w = g.colWidths[c.id] || 120;
+                    return `<col style="width:${w}px;min-width:${w}px;">`;
+                }).join('') + '</colgroup>';
+                // 插入到 table 开头
+                clone.insertAdjacentHTML('afterbegin', colgroupHtml);
+                // 强制固定表格布局，确保列宽严格遵循 colgroup 设置，不被内容撑开
+                clone.style.tableLayout = 'fixed';
+            }
 
             // 1b. 删除 corner cell
             const corner = clone.querySelector('.corner-cell');
@@ -12355,26 +12369,101 @@ document.addEventListener('DOMContentLoaded', function() {
             // 1d. 删除装饰性子元素
             clone.querySelectorAll('.col-resize-handle, .row-resize-handle, .col-rename-input').forEach(el => el.remove());
 
-            // 1e. 把 cell-display 内部替换为实际值（\n 转 <br>，交由浏览器处理自动折行）
-            // 保留 <span> 包装器以维持 flex 布局中的正确自动换行行为
+            // 1e. 把 cell-display 内部替换为实际值 + 重新断言所有单元格样式（颜色/字体/对齐等）
+            // 确保导出图片严格遵循用户在 quoteGrid.styles 中设置的样式
             clone.querySelectorAll('.cell-display').forEach(el => {
                 const td = el.closest('td[data-row-id][data-col-id]');
                 if (!td) return;
                 const rowId = parseInt(td.dataset.rowId);
                 const colId = parseInt(td.dataset.colId);
                 const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
-                // 从 cell-display 的 style 中提取 text-align（如 style 中有 text-align:center）
-                let textAlign = 'left';
+                const key = `${rowId}_${colId}`;
+                const cellStyle = g.styles[key] || {};
+
+                // 从 cell-display 的 style 中提取 text-align
+                let textAlign = cellStyle.align || 'left';
                 const styleMatch = el.getAttribute('style');
                 if (styleMatch) {
                     const taMatch = styleMatch.match(/text-align\s*:\s*([^;]+)/);
-                    if (taMatch) textAlign = taMatch[1].trim();
+                    if (taMatch && !cellStyle.align) textAlign = taMatch[1].trim();
                 }
+
+                // 根据 quoteGrid.styles 重新构建完整的 cell-display style
+                let displayStyle = `width:100%;height:100%;`;
+                // 行高 / 合并高度
+                const rowIdx = g.rows.findIndex(r => r.id === rowId);
+                const h = g.rowHeights[rowId] || 32;
+                const merge = g.merges ? g.merges.find(m => m.row === rowId && m.col === colId) : null;
+                let totalHeight = h;
+                if (merge && merge.rowspan > 1) {
+                    totalHeight = 0;
+                    for (let ri = 0; ri < merge.rowspan; ri++) {
+                        const targetRow = g.rows[rowIdx + ri];
+                        if (targetRow) totalHeight += g.rowHeights[targetRow.id] || 32;
+                    }
+                }
+                displayStyle += `min-height:${(merge ? totalHeight : h)}px;`;
+                displayStyle += `display:flex;flex-direction:row;flex-wrap:wrap;`;
+
+                // 垂直对齐
+                const valign = cellStyle.valign || (merge ? 'middle' : 'top');
+                const vAlignFlex = valign === 'middle' ? 'align-items:center;' : (valign === 'bottom' ? 'align-items:flex-end;' : 'align-items:flex-start;');
+                displayStyle += vAlignFlex;
+
+                // 水平对齐
+                const align = cellStyle.align || 'left';
+                const hAlignFlex = align === 'center' ? 'justify-content:center;' : (align === 'right' ? 'justify-content:flex-end;' : 'justify-content:flex-start;');
+                displayStyle += hAlignFlex;
+
+                // 用户自定义样式
+                if (cellStyle.fontFamily) displayStyle += `font-family:${cellStyle.fontFamily};`;
+                if (cellStyle.bold) displayStyle += 'font-weight:bold;';
+                if (cellStyle.fontSize) displayStyle += `font-size:${cellStyle.fontSize}px;`;
+                if (cellStyle.fg) displayStyle += `color:${cellStyle.fg};`;
+                displayStyle += 'padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;';
+                displayStyle += `text-align:${align};`;
+
+                // 设置 cell-display 的完整 style
+                el.setAttribute('style', displayStyle);
+
+                // 替换内容
                 if (val) {
-                    el.innerHTML = `<span style="width:100%;text-align:${textAlign};">${escapeHtml(String(val)).replace(/\n/g, '<br>')}</span>`;
+                    el.innerHTML = `<span style="width:100%;text-align:${align};">${escapeHtml(String(val)).replace(/\n/g, '<br>')}</span>`;
                 } else {
                     el.innerHTML = '&nbsp;';
                 }
+            });
+
+            // 1e-2. 重新断言 td 的样式（背景色、边框、尺寸等）
+            // 确保 bg (背景色) 也来自 quoteGrid.styles
+            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+                const rowId = parseInt(td.dataset.rowId);
+                const colId = parseInt(td.dataset.colId);
+                const key = `${rowId}_${colId}`;
+                const cellStyle = g.styles[key] || {};
+                const rowIdx = g.rows.findIndex(r => r.id === rowId);
+                const h = g.rowHeights[rowId] || 32;
+                const merge = g.merges ? g.merges.find(m => m.row === rowId && m.col === colId) : null;
+                let totalHeight = h;
+                if (merge && merge.rowspan > 1) {
+                    totalHeight = 0;
+                    for (let ri = 0; ri < merge.rowspan; ri++) {
+                        const targetRow = g.rows[rowIdx + ri];
+                        if (targetRow) totalHeight += g.rowHeights[targetRow.id] || 32;
+                    }
+                }
+                // 获取当前 td 的 style（可能已有 bg）
+                let tdStyle = td.getAttribute('style') || '';
+                // 移除旧的 background-color
+                tdStyle = tdStyle.replace(/background-color\s*:[^;]*;?/g, '');
+                if (cellStyle.bg) {
+                    tdStyle += `background-color:${cellStyle.bg};`;
+                }
+                // 移除旧的 height/min-height 并重新设置
+                tdStyle = tdStyle.replace(/height\s*:[^;]*;?/g, '').replace(/min-height\s*:[^;]*;?/g, '');
+                const tdHeight = merge ? `height:${totalHeight}px;min-height:${totalHeight}px;` : `height:${h}px;min-height:${h}px;`;
+                tdStyle += tdHeight;
+                td.setAttribute('style', tdStyle);
             });
 
             // ------- 第 2 步：放到临时容器中，让浏览器实际渲染 -------
@@ -12392,21 +12481,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // ------- 第 3 步：把所有 computed style 内联到 style 属性 -------
             // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
+            // 使用迭代方式而非 cssText，确保跨浏览器兼容性，特别是 color 属性
             const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
             let node = walker.nextNode();
             while (node) {
                 const el = node;
                 const cs = window.getComputedStyle(el);
-                let cssText = cs.cssText;
-                if (!cssText) {
-                    let parts = [];
-                    for (let i = 0; i < cs.length; i++) {
-                        const name = cs[i];
-                        const val = cs.getPropertyValue(name);
-                        if (val) parts.push(`${name}:${val}`);
-                    }
-                    cssText = parts.join(';');
+                let parts = [];
+                for (let i = 0; i < cs.length; i++) {
+                    const name = cs[i];
+                    const val = cs.getPropertyValue(name);
+                    if (val) parts.push(`${name}:${val}`);
                 }
+                const cssText = parts.join(';');
                 if (cssText) el.setAttribute('style', cssText);
                 // 清理不再需要的属性（避免 XML 中的奇怪值）
                 // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
