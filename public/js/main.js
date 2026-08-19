@@ -12480,32 +12480,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const totalW = Math.ceil(tmpContainer.getBoundingClientRect().width);
             const totalH = Math.ceil(tmpContainer.getBoundingClientRect().height);
 
-            // ------- 第 3 步：把所有 computed style 内联到 style 属性 -------
-            // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
-            const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
-            let node = walker.nextNode();
-            while (node) {
-                const el = node;
-                const cs = window.getComputedStyle(el);
-                let parts = [];
-                for (let i = 0; i < cs.length; i++) {
-                    const name = cs[i];
-                    const val = cs.getPropertyValue(name);
-                    if (val) parts.push(`${name}:${val}`);
-                }
-                const cssText = parts.join(';');
-                if (cssText) el.setAttribute('style', cssText);
-                // 清理不再需要的属性（避免 XML 中的奇怪值）
-                // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
-                el.removeAttribute('class');
-                el.removeAttribute('id');
-                el.removeAttribute('data-row-id');
-                el.removeAttribute('data-col-id');
-                el.removeAttribute('data-th');
-                node = walker.nextNode();
-            }
-
-            // ------- 第 3b 步：显式断言用户设置的关键样式，防止 getComputedStyle 丢失 -------
+            // ------- 第 3 步：显式断言用户设置的关键样式（在 getComputedStyle 之前！） -------
+            // 关键：必须在 getComputedStyle 之前执行，因为 Step 3 会删除 data-row-id / data-col-id 属性
             // 这一步确保 fg (字体颜色)、bg (背景色)、bold、fontSize、fontFamily 等
             // 用户自定义样式绝对不会在导出图片中丢失
             clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
@@ -12559,7 +12535,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
 
-            // ------- 第 4 步：XMLSerializer → SVG foreignObject -------
+            // ------- 第 4 步：把所有 computed style 内联到 style 属性 -------
+            // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
+            // 现在 getComputedStyle 会正确获取到 Step 3 中设置的用户自定义颜色
+            const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+            let node = walker.nextNode();
+            while (node) {
+                const el = node;
+                const cs = window.getComputedStyle(el);
+                let parts = [];
+                for (let i = 0; i < cs.length; i++) {
+                    const name = cs[i];
+                    const val = cs.getPropertyValue(name);
+                    if (val) parts.push(`${name}:${val}`);
+                }
+                const cssText = parts.join(';');
+                if (cssText) el.setAttribute('style', cssText);
+                // 清理不再需要的属性（避免 XML 中的奇怪值）
+                // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
+                el.removeAttribute('class');
+                el.removeAttribute('id');
+                el.removeAttribute('data-row-id');
+                el.removeAttribute('data-col-id');
+                el.removeAttribute('data-th');
+                node = walker.nextNode();
+            }
+
+            // ------- 第 5 步：XMLSerializer → SVG foreignObject -------
             const xml = new XMLSerializer().serializeToString(clone);
 
             const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${totalW}px;height:${totalH}px;display:inline-block;background:#fff;padding:${padding}px;box-sizing:border-box;">${xml}</div></foreignObject></svg>`;
@@ -12568,7 +12570,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             document.body.removeChild(tmpContainer);
 
-            // ------- 第 5 步：把 SVG 渲染到 Canvas -------
+            // ------- 第 6 步：把 SVG 渲染到 Canvas -------
             const img = new Image();
             img.crossOrigin = 'anonymous';
             let imgErr = null;
@@ -12604,7 +12606,7 @@ document.addEventListener('DOMContentLoaded', function() {
             ctx.scale(scale, scale);
             ctx.drawImage(img, 0, 0);
 
-            // ------- 第 6 步：输出 -------
+            // ------- 第 7 步：输出 -------
             const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
             try {
                 if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
