@@ -12371,6 +12371,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 1e. 把 cell-display 内部替换为实际值 + 重新断言所有单元格样式（颜色/字体/对齐等）
             // 确保导出图片严格遵循用户在 quoteGrid.styles 中设置的样式
+            // 调试日志：确认 quoteGrid.styles 中确实有 fg 值
+            console.log('[EXPORT] 用户样式统计:', 
+                'fg=' + Object.keys(g.styles).filter(k => g.styles[k].fg).length + 
+                ', bg=' + Object.keys(g.styles).filter(k => g.styles[k].bg).length);
+
             clone.querySelectorAll('.cell-display').forEach(el => {
                 const td = el.closest('td[data-row-id][data-col-id]');
                 if (!td) return;
@@ -12484,7 +12489,13 @@ document.addEventListener('DOMContentLoaded', function() {
             // 关键：必须在 getComputedStyle 之前执行，因为 Step 3 会删除 data-row-id / data-col-id 属性
             // 这一步确保 fg (字体颜色)、bg (背景色)、bold、fontSize、fontFamily 等
             // 用户自定义样式绝对不会在导出图片中丢失
-            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+            // 调试：统计有多少 td 被匹配到
+            const tdsWithData = clone.querySelectorAll('td[data-row-id][data-col-id]');
+            console.log('[EXPORT DEBUG] Step3 - td elements with data attributes:', tdsWithData.length);
+            console.log('[EXPORT DEBUG] Step3 - cell-display elements:', clone.querySelectorAll('.cell-display').length);
+            let matchedCount = 0;
+            let fgSetCount = 0;
+            tdsWithData.forEach(td => {
                 const rowId = parseInt(td.dataset.rowId);
                 const colId = parseInt(td.dataset.colId);
                 const key = `${rowId}_${colId}`;
@@ -12533,7 +12544,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     tdStyle = (tdStyle ? tdStyle + ';' : '') + `background-color:${cellStyle.bg}`;
                     td.setAttribute('style', tdStyle);
                 }
+                matchedCount++;
+                if (cellStyle.fg) fgSetCount++;
             });
+            console.log('[EXPORT] Step3 - 样式重断言:', `匹配${matchedCount}个单元格, 设置颜色${fgSetCount}个`);
 
             // ------- 第 4 步：把所有 computed style 内联到 style 属性 -------
             // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
@@ -12559,6 +12573,96 @@ document.addEventListener('DOMContentLoaded', function() {
                 el.removeAttribute('data-col-id');
                 el.removeAttribute('data-th');
                 node = walker.nextNode();
+            }
+
+            // ------- 第 4 步：把所有 computed style 内联到 style 属性 -------
+            // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
+            // 现在 getComputedStyle 会正确获取到 Step 3 中设置的用户自定义颜色
+            // 关键：在删除 data 属性之前，先保存 td → style 的映射
+            const tdStyleMap = new Map(); // Map<td, cellStyle>
+            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+                const k = `${td.dataset.rowId}_${td.dataset.colId}`;
+                const st = g.styles[k];
+                if (st && (st.fg || st.bg || st.bold || st.fontSize || st.fontFamily)) {
+                    tdStyleMap.set(td, st);
+                }
+            });
+            console.log(`[EXPORT DEBUG] Step4 - saved tdStyleMap entries: ${tdStyleMap.size}`);
+            
+            // 使用不同的变量名避免冲突
+            const styleWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+            let styleNode = styleWalker.nextNode();
+            while (styleNode) {
+                const el = styleNode;
+                const cs = window.getComputedStyle(el);
+                let parts = [];
+                for (let i = 0; i < cs.length; i++) {
+                    const name = cs[i];
+                    const val = cs.getPropertyValue(name);
+                    if (val) parts.push(`${name}:${val}`);
+                }
+                const cssText = parts.join(';');
+                if (cssText) el.setAttribute('style', cssText);
+                // 清理不再需要的属性（避免 XML 中的奇怪值）
+                // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
+                el.removeAttribute('class');
+                el.removeAttribute('id');
+                el.removeAttribute('data-row-id');
+                el.removeAttribute('data-col-id');
+                el.removeAttribute('data-th');
+                styleNode = styleWalker.nextNode();
+            }
+
+            // ------- 第 4b 步：getComputedStyle 之后，用保存的映射重断言关键样式 -------
+            // 某些浏览器的 getComputedStyle 可能会覆盖之前手动设置的样式
+            let reassertedCount = 0;
+            tdStyleMap.forEach((cellStyle, tdEl) => {
+                const displayDiv = tdEl.querySelector('.cell-display');
+                if (!displayDiv) return;
+
+                // 重建 cell-display style
+                let ds = displayDiv.getAttribute('style') || '';
+                ds = ds.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                ds = ds.replace(/(^|;)font-weight\s*:[^;]*(;|$)/g, '$1');
+                ds = ds.replace(/(^|;)font-size\s*:[^;]*(;|$)/g, '$1');
+                ds = ds.replace(/(^|;)font-family\s*:[^;]*(;|$)/g, '$1');
+                ds = ds.replace(/;+/g, ';').replace(/^;|;$/g, '');
+                const parts = [];
+                if (cellStyle.fg) parts.push(`color:${cellStyle.fg}`);
+                if (cellStyle.bold) parts.push('font-weight:bold');
+                if (cellStyle.fontSize) parts.push(`font-size:${cellStyle.fontSize}px`);
+                if (cellStyle.fontFamily) parts.push(`font-family:${cellStyle.fontFamily}`);
+                if (parts.length) ds = (ds ? ds + ';' : '') + parts.join(';');
+                displayDiv.setAttribute('style', ds);
+
+                // 重建 span style（确保文本颜色）
+                const span = displayDiv.querySelector('span');
+                if (span && cellStyle.fg) {
+                    let ss = span.getAttribute('style') || '';
+                    ss = ss.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                    ss = ss.replace(/;+/g, ';').replace(/^;|;$/g, '');
+                    ss = (ss ? ss + ';' : '') + `color:${cellStyle.fg}`;
+                    span.setAttribute('style', ss);
+                }
+
+                // td 背景色
+                if (cellStyle.bg) {
+                    let ts = tdEl.getAttribute('style') || '';
+                    ts = ts.replace(/(^|;)background-color\s*:[^;]*(;|$)/g, '$1');
+                    ts = ts.replace(/;+/g, ';').replace(/^;|;$/g, '');
+                    ts = (ts ? ts + ';' : '') + `background-color:${cellStyle.bg}`;
+                    tdEl.setAttribute('style', ts);
+                }
+                reassertedCount++;
+            });
+            console.log(`[EXPORT DEBUG] Step4b complete: re-asserted ${reassertedCount} cells with user styles`);
+
+            // 调试：验证 getComputedStyle 之后颜色是否保留
+            const divAfterCS = clone.querySelector('.cell-display');
+            if (divAfterCS) {
+                const ds = divAfterCS.getAttribute('style') || '';
+                const hasColor = ds.includes('color:');
+                console.log('[EXPORT] Step4 完成后颜色保留:', hasColor);
             }
 
             // ------- 第 5 步：XMLSerializer → SVG foreignObject -------
