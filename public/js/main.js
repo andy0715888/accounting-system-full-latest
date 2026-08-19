@@ -5959,9 +5959,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 navbar.style.color = colors.navbarText;
                 navbar.querySelectorAll('.nav-logo, .nav-logo span, .server-status, .ss-item, .nav-right, .user-info, .nav-user-menu, .ss-value').forEach(el => el.style.color = colors.navbarText);
                 navbar.querySelectorAll('button, a').forEach(el => el.style.color = colors.navbarText);
+                navbar.querySelectorAll('.traffic-item, .traffic-arrow, .traffic-speed').forEach(el => el.style.color = colors.navbarText);
+                navbar.querySelectorAll('.network-status').forEach(el => el.style.color = colors.navbarText);
             } else {
                 navbar.style.color = '';
                 navbar.querySelectorAll('.nav-logo, .nav-logo span, .server-status, .ss-item, .nav-right, .user-info, .nav-user-menu, .ss-value, button, a').forEach(el => el.style.color = '');
+                navbar.querySelectorAll('.traffic-item, .traffic-arrow, .traffic-speed, .network-status').forEach(el => el.style.color = '');
             }
         }
         // 菜单栏字体颜色
@@ -6111,6 +6114,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.extractedClientData = null;
         state.extractedBothData = null;
         $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+        // 清除左下角系统提示/错误信息
+        setStatus('');
         if (state.currentTabId) {
             showTableLoading();
             state.page = 1;
@@ -12351,14 +12356,22 @@ document.addEventListener('DOMContentLoaded', function() {
             clone.querySelectorAll('.col-resize-handle, .row-resize-handle, .col-rename-input').forEach(el => el.remove());
 
             // 1e. 把 cell-display 内部替换为实际值（\n 转 <br>，交由浏览器处理自动折行）
+            // 保留 <span> 包装器以维持 flex 布局中的正确自动换行行为
             clone.querySelectorAll('.cell-display').forEach(el => {
                 const td = el.closest('td[data-row-id][data-col-id]');
                 if (!td) return;
                 const rowId = parseInt(td.dataset.rowId);
                 const colId = parseInt(td.dataset.colId);
                 const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
+                // 从 cell-display 的 style 中提取 text-align（如 style 中有 text-align:center）
+                let textAlign = 'left';
+                const styleMatch = el.getAttribute('style');
+                if (styleMatch) {
+                    const taMatch = styleMatch.match(/text-align\s*:\s*([^;]+)/);
+                    if (taMatch) textAlign = taMatch[1].trim();
+                }
                 if (val) {
-                    el.innerHTML = String(val).replace(/\n/g, '<br>');
+                    el.innerHTML = `<span style="width:100%;text-align:${textAlign};">${escapeHtml(String(val)).replace(/\n/g, '<br>')}</span>`;
                 } else {
                     el.innerHTML = '&nbsp;';
                 }
@@ -12396,12 +12409,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (cssText) el.setAttribute('style', cssText);
                 // 清理不再需要的属性（避免 XML 中的奇怪值）
+                // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
                 el.removeAttribute('class');
                 el.removeAttribute('id');
                 el.removeAttribute('data-row-id');
                 el.removeAttribute('data-col-id');
-                el.removeAttribute('colspan');
-                el.removeAttribute('rowspan');
                 el.removeAttribute('data-th');
                 node = walker.nextNode();
             }

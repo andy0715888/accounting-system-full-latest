@@ -74,17 +74,17 @@ body {
     display: flex;
     align-items: center;
     gap: 4px;
-    color: rgba(255,255,255,0.75);
+    color: inherit;
     min-width: 55px;
 }
 .traffic-arrow {
     font-size: 10px;
+    color: inherit;
 }
-.traffic-item:first-child .traffic-arrow { color: #f5a623; }
-.traffic-item:last-child .traffic-arrow { color: #67c23a; }
 .traffic-speed {
     font-family: 'SF Mono', Monaco, monospace;
     font-weight: 500;
+    color: inherit;
 }
 .nav-btn {
     background: rgba(255,255,255,0.1);
