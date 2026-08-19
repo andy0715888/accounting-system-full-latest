@@ -12424,7 +12424,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (cellStyle.fontFamily) displayStyle += `font-family:${cellStyle.fontFamily};`;
                 if (cellStyle.bold) displayStyle += 'font-weight:bold;';
                 if (cellStyle.fontSize) displayStyle += `font-size:${cellStyle.fontSize}px;`;
-                if (cellStyle.fg) displayStyle += `color:${cellStyle.fg};`;
+                if (cellStyle.fg) displayStyle += `color:${cellStyle.fg};-webkit-text-fill-color:${cellStyle.fg};`;
                 displayStyle += 'padding:6px 10px;box-sizing:border-box;cursor:cell;line-height:1.5;white-space:pre-wrap;word-break:break-word;';
                 displayStyle += `text-align:${align};`;
 
@@ -12433,7 +12433,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // 替换内容 —— 将 fg 颜色直接设置在 <span> 上，确保文本颜色不会因继承丢失
                 if (val) {
-                    const spanColor = cellStyle.fg ? `color:${cellStyle.fg};` : '';
+                    const spanColor = cellStyle.fg ? `color:${cellStyle.fg};-webkit-text-fill-color:${cellStyle.fg};` : '';
                     el.innerHTML = `<span style="width:100%;text-align:${align};${spanColor}">${escapeHtml(String(val)).replace(/\n/g, '<br>')}</span>`;
                 } else {
                     el.innerHTML = '&nbsp;';
@@ -12509,6 +12509,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 从当前 style 中移除旧的 color / font-weight / font-size / font-family
                 let divStyle = displayDiv.getAttribute('style') || '';
                 divStyle = divStyle.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                divStyle = divStyle.replace(/(^|;)-webkit-text-fill-color\s*:[^;]*(;|$)/g, '$1');
                 divStyle = divStyle.replace(/(^|;)font-weight\s*:[^;]*(;|$)/g, '$1');
                 divStyle = divStyle.replace(/(^|;)font-size\s*:[^;]*(;|$)/g, '$1');
                 divStyle = divStyle.replace(/(^|;)font-family\s*:[^;]*(;|$)/g, '$1');
@@ -12517,7 +12518,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // 用用户设置的样式重新构建（确保分号分隔正确）
                 const newParts = [];
-                if (cellStyle.fg) newParts.push(`color:${cellStyle.fg}`);
+                if (cellStyle.fg) newParts.push(`color:${cellStyle.fg}`, `-webkit-text-fill-color:${cellStyle.fg}`);
                 if (cellStyle.bold) newParts.push('font-weight:bold');
                 if (cellStyle.fontSize) newParts.push(`font-size:${cellStyle.fontSize}px`);
                 if (cellStyle.fontFamily) newParts.push(`font-family:${cellStyle.fontFamily}`);
@@ -12531,8 +12532,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (span && cellStyle.fg) {
                     let spanStyle = span.getAttribute('style') || '';
                     spanStyle = spanStyle.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                    spanStyle = spanStyle.replace(/(^|;)-webkit-text-fill-color\s*:[^;]*(;|$)/g, '$1');
                     spanStyle = spanStyle.replace(/;+/g, ';').replace(/^;|;$/g, '');
-                    spanStyle = (spanStyle ? spanStyle + ';' : '') + `color:${cellStyle.fg}`;
+                    spanStyle = (spanStyle ? spanStyle + ';' : '') + `color:${cellStyle.fg};-webkit-text-fill-color:${cellStyle.fg}`;
                     span.setAttribute('style', spanStyle);
                 }
 
@@ -12549,120 +12551,103 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             console.log('[EXPORT] Step3 - 样式重断言:', `匹配${matchedCount}个单元格, 设置颜色${fgSetCount}个`);
 
-            // ------- 第 4 步：把所有 computed style 内联到 style 属性 -------
-            // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
-            // 现在 getComputedStyle 会正确获取到 Step 3 中设置的用户自定义颜色
-            const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
-            let node = walker.nextNode();
-            while (node) {
-                const el = node;
-                const cs = window.getComputedStyle(el);
-                let parts = [];
-                for (let i = 0; i < cs.length; i++) {
-                    const name = cs[i];
-                    const val = cs.getPropertyValue(name);
-                    if (val) parts.push(`${name}:${val}`);
-                }
-                const cssText = parts.join(';');
-                if (cssText) el.setAttribute('style', cssText);
-                // 清理不再需要的属性（避免 XML 中的奇怪值）
-                // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
-                el.removeAttribute('class');
-                el.removeAttribute('id');
-                el.removeAttribute('data-row-id');
-                el.removeAttribute('data-col-id');
-                el.removeAttribute('data-th');
-                node = walker.nextNode();
-            }
-
-            // ------- 第 4 步：把所有 computed style 内联到 style 属性 -------
-            // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
-            // 现在 getComputedStyle 会正确获取到 Step 3 中设置的用户自定义颜色
-            // 关键：在删除 data 属性之前，先保存 td → style 的映射
-            const tdStyleMap = new Map(); // Map<td, cellStyle>
-            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
-                const k = `${td.dataset.rowId}_${td.dataset.colId}`;
+            // ------- 第 4 步：保存元素引用 + getComputedStyle 内联样式 -------
+            // foreignObject 不继承宿主页面样式表，必须 inline 所有 computed style
+            // ★ 关键：先保存 {td, displayDiv, span, style} 的引用，再删除属性
+            //     因为删除 class 后 .cell-display 选择器失效；删除 data-* 后 query 失效
+            const reassertList = [];
+            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(tdEl => {
+                const k = `${tdEl.dataset.rowId}_${tdEl.dataset.colId}`;
                 const st = g.styles[k];
-                if (st && (st.fg || st.bg || st.bold || st.fontSize || st.fontFamily)) {
-                    tdStyleMap.set(td, st);
-                }
+                if (!st || (!st.fg && !st.bg && !st.bold && !st.fontSize && !st.fontFamily)) return;
+                // 获取子元素的直接引用（不是用 class selector，而是用 DOM 结构）
+                // .cell-display 是 td 的第一个/唯一一个子 div
+                const displayDiv = tdEl.children && tdEl.children[0];
+                if (!displayDiv) return;
+                // span 是 displayDiv 的第一个 span 子元素（如果是内容单元格）
+                const spanEl = displayDiv.querySelector('span');
+                reassertList.push({ tdEl, displayDiv, spanEl, style: st });
             });
-            console.log(`[EXPORT DEBUG] Step4 - saved tdStyleMap entries: ${tdStyleMap.size}`);
-            
-            // 使用不同的变量名避免冲突
+            console.log(`[EXPORT] Step4 - 保存样式应用目标: ${reassertList.length} 个单元格`);
+
             const styleWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
             let styleNode = styleWalker.nextNode();
+            // 这些属性 computed 默认值会覆盖用户显式设置的颜色/样式，必须排除
+            const SKIP_PROPS = new Set([
+                '-webkit-text-fill-color',
+                '-webkit-text-stroke-color',
+                '-webkit-text-stroke-width'
+            ]);
             while (styleNode) {
                 const el = styleNode;
                 const cs = window.getComputedStyle(el);
                 let parts = [];
                 for (let i = 0; i < cs.length; i++) {
                     const name = cs[i];
+                    if (SKIP_PROPS.has(name)) continue;
                     const val = cs.getPropertyValue(name);
                     if (val) parts.push(`${name}:${val}`);
                 }
                 const cssText = parts.join(';');
                 if (cssText) el.setAttribute('style', cssText);
-                // 清理不再需要的属性（避免 XML 中的奇怪值）
-                // 注意：不要删除 colspan/rowspan！foreignObject 渲染需要这些属性来保持表格布局
-                el.removeAttribute('class');
+                // 清理不必要的属性（但不在 reassertList 中移除 class——保留也不影响 foreignObject）
                 el.removeAttribute('id');
                 el.removeAttribute('data-row-id');
                 el.removeAttribute('data-col-id');
                 el.removeAttribute('data-th');
+                // 注意：保留 class，不会影响 foreignObject 渲染（样式已 inline）
                 styleNode = styleWalker.nextNode();
             }
 
-            // ------- 第 4b 步：getComputedStyle 之后，用保存的映射重断言关键样式 -------
-            // 某些浏览器的 getComputedStyle 可能会覆盖之前手动设置的样式
+            // ------- 第 4b 步：getComputedStyle 之后重断言用户样式 -------
+            // ★ 这一步是颜色保真的最后防线：直接用保存的 DOM 元素引用设置 style
+            //   完全不依赖选择器，绝对不会失效
             let reassertedCount = 0;
-            tdStyleMap.forEach((cellStyle, tdEl) => {
-                const displayDiv = tdEl.querySelector('.cell-display');
-                if (!displayDiv) return;
+            for (const item of reassertList) {
+                const { tdEl, displayDiv, spanEl, style: cs } = item;
 
-                // 重建 cell-display style
+                // 重断言 .cell-display (displayDiv) 的关键样式
                 let ds = displayDiv.getAttribute('style') || '';
                 ds = ds.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                ds = ds.replace(/(^|;)-webkit-text-fill-color\s*:[^;]*(;|$)/g, '$1');
                 ds = ds.replace(/(^|;)font-weight\s*:[^;]*(;|$)/g, '$1');
                 ds = ds.replace(/(^|;)font-size\s*:[^;]*(;|$)/g, '$1');
                 ds = ds.replace(/(^|;)font-family\s*:[^;]*(;|$)/g, '$1');
                 ds = ds.replace(/;+/g, ';').replace(/^;|;$/g, '');
-                const parts = [];
-                if (cellStyle.fg) parts.push(`color:${cellStyle.fg}`);
-                if (cellStyle.bold) parts.push('font-weight:bold');
-                if (cellStyle.fontSize) parts.push(`font-size:${cellStyle.fontSize}px`);
-                if (cellStyle.fontFamily) parts.push(`font-family:${cellStyle.fontFamily}`);
-                if (parts.length) ds = (ds ? ds + ';' : '') + parts.join(';');
+                const dParts = [];
+                if (cs.fg) dParts.push(`color:${cs.fg}`, `-webkit-text-fill-color:${cs.fg}`);
+                if (cs.bold) dParts.push('font-weight:bold');
+                if (cs.fontSize) dParts.push(`font-size:${cs.fontSize}px`);
+                if (cs.fontFamily) dParts.push(`font-family:${cs.fontFamily}`);
+                if (dParts.length) ds = (ds ? ds + ';' : '') + dParts.join(';');
                 displayDiv.setAttribute('style', ds);
 
-                // 重建 span style（确保文本颜色）
-                const span = displayDiv.querySelector('span');
-                if (span && cellStyle.fg) {
-                    let ss = span.getAttribute('style') || '';
+                // 重断言 <span> 的 color（文本颜色）
+                if (spanEl && cs.fg) {
+                    let ss = spanEl.getAttribute('style') || '';
                     ss = ss.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                    ss = ss.replace(/(^|;)-webkit-text-fill-color\s*:[^;]*(;|$)/g, '$1');
                     ss = ss.replace(/;+/g, ';').replace(/^;|;$/g, '');
-                    ss = (ss ? ss + ';' : '') + `color:${cellStyle.fg}`;
-                    span.setAttribute('style', ss);
+                    ss = (ss ? ss + ';' : '') + `color:${cs.fg};-webkit-text-fill-color:${cs.fg}`;
+                    spanEl.setAttribute('style', ss);
                 }
 
-                // td 背景色
-                if (cellStyle.bg) {
+                // 重断言 td 的 background-color
+                if (cs.bg) {
                     let ts = tdEl.getAttribute('style') || '';
                     ts = ts.replace(/(^|;)background-color\s*:[^;]*(;|$)/g, '$1');
                     ts = ts.replace(/;+/g, ';').replace(/^;|;$/g, '');
-                    ts = (ts ? ts + ';' : '') + `background-color:${cellStyle.bg}`;
+                    ts = (ts ? ts + ';' : '') + `background-color:${cs.bg}`;
                     tdEl.setAttribute('style', ts);
                 }
                 reassertedCount++;
-            });
-            console.log(`[EXPORT DEBUG] Step4b complete: re-asserted ${reassertedCount} cells with user styles`);
-
-            // 调试：验证 getComputedStyle 之后颜色是否保留
-            const divAfterCS = clone.querySelector('.cell-display');
-            if (divAfterCS) {
-                const ds = divAfterCS.getAttribute('style') || '';
-                const hasColor = ds.includes('color:');
-                console.log('[EXPORT] Step4 完成后颜色保留:', hasColor);
+            }
+            console.log(`[EXPORT] Step4b - getComputedStyle 后重断言: ${reassertedCount} 个单元格`);
+            // 验证结果：直接检查保存的 displayDiv 的颜色
+            if (reassertList.length > 0) {
+                const first = reassertList[0];
+                const hasColor = (first.displayDiv.getAttribute('style') || '').includes('color:');
+                console.log(`[EXPORT] 验证: 第一个有样式的单元格 fg=${first.style.fg}, 写入成功=${hasColor}`);
             }
 
             // ------- 第 5 步：XMLSerializer → SVG foreignObject -------
