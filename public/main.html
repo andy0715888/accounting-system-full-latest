@@ -24,6 +24,10 @@
                         css += '.navbar, .navbar .nav-logo, .navbar .nav-logo span, .navbar .server-status, .navbar .ss-item, .navbar .nav-right, .navbar .user-info, .navbar .nav-user-menu { color:' + c.navbarText + ' !important; }';
                         css += '.navbar .user-info .ss-value { color:' + c.navbarText + ' !important; }';
                         css += '.navbar a, .navbar button { color:' + c.navbarText + ' !important; }';
+                        // 流量图标、数字、在线离线文字颜色随导航栏字体颜色
+                        css += '.navbar .traffic-item, .navbar .traffic-speed { color:' + c.navbarText + ' !important; }';
+                        css += '.navbar .traffic-arrow { color:' + c.navbarText + ' !important; }';
+                        css += '.navbar .network-status { color:' + c.navbarText + ' !important; }';
                     }
                     if (c.menubarText) {
                         css += '.top-menu, .top-menu .menu-item, .top-menu .top-menu-title, .top-menu .menu-group { color:' + c.menubarText + ' !important; }';
