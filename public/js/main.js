@@ -12426,9 +12426,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 设置 cell-display 的完整 style
                 el.setAttribute('style', displayStyle);
 
-                // 替换内容
+                // 替换内容 —— 将 fg 颜色直接设置在 <span> 上，确保文本颜色不会因继承丢失
                 if (val) {
-                    el.innerHTML = `<span style="width:100%;text-align:${align};">${escapeHtml(String(val)).replace(/\n/g, '<br>')}</span>`;
+                    const spanColor = cellStyle.fg ? `color:${cellStyle.fg};` : '';
+                    el.innerHTML = `<span style="width:100%;text-align:${align};${spanColor}">${escapeHtml(String(val)).replace(/\n/g, '<br>')}</span>`;
                 } else {
                     el.innerHTML = '&nbsp;';
                 }
@@ -12481,7 +12482,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // ------- 第 3 步：把所有 computed style 内联到 style 属性 -------
             // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
-            // 使用迭代方式而非 cssText，确保跨浏览器兼容性，特别是 color 属性
             const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
             let node = walker.nextNode();
             while (node) {
@@ -12504,6 +12504,60 @@ document.addEventListener('DOMContentLoaded', function() {
                 el.removeAttribute('data-th');
                 node = walker.nextNode();
             }
+
+            // ------- 第 3b 步：显式断言用户设置的关键样式，防止 getComputedStyle 丢失 -------
+            // 这一步确保 fg (字体颜色)、bg (背景色)、bold、fontSize、fontFamily 等
+            // 用户自定义样式绝对不会在导出图片中丢失
+            clone.querySelectorAll('td[data-row-id][data-col-id]').forEach(td => {
+                const rowId = parseInt(td.dataset.rowId);
+                const colId = parseInt(td.dataset.colId);
+                const key = `${rowId}_${colId}`;
+                const cellStyle = g.styles[key];
+                if (!cellStyle) return;
+
+                // 对 .cell-display div 显式设置关键样式
+                const displayDiv = td.querySelector('.cell-display');
+                if (!displayDiv) return;
+
+                // 从当前 style 中移除旧的 color / font-weight / font-size / font-family
+                let divStyle = displayDiv.getAttribute('style') || '';
+                divStyle = divStyle.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                divStyle = divStyle.replace(/(^|;)font-weight\s*:[^;]*(;|$)/g, '$1');
+                divStyle = divStyle.replace(/(^|;)font-size\s*:[^;]*(;|$)/g, '$1');
+                divStyle = divStyle.replace(/(^|;)font-family\s*:[^;]*(;|$)/g, '$1');
+                // 清理多余的分号
+                divStyle = divStyle.replace(/;+/g, ';').replace(/^;|;$/g, '');
+
+                // 用用户设置的样式重新构建（确保分号分隔正确）
+                const newParts = [];
+                if (cellStyle.fg) newParts.push(`color:${cellStyle.fg}`);
+                if (cellStyle.bold) newParts.push('font-weight:bold');
+                if (cellStyle.fontSize) newParts.push(`font-size:${cellStyle.fontSize}px`);
+                if (cellStyle.fontFamily) newParts.push(`font-family:${cellStyle.fontFamily}`);
+                if (newParts.length > 0) {
+                    divStyle = (divStyle ? divStyle + ';' : '') + newParts.join(';');
+                }
+                displayDiv.setAttribute('style', divStyle);
+
+                // 对内部 <span> 也显式设置 color，确保文本颜色不会丢失
+                const span = displayDiv.querySelector('span');
+                if (span && cellStyle.fg) {
+                    let spanStyle = span.getAttribute('style') || '';
+                    spanStyle = spanStyle.replace(/(^|;)color\s*:[^;]*(;|$)/g, '$1');
+                    spanStyle = spanStyle.replace(/;+/g, ';').replace(/^;|;$/g, '');
+                    spanStyle = (spanStyle ? spanStyle + ';' : '') + `color:${cellStyle.fg}`;
+                    span.setAttribute('style', spanStyle);
+                }
+
+                // 对 td 显式设置背景色
+                if (cellStyle.bg) {
+                    let tdStyle = td.getAttribute('style') || '';
+                    tdStyle = tdStyle.replace(/(^|;)background-color\s*:[^;]*(;|$)/g, '$1');
+                    tdStyle = tdStyle.replace(/;+/g, ';').replace(/^;|;$/g, '');
+                    tdStyle = (tdStyle ? tdStyle + ';' : '') + `background-color:${cellStyle.bg}`;
+                    td.setAttribute('style', tdStyle);
+                }
+            });
 
             // ------- 第 4 步：XMLSerializer → SVG foreignObject -------
             const xml = new XMLSerializer().serializeToString(clone);
