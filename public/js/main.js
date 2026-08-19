@@ -12303,9 +12303,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) { setStatus('导出失败: ' + e.message); }
     });
 
-    // 导出图片：克隆 DOM → 删除不需要部分 → 浏览器渲染
-    // → inline 所有 computed style → XMLSerializer → SVG foreignObject
-    // → Image → Canvas → Clipboard。利用浏览器原生引擎保证所见即所得。
+    // 导出图片：克隆 DOM → 清理 → 保留结构样式 → 内联 computed style
+    // → XMLSerializer → SVG foreignObject → Canvas → Clipboard
     const quoteCopyImgBtn = document.getElementById('quoteCopyImgBtn');
     if (quoteCopyImgBtn) quoteCopyImgBtn.addEventListener('click', async () => {
         if (!quoteGrid || quoteGrid.columns.length === 0) { setStatus('表格为空'); return; }
@@ -12320,18 +12319,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const hiddenCols = new Set(Array.isArray(g.hiddenCols) ? g.hiddenCols : []);
 
             // ------- 第 1 步：克隆表格，仅保留数据区域 -------
-            // 用户明确要求：不需要列头(列1-7)、不需要行号(1-6)、不需要corner cell
             const clone = table.cloneNode(true);
 
-            // 1a. 删除整个 thead（列1-7）
+            // 1a. 删除整个 thead（列1-7、corner cell、行号表头）
             const thead = clone.querySelector('thead');
             if (thead) thead.remove();
 
-            // 1b. 删除 corner cell
-            const corner = clone.querySelector('.corner-cell');
-            if (corner) corner.remove();
-
-            // 1c. 处理 tbody 中的每一行
+            // 1b. 处理 tbody 中的每一行
             const tbodyRows = clone.querySelectorAll('tbody tr');
             tbodyRows.forEach(tr => {
                 const rowId = parseInt(tr.dataset.rowId);
@@ -12339,29 +12333,50 @@ document.addEventListener('DOMContentLoaded', function() {
                     tr.remove();
                     return;
                 }
+                // 删除行号列 td.row-header
                 tr.querySelectorAll('td.row-header').forEach(el => el.remove());
+                // 删除隐藏列的单元格
                 tr.querySelectorAll('td[data-col-id]').forEach(td => {
                     const cid = parseInt(td.dataset.colId);
                     if (hiddenCols.has(cid)) td.remove();
                 });
+                // 删除 merge-covered-cell（display:none 的占位）
                 tr.querySelectorAll('td.merge-covered-cell').forEach(td => td.remove());
             });
 
-            // 1d. 删除装饰性子元素
+            // 1c. 删除装饰性子元素
             clone.querySelectorAll('.col-resize-handle, .row-resize-handle, .col-rename-input').forEach(el => el.remove());
 
-            // 1e. 把 cell-display 内部替换为实际值（\n 转 <br>，交由浏览器处理自动折行）
+            // 1d. 更新 cell-display 内容，保留原有样式结构
             clone.querySelectorAll('.cell-display').forEach(el => {
                 const td = el.closest('td[data-row-id][data-col-id]');
                 if (!td) return;
                 const rowId = parseInt(td.dataset.rowId);
                 const colId = parseInt(td.dataset.colId);
                 const val = (g.rows.find(r => r.id === rowId)?.cells?.[colId]) || '';
+                
+                // 保留第一个span子元素，只更新其文本内容
+                const existingSpan = el.querySelector('span');
                 if (val) {
-                    el.innerHTML = String(val).replace(/\n/g, '<br>');
+                    const text = String(val).replace(/\n/g, '<br>');
+                    if (existingSpan) {
+                        existingSpan.innerHTML = text;
+                    } else {
+                        el.innerHTML = `<span style="width:100%;">${text}</span>`;
+                    }
                 } else {
-                    el.innerHTML = '&nbsp;';
+                    if (existingSpan) {
+                        existingSpan.innerHTML = '&nbsp;';
+                    } else {
+                        el.innerHTML = '&nbsp;';
+                    }
                 }
+            });
+
+            // 1e. 删除 colgroup 中隐藏列的 col 元素
+            clone.querySelectorAll('colgroup col').forEach(col => {
+                const cid = parseInt(col.dataset.colId);
+                if (!isNaN(cid) && hiddenCols.has(cid)) col.remove();
             });
 
             // ------- 第 2 步：放到临时容器中，让浏览器实际渲染 -------
@@ -12377,45 +12392,63 @@ document.addEventListener('DOMContentLoaded', function() {
             const totalW = Math.ceil(tmpContainer.getBoundingClientRect().width);
             const totalH = Math.ceil(tmpContainer.getBoundingClientRect().height);
 
-            // ------- 第 3 步：把所有 computed style 内联到 style 属性 -------
-            // foreignObject 不继承宿主页面的样式表，必须 inline 全部样式
+            // ------- 第 3 步：内联所有 computed style，保留结构属性 -------
             const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
             let node = walker.nextNode();
             while (node) {
                 const el = node;
+                const tagName = el.tagName.toLowerCase();
+                
+                // 获取 computed style
                 const cs = window.getComputedStyle(el);
-                let cssText = cs.cssText;
-                if (!cssText) {
-                    let parts = [];
-                    for (let i = 0; i < cs.length; i++) {
-                        const name = cs[i];
-                        const val = cs.getPropertyValue(name);
-                        if (val) parts.push(`${name}:${val}`);
+                let cssText = '';
+                
+                // 收集所有样式属性
+                const props = [];
+                for (let i = 0; i < cs.length; i++) {
+                    const name = cs[i];
+                    const val = cs.getPropertyValue(name);
+                    if (val && val !== 'normal' && val !== 'none' && val !== 'auto') {
+                        props.push(`${name}:${val}`);
                     }
-                    cssText = parts.join(';');
                 }
+                cssText = props.join(';');
+                
                 if (cssText) el.setAttribute('style', cssText);
-                // 清理不再需要的属性（避免 XML 中的奇怪值）
+                
+                // 清理不需要的属性，但保留 colspan/rowspan
                 el.removeAttribute('class');
                 el.removeAttribute('id');
-                el.removeAttribute('data-row-id');
-                el.removeAttribute('data-col-id');
-                el.removeAttribute('colspan');
-                el.removeAttribute('rowspan');
-                el.removeAttribute('data-th');
+                
+                // 保留 colspan/rowspan 属性
+                const keepAttrs = ['colspan', 'rowspan', 'width', 'height'];
+                const attrsToRemove = [];
+                for (const attr of el.attributes) {
+                    if (!keepAttrs.includes(attr.name) && attr.name.startsWith('data-')) {
+                        attrsToRemove.push(attr.name);
+                    }
+                }
+                attrsToRemove.forEach(a => el.removeAttribute(a));
+                
                 node = walker.nextNode();
             }
 
             // ------- 第 4 步：XMLSerializer → SVG foreignObject -------
             const xml = new XMLSerializer().serializeToString(clone);
+            
+            // 转义 XML 中的特殊字符
+            const escapedXml = xml
+                .replace(/&(?!amp;|lt;|gt;|quot;|apos;)/g, '&amp;')
+                .replace(/\n/g, '&#10;')
+                .replace(/\r/g, '');
 
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${totalW}px;height:${totalH}px;display:inline-block;background:#fff;padding:${padding}px;box-sizing:border-box;">${xml}</div></foreignObject></svg>`;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${totalW}px;height:${totalH}px;display:inline-block;background:#fff;padding:${padding}px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">${escapedXml}</div></foreignObject></svg>`;
 
             const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 
             document.body.removeChild(tmpContainer);
 
-            // ------- 第 5 步：把 SVG 渲染到 Canvas -------
+            // ------- 第 5 步：渲染到 Canvas -------
             const img = new Image();
             img.crossOrigin = 'anonymous';
             let imgErr = null;
