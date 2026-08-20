@@ -11333,11 +11333,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const newColIdx = Math.max(0, Math.min(quoteGrid.columns.length - 1, colIdx + dCol));
             const newRowId = quoteGrid.rows[newRowIdx].id;
             const newColId = quoteGrid.columns[newColIdx].id;
-            // 如果被合并覆盖，找到主单元格
+            // 如果被合并覆盖，找到主单元格（用 index 比较，而不是 ID）
             let finalRowId = newRowId, finalColId = newColId;
             for (const m of (quoteGrid.merges || [])) {
-                if (newRowId >= m.row && newRowId < m.row + m.rowspan &&
-                    newColId >= m.col && newColId < m.col + m.colspan) {
+                const mRi = rowIdToIdx(m.row);
+                const mCi = colIdToIdx(m.col);
+                if (mRi < 0 || mCi < 0) continue;
+                if (newRowIdx >= mRi && newRowIdx < mRi + m.rowspan &&
+                    newColIdx >= mCi && newColIdx < mCi + m.colspan) {
                     finalRowId = m.row;
                     finalColId = m.col;
                     break;
@@ -11492,15 +11495,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         // insert at baseRowIdx (before) 或 baseRowIdx+1 (after)
         const insertAt = before ? baseRowIdx : baseRowIdx + 1;
-        quoteGrid.rows.splice(insertAt, 0, ...newRows);
-        // 合并区域里行号在 splice 之后的 row/rowspan 修正（只针对以 splice 点之后为主行的合并 + 跨越 splice 点的 rowspan 扩展）
-        for (const m of (quoteGrid.merges || [])) {
-            const mainIdx = quoteGrid.rows.findIndex(r => r.id === m.row);
-            // 原始主行在 insertAt 之前，且合并范围覆盖 insertAt → rowspan 增加 n
-            if (mainIdx >= 0 && mainIdx < insertAt && mainIdx + m.rowspan > insertAt) {
-                m.rowspan += n;
+
+        // ★ 关键修复：在 splice 之前先处理合并
+        const isInsertAtEnd = insertAt >= quoteGrid.rows.length;
+        if (isInsertAtEnd) {
+            // 插入在表格末尾：扩展跨越到末尾的合并
+            for (const m of (quoteGrid.merges || [])) {
+                const mainIdx = quoteGrid.rows.findIndex(r => r.id === m.row);
+                if (mainIdx >= 0 && mainIdx + m.rowspan >= insertAt) {
+                    m.rowspan += n;
+                }
+            }
+        } else {
+            // 插入在表格中间：拆分跨越插入点的合并，使新行保持独立
+            const mergesToSplit = [];
+            for (const m of (quoteGrid.merges || [])) {
+                const mainIdx = quoteGrid.rows.findIndex(r => r.id === m.row);
+                if (mainIdx >= 0 && mainIdx < insertAt && mainIdx + m.rowspan > insertAt) {
+                    mergesToSplit.push({ m, mainIdx });
+                }
+            }
+            for (const { m, mainIdx } of mergesToSplit) {
+                const origRowspan = m.rowspan;
+                // 原合并：只保留插入点之前的部分
+                m.rowspan = insertAt - mainIdx;
+                // 如果插入点之后还有行被原合并覆盖，创建新合并
+                const remainingSpan = origRowspan - (insertAt - mainIdx);
+                if (remainingSpan > 0) {
+                    const newMainRowId = quoteGrid.rows[insertAt].id;
+                    quoteGrid.merges.push({
+                        row: newMainRowId,
+                        col: m.col,
+                        rowspan: remainingSpan,
+                        colspan: m.colspan
+                    });
+                }
             }
         }
+
+        quoteGrid.rows.splice(insertAt, 0, ...newRows);
+
         saveQuoteGridDebounced();
         renderQuoteGrid();
     }
@@ -11514,18 +11548,50 @@ document.addEventListener('DOMContentLoaded', function() {
             quoteGrid.colWidths[col.id] = 120;
         }
         const insertAt = before ? baseColIdx : baseColIdx + 1;
+
+        // ★ 关键修复：在 splice 之前先处理合并
+        const isInsertAtEnd = insertAt >= quoteGrid.columns.length;
+        if (isInsertAtEnd) {
+            // 插入在最后：扩展跨越到末尾的列合并
+            for (const m of (quoteGrid.merges || [])) {
+                const mainIdx = quoteGrid.columns.findIndex(c => c.id === m.col);
+                if (mainIdx >= 0 && mainIdx + m.colspan >= insertAt) {
+                    m.colspan += n;
+                }
+            }
+        } else {
+            // 插入在中间：拆分跨越插入点的列合并
+            const mergesToSplit = [];
+            for (const m of (quoteGrid.merges || [])) {
+                const mainIdx = quoteGrid.columns.findIndex(c => c.id === m.col);
+                if (mainIdx >= 0 && mainIdx < insertAt && mainIdx + m.colspan > insertAt) {
+                    mergesToSplit.push({ m, mainIdx });
+                }
+            }
+            for (const { m, mainIdx } of mergesToSplit) {
+                const origColspan = m.colspan;
+                // 原合并：只保留插入点之前的部分
+                m.colspan = insertAt - mainIdx;
+                // 如果插入点之后还有列被原合并覆盖，创建新合并
+                const remainingSpan = origColspan - (insertAt - mainIdx);
+                if (remainingSpan > 0) {
+                    const newMainColId = quoteGrid.columns[insertAt].id;
+                    quoteGrid.merges.push({
+                        row: m.row,
+                        col: newMainColId,
+                        rowspan: m.rowspan,
+                        colspan: remainingSpan
+                    });
+                }
+            }
+        }
+
         quoteGrid.columns.splice(insertAt, 0, ...newCols);
         // 现有每行给新列补空值
         quoteGrid.rows.forEach(row => {
             newCols.forEach(col => { row.cells[col.id] = ''; });
         });
-        // 合并列跨越 insertAt 时 colspan 扩展
-        for (const m of (quoteGrid.merges || [])) {
-            const mainIdx = quoteGrid.columns.findIndex(c => c.id === m.col);
-            if (mainIdx >= 0 && mainIdx < insertAt && mainIdx + m.colspan > insertAt) {
-                m.colspan += n;
-            }
-        }
+
         saveQuoteGridDebounced();
         renderQuoteGrid();
     }
@@ -11713,10 +11779,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const newColIdx = Math.max(0, Math.min(quoteGrid.columns.length - 1, colIdx + dCol));
                 let newRowId = quoteGrid.rows[newRowIdx].id;
                 let newColId = quoteGrid.columns[newColIdx].id;
-                // 如果被合并覆盖，找到主单元格
+                // 如果被合并覆盖，找到主单元格（用 index 比较，而不是 ID）
                 for (const m of (quoteGrid.merges || [])) {
-                    if (newRowId >= m.row && newRowId < m.row + m.rowspan &&
-                        newColId >= m.col && newColId < m.col + m.colspan) {
+                    const mRi = rowIdToIdx(m.row);
+                    const mCi = colIdToIdx(m.col);
+                    if (mRi < 0 || mCi < 0) continue;
+                    if (newRowIdx >= mRi && newRowIdx < mRi + m.rowspan &&
+                        newColIdx >= mCi && newColIdx < mCi + m.colspan) {
                         newRowId = m.row;
                         newColId = m.col;
                         break;
