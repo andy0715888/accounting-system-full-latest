@@ -1472,13 +1472,34 @@ body {
 .income-add-form input[type="text"] { flex: 1; min-width: 150px; }
 .expense-add-form input[type="number"] { width: 120px; }
 .expense-add-form input[type="text"] { flex: 1; min-width: 150px; }
-.income-list { 
+.income-list {
     min-height: 200px;
-    max-height: 350px; 
-    overflow-y: auto; 
+    max-height: 350px;
+    overflow-y: auto;
     background: #fafafa;
     border-radius: 8px;
     border: 1px solid #eee;
+}
+/* 固定弹窗大小：收入/支出/主机支出明细弹窗 */
+#incomeModal .modal,
+#expenseModal .modal,
+#hostExpenseModal .modal {
+    height: 70vh;
+}
+#incomeModal .modal-body,
+#expenseModal .modal-body,
+#hostExpenseModal .modal-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#incomeModal .income-list,
+#expenseModal .income-list,
+#hostExpenseModal .income-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
 }
 .income-list-header {
     display: flex;

@@ -11499,10 +11499,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // ★ 关键修复：在 splice 之前先处理合并
         const isInsertAtEnd = insertAt >= quoteGrid.rows.length;
         if (isInsertAtEnd) {
-            // 插入在表格末尾：扩展跨越到末尾的合并
+            // 插入在表格末尾：仅扩展确实跨越插入点的合并（数据异常时）
+            // 正常情况下合并在插入点之前结束，不应扩展，新行保持独立
             for (const m of (quoteGrid.merges || [])) {
                 const mainIdx = quoteGrid.rows.findIndex(r => r.id === m.row);
-                if (mainIdx >= 0 && mainIdx + m.rowspan >= insertAt) {
+                if (mainIdx >= 0 && mainIdx + m.rowspan > insertAt) {
                     m.rowspan += n;
                 }
             }
@@ -11552,10 +11553,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // ★ 关键修复：在 splice 之前先处理合并
         const isInsertAtEnd = insertAt >= quoteGrid.columns.length;
         if (isInsertAtEnd) {
-            // 插入在最后：扩展跨越到末尾的列合并
+            // 插入在最后：仅扩展确实跨越插入点的列合并（数据异常时）
             for (const m of (quoteGrid.merges || [])) {
                 const mainIdx = quoteGrid.columns.findIndex(c => c.id === m.col);
-                if (mainIdx >= 0 && mainIdx + m.colspan >= insertAt) {
+                if (mainIdx >= 0 && mainIdx + m.colspan > insertAt) {
                     m.colspan += n;
                 }
             }
