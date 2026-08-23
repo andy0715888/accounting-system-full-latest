@@ -195,6 +195,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const incomeModal = $('#incomeModal');
     const closeIncomeModal = $('#closeIncomeModal');
+    const incomeModalRow = $('#incomeModalRow');
     const incomeAmountInput = $('#incomeAmountInput');
     const incomeDateInput = $('#incomeDateInput');
     const incomeRemarkInput = $('#incomeRemarkInput');
@@ -205,6 +206,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const expenseModal = $('#expenseModal');
     const closeExpenseModal = $('#closeExpenseModal');
+    const expenseModalRow = $('#expenseModalRow');
     const expenseAmountInput = $('#expenseAmountInput');
     const expenseDateInput = $('#expenseDateInput');
     const expenseRemarkInput = $('#expenseRemarkInput');
@@ -216,6 +218,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 独享/共享标签主机支出明细弹窗
     const hostExpenseModal = $('#hostExpenseModal');
     const closeHostExpenseModal = $('#closeHostExpenseModal');
+    const hostExpenseModalRow = $('#hostExpenseModalRow');
     const hostExpenseUnitPriceInput = $('#hostExpenseUnitPrice');
     const hostExpenseExtraInput = $('#hostExpenseExtra');
     const hostExpenseRemarkInput = $('#hostExpenseRemarkInput');
@@ -4386,21 +4389,61 @@ document.addEventListener('DOMContentLoaded', function() {
     let _expensePriceSaveTimer = null;
     function scheduleIncomePricePersist() {
         if (!state.incomeRecordId) return;
-        // 立即写 localStorage 兜底
-        try { localStorage.setItem('incomeLastAmount_' + state.userId + '_' + state.incomeRecordId, incomeAmountInput.value); } catch(e) {}
-        // 防抖写数据库
+        // 立即读值 + 立即写 localStorage 兜底
+        const value = incomeAmountInput.value;
+        const recId = state.incomeRecordId;
+        try { localStorage.setItem('incomeLastAmount_' + state.userId + '_' + recId, value); } catch(e) {}
+        // 防抖写数据库 — 捕获当时的 recordId 和 value，彻底避免竞态
         if (_incomePriceSaveTimer) clearTimeout(_incomePriceSaveTimer);
         _incomePriceSaveTimer = setTimeout(() => {
-            persistModalTopPrice(state.incomeRecordId, 'income_unit_price', incomeAmountInput.value);
+            persistModalTopPrice(recId, 'income_unit_price', value);
         }, 450);
     }
     function scheduleExpensePricePersist() {
         if (!state.expenseRecordId) return;
-        try { localStorage.setItem('expenseLastAmount_' + state.userId + '_' + state.expenseRecordId, expenseAmountInput.value); } catch(e) {}
+        const value = expenseAmountInput.value;
+        const recId = state.expenseRecordId;
+        try { localStorage.setItem('expenseLastAmount_' + state.userId + '_' + recId, value); } catch(e) {}
         if (_expensePriceSaveTimer) clearTimeout(_expensePriceSaveTimer);
         _expensePriceSaveTimer = setTimeout(() => {
-            persistModalTopPrice(state.expenseRecordId, 'expense_unit_price', expenseAmountInput.value);
+            persistModalTopPrice(recId, 'expense_unit_price', value);
         }, 450);
+    }
+
+    function getModalRowLabel(recordId, mode) {
+        let rec = state.records.find(r => r.id === recordId);
+        // 若当前 records 缓存没命中，尝试从当前表格行解析（兜底）
+        if (!rec) {
+            const tr = document.querySelector(`tr[data-id="${recordId}"]`);
+            if (tr) {
+                const raw = tr.dataset.data;
+                if (raw) {
+                    try { rec = { data: JSON.parse(raw) }; } catch (e) { rec = null; }
+                }
+            }
+        }
+        if (!rec || !rec.data) return `#${recordId}`;
+        const isSimple = isSimpleTab();
+        let label = '';
+        if (isSimple) {
+            // 普通标签：显示"备注"内容
+            label = rec.data.remark || '';
+        } else {
+            // 独享/共享标签：
+            // 收入弹窗 → 客户名（客户备注）
+            // 支出弹窗 → IP地址
+            if (mode === 'income') {
+                label = rec.data.client_name || '';
+            } else {
+                label = rec.data.ip_address || '';
+            }
+        }
+        // 空值时显示列标识
+        if (!label) {
+            const colLabel = isSimple ? '备注' : (mode === 'income' ? '客户名' : 'IP地址');
+            label = `#${recordId}（${colLabel}为空）`;
+        }
+        return label;
     }
 
     async function openIncomeModal(recordId) {
@@ -4408,6 +4451,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.incomeRecords = [];
         incomeTotalDisplay.textContent = '0';
         renderIncomeList();
+        // 设置行标识
+        if (incomeModalRow) incomeModalRow.textContent = getModalRowLabel(recordId, 'income');
         // 优先读数据库 record.data.income_unit_price，localStorage 仅作旧数据兜底
         const rec = state.records.find(r => r.id === recordId);
         let savedAmount = '';
@@ -4589,6 +4634,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.expenseRecords = [];
         expenseTotalDisplay.textContent = '0';
         renderExpenseList();
+        // 设置行标识
+        if (expenseModalRow) expenseModalRow.textContent = getModalRowLabel(recordId, 'expense');
         // 优先读数据库 record.data.expense_unit_price，localStorage 仅作旧数据兜底
         const rec = state.records.find(r => r.id === recordId);
         let savedAmount = '';
@@ -4754,6 +4801,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.hostExpenseDetails = [];
         renderHostExpenseList();
         updateHostExpenseTotalDisplay();
+        // 设置行标识
+        if (hostExpenseModalRow) hostExpenseModalRow.textContent = getModalRowLabel(recordId, 'expense');
         const record = state.records.find(r => r.id === recordId);
         if (!record) return;
 
@@ -4926,8 +4975,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
         const oldUnitPrice = parseFloat(record.data.host_expense_unit_price) || 0;
-        const unitPrice = parseFloat(hostExpenseUnitPriceInput.value) || 0;
-        const extra = parseFloat(hostExpenseExtraInput.value) || 0;
+        const rawUnitPrice = hostExpenseUnitPriceInput.value.trim();
+        const unitPrice = rawUnitPrice === '' ? 0 : (parseFloat(rawUnitPrice) || 0);
+        const rawExtra = hostExpenseExtraInput.value.trim();
+        const extra = rawExtra === '' ? 0 : (parseFloat(rawExtra) || 0);
         const remark = hostExpenseRemarkInput.value;
         record.data.host_expense_unit_price = unitPrice;
         record.data.host_expense_extra = extra;
@@ -4998,7 +5049,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function addHostExpenseDetailManually() {
         const record = state.records.find(r => r.id === state.hostExpenseRecordId);
         if (!record) return;
-        const unitPrice = parseFloat(hostExpenseUnitPriceInput.value) || 0;
+        const rawUnitPrice = hostExpenseUnitPriceInput.value.trim();
+        const unitPrice = rawUnitPrice === '' ? NaN : parseFloat(rawUnitPrice);
         if (isNaN(unitPrice) || unitPrice < 0) {
             hostExpenseStatus.textContent = '请先填入有效单价';
             hostExpenseStatus.style.color = '#f56c6c';
@@ -6164,7 +6216,14 @@ document.addEventListener('DOMContentLoaded', function() {
     providerManageBtn.addEventListener('click', openProviderModal);
     closeAddressSuffixModal.addEventListener('click', () => addressSuffixModal.classList.remove('show'));
     closeProviderModal.addEventListener('click', () => providerModal.classList.remove('show'));
-    closeIncomeModal.addEventListener('click', () => incomeModal.classList.remove('show'));
+    // 关闭弹窗前强制落盘单价，避免用户点击 × 时 input 仍聚焦而未触发 blur 导致单价丢失
+    closeIncomeModal.addEventListener('click', () => {
+        if (_incomePriceSaveTimer) { clearTimeout(_incomePriceSaveTimer); _incomePriceSaveTimer = null; }
+        if (state.incomeRecordId) {
+            persistModalTopPrice(state.incomeRecordId, 'income_unit_price', incomeAmountInput.value);
+        }
+        incomeModal.classList.remove('show');
+    });
     closeColumnModal.addEventListener('click', () => columnModal.classList.remove('show'));
     if (addColBtn) addColBtn.addEventListener('click', addColumn);
     closeImport.addEventListener('click', () => importModal.classList.remove('show'));
@@ -6190,7 +6249,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Enter') addIncomeRecord();
     });
 
-    closeExpenseModal.addEventListener('click', () => expenseModal.classList.remove('show'));
+    closeExpenseModal.addEventListener('click', () => {
+        if (_expensePriceSaveTimer) { clearTimeout(_expensePriceSaveTimer); _expensePriceSaveTimer = null; }
+        if (state.expenseRecordId) {
+            persistModalTopPrice(state.expenseRecordId, 'expense_unit_price', expenseAmountInput.value);
+        }
+        expenseModal.classList.remove('show');
+    });
     addExpenseBtn.addEventListener('click', addExpenseRecord);
     // 支出单价：输入+失焦都立即（防抖）持久化到数据库
     expenseAmountInput.addEventListener('input', scheduleExpensePricePersist);
@@ -6203,7 +6268,14 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // 主机支出明细弹窗事件
-    if (closeHostExpenseModal) closeHostExpenseModal.addEventListener('click', () => hostExpenseModal.classList.remove('show'));
+    if (closeHostExpenseModal) closeHostExpenseModal.addEventListener('click', () => {
+        // 关闭主机支出弹窗前强制保存单价、附加
+        if (state.hostExpenseRecordId) {
+            persistModalTopPrice(state.hostExpenseRecordId, 'host_expense_unit_price', hostExpenseUnitPriceInput ? hostExpenseUnitPriceInput.value : '');
+            persistModalTopPrice(state.hostExpenseRecordId, 'host_expense_extra', hostExpenseExtraInput ? hostExpenseExtraInput.value : '');
+        }
+        hostExpenseModal.classList.remove('show');
+    });
     if (addHostExpenseDetailBtn) addHostExpenseDetailBtn.addEventListener('click', addHostExpenseDetailManually);
     if (hostExpenseUnitPriceInput) {
         hostExpenseUnitPriceInput.addEventListener('input', updateHostExpenseTotalDisplay);
