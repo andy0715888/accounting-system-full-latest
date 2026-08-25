@@ -6193,18 +6193,20 @@ document.addEventListener('DOMContentLoaded', function() {
             statsNetProfit.textContent = (result.netProfit >= 0 ? '+' : '') + result.netProfit.toFixed(2);
             statsNetProfit.style.color = result.netProfit >= 0 ? '#2e7d32' : '#c62828';
             statsRecordCount.textContent = result.recordCount;
-            // 利润比显示
+            // 利润率显示（同财务统计：净利/收入，保留1位小数，>=0 positive，<0 negative）
             const wrap = document.getElementById('statsProfitRatioWrap');
             if (wrap && statsProfitRatio) {
-                if (result.profitRatio === null || result.profitRatio === undefined) {
+                const profitRate = result.profitRate;
+                if (profitRate === null || profitRate === undefined) {
                     wrap.style.background = '#f5f5f5';
                     statsProfitRatio.textContent = '—';
                     statsProfitRatio.style.color = '#333';
                 } else {
-                    wrap.style.background = result.profitRatio >= 0 ? '#e8f5e9' : '#ffebee';
-                    const prefix = result.profitRatio > 0 ? '+' : '';
-                    statsProfitRatio.textContent = prefix + result.profitRatio.toFixed(2) + '%';
-                    statsProfitRatio.style.color = result.profitRatio >= 0 ? '#2e7d32' : '#c62828';
+                    const positive = profitRate >= 0;
+                    wrap.style.background = positive ? '#e8f5e9' : '#ffebee';
+                    const prefix = positive ? '+' : '';
+                    statsProfitRatio.textContent = prefix + profitRate.toFixed(1) + '%';
+                    statsProfitRatio.style.color = positive ? '#2e7d32' : '#c62828';
                 }
             }
             incomeExpenseStatsModal.classList.add('show');
@@ -6452,8 +6454,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const ds = window._dragSelect;
         const hasMultiSelection = ds && ds.startRowId && ds.endRowId && ds.startRowId !== ds.endRowId && ds.colKey;
         ctxBatchPaste.style.display = hasMultiSelection ? 'block' : 'none';
-        // 复制选中：只要 state.selectedRows 有勾选就显示
-        ctxCopySelected.style.display = state.selectedRows && state.selectedRows.size > 0 ? 'block' : 'none';
+        // 复制选中：独享/共享/普通标签都始终显示（支持三种"选中"方式）
+        ctxCopySelected.style.display = (isDedicated || isShared || isSimple) ? 'block' : 'none';
 
         contextMenu.style.display = 'block';
         contextMenu.style.left = e.clientX + 'px';
@@ -6986,29 +6988,61 @@ document.addEventListener('DOMContentLoaded', function() {
         if (text) doMultiPaste(ds, text);
     });
 
-    // ===== 右键菜单：复制选中（按表格当前列顺序复制所有勾选行的可见单元格内容为 TSV）=====
+    // ===== 右键菜单：复制选中（按表格当前列顺序复制"选中行"为 TSV）
+    // 选中优先级：
+    //   1) 管理行模式下有勾选 (state.selectedRows) → 复制勾选行
+    //   2) 有拖拽区域选中（window._dragSelect）→ 复制拖拽覆盖的行
+    //   3) 否则 → 复制当前右键点击的行 (contextTargetId)
     ctxCopySelected.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
-        if (!state.selectedRows || state.selectedRows.size === 0) return;
         try {
-            // 当前展示顺序：根据 tbody 的 tr 顺序
-            const rows = [];
+            // Step 1: 确定要复制哪些行（按 tbody 展示顺序）
+            // Collect candidate row IDs in display order (tbody order)
             const tbodyTrs = document.querySelectorAll('#tableBody tr[data-id]');
+            const displayOrderIds = [];
+            const idToTr = new Map();
             tbodyTrs.forEach(tr => {
                 const id = parseInt(tr.dataset.id);
-                if (state.selectedRows.has(id)) rows.push(tr);
+                displayOrderIds.push(id);
+                idToTr.set(id, tr);
             });
+
+            let targetIds = [];
+            // Mode 1: checkboxes (管理行)
+            if (state.selectedRows && state.selectedRows.size > 0) {
+                targetIds = displayOrderIds.filter(id => state.selectedRows.has(id));
+            }
+            // Mode 2: drag selection (window._dragSelect)
+            if (targetIds.length === 0) {
+                const ds = window._dragSelect;
+                if (ds && ds.startRowId != null && ds.endRowId != null) {
+                    const start = ds.startRowId;
+                    const end = ds.endRowId;
+                    const sIdx = displayOrderIds.indexOf(start);
+                    const eIdx = displayOrderIds.indexOf(end);
+                    if (sIdx !== -1 && eIdx !== -1) {
+                        const [lo, hi] = sIdx < eIdx ? [sIdx, eIdx] : [eIdx, sIdx];
+                        for (let i = lo; i <= hi; i++) targetIds.push(displayOrderIds[i]);
+                    }
+                }
+            }
+            // Mode 3: current right-clicked row
+            if (targetIds.length === 0 && contextTargetId) {
+                targetIds = [contextTargetId];
+            }
+            if (targetIds.length === 0) return;
+
+            const rows = [];
+            targetIds.forEach(id => { if (idToTr.has(id)) rows.push(idToTr.get(id)); });
             if (rows.length === 0) return;
 
             // 列顺序：取当前显示的列（有可见的 th 的列）
             const colKeys = [];
             const colHeaders = {};
             document.querySelectorAll('#tableHead th[data-col-key]').forEach(th => {
-                // 跳过仅用于选择框的列
                 const ck = th.dataset.colKey;
                 if (!ck) return;
                 if (ck === '__selector') return;
-                // 跳过已隐藏的列（但 th 一般就只有显示列）
                 colKeys.push(ck);
                 colHeaders[ck] = th.textContent.trim();
             });
@@ -7021,9 +7055,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const td = tr.querySelector(`td.cell[data-col-key="${ck}"]`);
                     if (!td) { cells.push(''); return; }
                     let txt = (td.innerText || td.textContent || '').trim();
-                    // 去掉图标（如 IP 信息的 🔗）和额外后缀
                     txt = txt.replace(/🔗/g, '').trim();
-                    // 替换制表符和换行符
                     txt = txt.replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
                     cells.push(txt);
                 });
@@ -7038,7 +7070,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } catch(e) { ok = false; }
             if (!ok) {
-                // 兜底：创建隐藏 textarea 触发 document.execCommand
                 const ta = document.createElement('textarea');
                 ta.value = tsv;
                 ta.style.position = 'fixed';

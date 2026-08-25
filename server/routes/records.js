@@ -598,7 +598,7 @@ router.get('/stats', requireAuth, async (req, res) => {
             totalIncome: Math.round(totalIncome * 100) / 100,
             totalExpense: Math.round(totalExpense * 100) / 100,
             netProfit: Math.round((totalIncome - totalExpense) * 100) / 100,
-            profitRatio: totalExpense > 0 ? Math.round(((totalIncome - totalExpense) / totalExpense) * 10000) / 100 : null,
+            profitRate: totalIncome > 0 ? Math.round(((totalIncome - totalExpense) / totalIncome) * 1000) / 10 : null,
             recordCount: countedRecords
         });
     } catch (err) {
