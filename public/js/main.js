@@ -108,6 +108,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const statsTotalExpense = $('#statsTotalExpense');
     const statsNetProfit = $('#statsNetProfit');
     const statsRecordCount = $('#statsRecordCount');
+    const statsProfitRatio = $('#statsProfitRatio');
     const cfModalTabName = $('#cfModalTabName');
     const cfColSelect = $('#cfColSelect');
     const cfConditionSelect = $('#cfConditionSelect');
@@ -861,10 +862,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const CLIENT_INHERITED_COLS = new Set(['ip_address', 'password', 'domain', 'remark']);
     // 点击编辑后输入框按内容最大长度显示的列（非编辑时居中，编辑时展开）
     const EXPAND_COLS = new Set(['ip_address', 'password', 'domain', 'remark', 'client_name', 'unit_price']);
-    // 服务器字段：服务商,月数,主机购买时间,主机到期时间,主机剩余天数,IP地址,密码,域名,备注,地址,IP信息
-    const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'ip_info'];
-    // 客户字段：客户购买时间,客户到期时间,客户剩余天数,客户名,单价备注
-    const CLIENT_FIELDS = ['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price'];
+    // 服务器字段：服务商,月数,主机购买时间,主机到期时间,主机剩余天数,IP地址,密码,域名,备注,地址,IP信息 + 弹窗顶部持久化单价
+    const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'expense_unit_price', 'income_unit_price'];
+    // 客户字段：客户购买时间,客户到期时间,客户剩余天数,客户名,单价备注 + 弹窗顶部持久化单价
+    const CLIENT_FIELDS = ['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'income_unit_price'];
     // Client-only columns (only meaningful for client rows, empty/readonly on server rows)
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
@@ -882,6 +883,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const ctxPasteBoth = $('#ctxPasteBoth');
     const ctxDeleteRecord = $('#ctxDeleteRecord');
     const ctxBatchPaste = $('#ctxBatchPaste');
+    const ctxCopySelected = $('#ctxCopySelected');
     const insertMultiRowModal = $('#insertMultiRowModal');
     const closeInsertMultiRowModal = $('#closeInsertMultiRowModal');
     const insertMultiRowCount = $('#insertMultiRowCount');
@@ -6191,6 +6193,20 @@ document.addEventListener('DOMContentLoaded', function() {
             statsNetProfit.textContent = (result.netProfit >= 0 ? '+' : '') + result.netProfit.toFixed(2);
             statsNetProfit.style.color = result.netProfit >= 0 ? '#2e7d32' : '#c62828';
             statsRecordCount.textContent = result.recordCount;
+            // 利润比显示
+            const wrap = document.getElementById('statsProfitRatioWrap');
+            if (wrap && statsProfitRatio) {
+                if (result.profitRatio === null || result.profitRatio === undefined) {
+                    wrap.style.background = '#f5f5f5';
+                    statsProfitRatio.textContent = '—';
+                    statsProfitRatio.style.color = '#333';
+                } else {
+                    wrap.style.background = result.profitRatio >= 0 ? '#e8f5e9' : '#ffebee';
+                    const prefix = result.profitRatio > 0 ? '+' : '';
+                    statsProfitRatio.textContent = prefix + result.profitRatio.toFixed(2) + '%';
+                    statsProfitRatio.style.color = result.profitRatio >= 0 ? '#2e7d32' : '#c62828';
+                }
+            }
             incomeExpenseStatsModal.classList.add('show');
         } catch (err) {
             setStatus('统计失败: ' + err.message);
@@ -6373,16 +6389,15 @@ document.addEventListener('DOMContentLoaded', function() {
         contextTargetId = parseInt(tr.dataset.id);
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
-        // 独享/共享标签：在上方插入一行/多行
-        ctxInsertMultiAbove.style.display = (isDedicated || isShared) ? 'block' : 'none';
-        ctxInsertAbove.style.display = (isDedicated || isShared) ? 'block' : 'none';
+        // 独享/共享/简单标签：在上方插入一行/多行（普通标签也启用）
+        ctxInsertMultiAbove.style.display = (isDedicated || isShared || isSimple) ? 'block' : 'none';
+        ctxInsertAbove.style.display = (isDedicated || isShared || isSimple) ? 'block' : 'none';
 
         const isServerRow = recordType === 'server';
-        const isEmptyRow = targetRec && !targetRec.data.ip_address && !targetRec.data.provider;
-        // 支出列总额（独享/共享用 _hostExpenseTotal，simple用 _expenseTotal）
+        // 空白行判定：支出列总额 = 0 且 收入列总额 = 0（适用于所有标签）
         const expenseTotal = targetRec ? (targetRec._hostExpenseTotal || targetRec._expenseTotal || 0) : 0;
-        // 收入列总额
         const incomeTotal = targetRec ? (targetRec._incomeTotal || 0) : 0;
+        const isEmptyRow = (expenseTotal === 0 && incomeTotal === 0);
 
         if (isDedicated) {
             // ===== 独享标签：3个提取 + 3个粘贴（互斥）=====
@@ -6437,6 +6452,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const ds = window._dragSelect;
         const hasMultiSelection = ds && ds.startRowId && ds.endRowId && ds.startRowId !== ds.endRowId && ds.colKey;
         ctxBatchPaste.style.display = hasMultiSelection ? 'block' : 'none';
+        // 复制选中：只要 state.selectedRows 有勾选就显示
+        ctxCopySelected.style.display = state.selectedRows && state.selectedRows.size > 0 ? 'block' : 'none';
 
         contextMenu.style.display = 'block';
         contextMenu.style.left = e.clientX + 'px';
@@ -6611,11 +6628,20 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!record) return;
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         const isDedicatedTab = tab && tab.tab_type === 'dedicated';
+        // 尝试加载当前记录IP对应的主机信息（端口/用户名），粘贴时复制到目标IP
+        let copiedHostInfo = null;
+        if (record.data && record.data.ip_address) {
+            try {
+                const h = await API.get('/hosts/by-ip/' + encodeURIComponent(record.data.ip_address)).catch(() => null);
+                if (h && h.host) copiedHostInfo = { name: h.name, host: h.host, port: h.port || 22, username: h.username, remark: h.remark };
+            } catch(e) { copiedHostInfo = null; }
+        }
         if (isDedicatedTab) {
-            // 独享标签：提取服务器字段（服务商~IP信息），支出明细通过API迁移
+            // 独享标签：提取服务器字段（服务商~IP信息 + 弹窗单价），支出明细通过API迁移
             const serverData = {};
             SERVER_FIELDS.forEach(k => { serverData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
             state.copiedServerData = serverData;
+            state.copiedServerHostInfo = copiedHostInfo;
             state.copiedServerRecordId = record.id;
             // 互斥：清空其他提取状态
             state.extractedClientData = null;
@@ -6624,16 +6650,17 @@ document.addEventListener('DOMContentLoaded', function() {
             $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
             const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
             if (tr) tr.classList.add('cut-pending');
-            setStatus('服务器信息已提取 ✂️，请在支出列为0的行右键粘贴');
+            setStatus('本行信息已提取 ✂️，请在支出列为0的行右键粘贴');
         } else {
-            // 共享/简单标签：原有逻辑
+            // 共享/简单标签：原有逻辑，同时保存主机端口/用户名
             var hostTotal = record._hostExpenseTotal || 0;
             if (hostTotal === 0) {
                 if (!await showConfirm('当前0支出,确定剪切吗?')) return;
             }
             state.copiedServerData = { ...record.data };
+            state.copiedServerHostInfo = copiedHostInfo;
             state.copiedServerRecordId = record.id;
-            setStatus('服务器信息已提取，可在空白行右键粘贴（原行支出将清零）');
+            setStatus('本行信息已提取，可在空白行右键粘贴（原行支出将清零）');
         }
     });
 
@@ -6679,8 +6706,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateData[k] = state.copiedServerData[k] !== undefined ? state.copiedServerData[k] : '';
                 });
             } else {
-                // 共享/简单标签：原有逻辑（写所有服务器相关字段）
-                const OLD_SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'fee'];
+                // 共享/简单标签：写所有服务器相关字段（含单价持久化字段）
+                const OLD_SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'fee', 'income_unit_price', 'expense_unit_price'];
                 OLD_SERVER_FIELDS.forEach(k => {
                     const val = state.copiedServerData[k];
                     updateData[k] = val !== undefined && val !== null ? val : '';
@@ -6718,7 +6745,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             await API.put('/records/' + contextTargetId, { data: updateData });
+            // 把提取到的 IP 弹窗端口/用户名信息同步写入目标 IP 对应的 hosts 记录（持久化入库）
+            if (state.copiedServerHostInfo && updateData.ip_address && updateData.ip_address !== '') {
+                try {
+                    await API.post('/hosts/upsert-by-ip', {
+                        name: state.copiedServerHostInfo.name || updateData.ip_address,
+                        host: updateData.ip_address,
+                        port: state.copiedServerHostInfo.port || 22,
+                        username: state.copiedServerHostInfo.username || '',
+                        remark: state.copiedServerHostInfo.remark || ''
+                    }).catch(() => {});
+                } catch(e) {}
+            }
             state.copiedServerData = null;
+            state.copiedServerHostInfo = null;
             state.copiedServerRecordId = null;
             $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
             await loadRecords(state.currentTabId);
@@ -6809,22 +6849,31 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // ===== 独享标签：提取/粘贴 服务器+客户信息 =====
-    ctxExtractBoth.addEventListener('click', () => {
+    ctxExtractBoth.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
         if (!contextTargetId) return;
         const record = state.records.find(r => r.id === contextTargetId);
         if (!record) return;
-        // 提取服务器字段+客户字段（整行所有信息）
+        // 提取服务器字段+客户字段（整行所有信息），同时尝试加载IP对应的主机信息
+        let copiedHostInfo = null;
+        if (record.data && record.data.ip_address) {
+            try {
+                const h = await API.get('/hosts/by-ip/' + encodeURIComponent(record.data.ip_address)).catch(() => null);
+                if (h && h.host) copiedHostInfo = { name: h.name, host: h.host, port: h.port || 22, username: h.username, remark: h.remark };
+            } catch(e) { copiedHostInfo = null; }
+        }
         const bothData = {};
         SERVER_FIELDS.forEach(k => { bothData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
         CLIENT_FIELDS.forEach(k => { bothData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
         state.extractedBothData = {
             recordId: record.id,
             tabId: state.currentTabId,
-            data: bothData
+            data: bothData,
+            hostInfo: copiedHostInfo
         };
         // 互斥：清空其他提取状态
         state.copiedServerData = null;
+        state.copiedServerHostInfo = null;
         state.copiedServerRecordId = null;
         state.extractedClientData = null;
         state.copiedClientRecordId = null;
@@ -6863,6 +6912,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateData[k] = src.data[k] !== undefined ? src.data[k] : '';
             });
             await API.put('/records/' + contextTargetId, { data: updateData });
+            // 2.1 把提取到的 IP 弹窗端口/用户名信息同步写入目标 IP 对应的 hosts 记录
+            if (src.hostInfo && updateData.ip_address && updateData.ip_address !== '') {
+                try {
+                    await API.post('/hosts/upsert-by-ip', {
+                        name: src.hostInfo.name || updateData.ip_address,
+                        host: updateData.ip_address,
+                        port: src.hostInfo.port || 22,
+                        username: src.hostInfo.username || '',
+                        remark: src.hostInfo.remark || ''
+                    }).catch(() => {});
+                } catch(e) {}
+            }
             // 3. 清空原行所有服务器+客户字段（移动语义）
             if (src.recordId !== contextTargetId) {
                 const srcRec = state.records.find(r => r.id === src.recordId);
@@ -6923,6 +6984,72 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         if (text) doMultiPaste(ds, text);
+    });
+
+    // ===== 右键菜单：复制选中（按表格当前列顺序复制所有勾选行的可见单元格内容为 TSV）=====
+    ctxCopySelected.addEventListener('click', async () => {
+        contextMenu.style.display = 'none';
+        if (!state.selectedRows || state.selectedRows.size === 0) return;
+        try {
+            // 当前展示顺序：根据 tbody 的 tr 顺序
+            const rows = [];
+            const tbodyTrs = document.querySelectorAll('#tableBody tr[data-id]');
+            tbodyTrs.forEach(tr => {
+                const id = parseInt(tr.dataset.id);
+                if (state.selectedRows.has(id)) rows.push(tr);
+            });
+            if (rows.length === 0) return;
+
+            // 列顺序：取当前显示的列（有可见的 th 的列）
+            const colKeys = [];
+            const colHeaders = {};
+            document.querySelectorAll('#tableHead th[data-col-key]').forEach(th => {
+                // 跳过仅用于选择框的列
+                const ck = th.dataset.colKey;
+                if (!ck) return;
+                if (ck === '__selector') return;
+                // 跳过已隐藏的列（但 th 一般就只有显示列）
+                colKeys.push(ck);
+                colHeaders[ck] = th.textContent.trim();
+            });
+            if (colKeys.length === 0) return;
+
+            const lines = [colKeys.map(k => colHeaders[k] || k).join('\t')];
+            rows.forEach(tr => {
+                const cells = [];
+                colKeys.forEach(ck => {
+                    const td = tr.querySelector(`td.cell[data-col-key="${ck}"]`);
+                    if (!td) { cells.push(''); return; }
+                    let txt = (td.innerText || td.textContent || '').trim();
+                    // 去掉图标（如 IP 信息的 🔗）和额外后缀
+                    txt = txt.replace(/🔗/g, '').trim();
+                    // 替换制表符和换行符
+                    txt = txt.replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+                    cells.push(txt);
+                });
+                lines.push(cells.join('\t'));
+            });
+            const tsv = lines.join('\n');
+            let ok = false;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(tsv);
+                    ok = true;
+                }
+            } catch(e) { ok = false; }
+            if (!ok) {
+                // 兜底：创建隐藏 textarea 触发 document.execCommand
+                const ta = document.createElement('textarea');
+                ta.value = tsv;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                try { ok = document.execCommand('copy'); } catch(e) { ok = false; }
+                document.body.removeChild(ta);
+            }
+            setStatus(ok ? `已复制 ${rows.length} 行到剪贴板` : '复制失败，请手动选择后 Ctrl+C');
+        } catch (err) { setStatus('复制失败: ' + err.message); }
     });
 
     async function addRowClient(parentId) {

@@ -133,6 +133,58 @@ router.get('/by-ip/:ip', requireAuth, async (req, res) => {
     }
 });
 
+// 按IP地址 upsert 主机（用于服务器信息提取/粘贴时复制端口/用户名）
+router.post('/upsert-by-ip', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        let { name, host, port, username, password, remark } = req.body || {};
+        if (!host) return res.status(400).json({ error: '缺少 host(IP)' });
+        const existing = await queryOne(
+            'SELECT id FROM hosts WHERE user_id = ? AND host = ? ORDER BY id DESC LIMIT 1',
+            [userId, host]
+        );
+        if (existing) {
+            // 有就更新（仅当提供了相应字段）
+            const updates = [];
+            const params = [];
+            if (name !== undefined) { updates.push('name = ?'); params.push(name || host); }
+            if (port !== undefined) { updates.push('port = ?'); params.push(port || 22); }
+            if (username !== undefined && username !== '') { updates.push('username = ?'); params.push(username); }
+            if (remark !== undefined) { updates.push('remark = ?'); params.push(remark || null); }
+            if (password !== undefined && password !== '') {
+                updates.push('password = ?'); params.push(encrypt(password));
+            }
+            if (updates.length > 0) {
+                await execute(`UPDATE hosts SET ${updates.join(', ')} WHERE id = ?`, [...params, existing.id]);
+            }
+            logAudit(userId, 'host_upsert_ip', `更新主机记录 IP=${host}`);
+            res.json({ success: true, id: existing.id, action: 'update' });
+        } else {
+            // 没有就插入（用户名必填，否则跳过）
+            if (!username) {
+                res.json({ success: true, id: null, action: 'skip', reason: 'no username' });
+                return;
+            }
+            const order = 0;
+            try {
+                await execute('UPDATE hosts SET sort_order = sort_order + 1 WHERE user_id = ?', [userId]);
+            } catch(e) {}
+            const result = await execute(`
+                INSERT INTO hosts (user_id, name, host, port, username, password, remark, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                userId, name || host, host, port || 22, username,
+                encrypt(password || null), remark || null, order
+            ]);
+            logAudit(userId, 'host_upsert_ip', `创建主机记录 IP=${host}`);
+            res.json({ success: true, id: result.lastID, action: 'insert' });
+        }
+    } catch (err) {
+        console.error('按IP upsert 主机错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 router.post('/:id/favorite', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
