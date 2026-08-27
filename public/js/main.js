@@ -6377,6 +6377,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- 右键菜单（共享标签：添加客户/删除行） ---
     let contextTargetId = null;
+    let contextTargetColKey = null; // 右键点击所在列的 col_key（用于"复制选中"兜底复制单元格值）
 
     document.addEventListener('contextmenu', function(e) {
         const tr = e.target.closest('tr[data-id]');
@@ -6390,6 +6391,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
         e.preventDefault();
         contextTargetId = parseInt(tr.dataset.id);
+        // 解析右键点击所在列的 col_key（通过 td 在 tr 中的索引对齐 thead th 的 data-col）
+        contextTargetColKey = null;
+        try {
+            const clickedTd = e.target.closest('td');
+            if (clickedTd && tr.contains(clickedTd)) {
+                const tdIdx = Array.prototype.indexOf.call(tr.children, clickedTd);
+                const ths = document.querySelectorAll('#tableHead tr th');
+                if (ths[tdIdx]) contextTargetColKey = ths[tdIdx].dataset.col || null;
+            }
+        } catch (err) { contextTargetColKey = null; }
         const recordType = tr.dataset.type || 'server';
         const targetRec = state.records.find(r => r.id === contextTargetId);
         // 独享/共享/简单标签：在上方插入一行/多行（普通标签也启用）
@@ -7036,108 +7047,98 @@ document.addEventListener('DOMContentLoaded', function() {
         if (text) doMultiPaste(ds, text);
     });
 
-    // ===== 右键菜单：复制选中（按表格当前列顺序复制"选中行"为 TSV）
+    // ===== 右键菜单：复制选中（只复制"用户实际选中"的内容，而非整行所有列）
     // 选中优先级：
-    //   1) 管理行模式下有勾选 (state.selectedRows) → 复制勾选行
-    //   2) 有拖拽区域选中（window._dragSelect）→ 复制拖拽覆盖的行
-    //   3) 否则 → 复制当前右键点击的行 (contextTargetId)
+    //   1) 浏览器原生选中文本（用户在输入框里选中了部分文字）→ 复制选中文本
+    //   2) 拖拽区域选中（window._dragSelect，某列多行）→ 只复制选中列的单元格值（一列，用换行分隔）
+    //   3) 右键点击的单元格（contextTargetId + contextTargetColKey）→ 复制该单元格值
     ctxCopySelected.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
         setStatus('复制选中: 正在处理...');
-        try {
-            // Step 1: 确定要复制哪些行（按 tbody 展示顺序）
-            // Collect candidate row IDs in display order (tbody order)
-            const tbodyTrs = document.querySelectorAll('#tableBody tr[data-id]');
-            const displayOrderIds = [];
-            const idToTr = new Map();
-            tbodyTrs.forEach(tr => {
-                const id = parseInt(tr.dataset.id);
-                displayOrderIds.push(id);
-                idToTr.set(id, tr);
-            });
-
-            let targetIds = [];
-            // Mode 1: checkboxes (管理行)
-            if (state.selectedRows && state.selectedRows.size > 0) {
-                targetIds = displayOrderIds.filter(id => state.selectedRows.has(id));
-            }
-            // Mode 2: drag selection (window._dragSelect)
-            if (targetIds.length === 0) {
-                const ds = window._dragSelect;
-                if (ds && ds.startRowId != null && ds.endRowId != null) {
-                    const start = ds.startRowId;
-                    const end = ds.endRowId;
-                    const sIdx = displayOrderIds.indexOf(start);
-                    const eIdx = displayOrderIds.indexOf(end);
-                    if (sIdx !== -1 && eIdx !== -1) {
-                        const [lo, hi] = sIdx < eIdx ? [sIdx, eIdx] : [eIdx, sIdx];
-                        for (let i = lo; i <= hi; i++) targetIds.push(displayOrderIds[i]);
-                    }
-                }
-            }
-            // Mode 3: current right-clicked row
-            if (targetIds.length === 0 && contextTargetId) {
-                targetIds = [contextTargetId];
-            }
-            console.log('[COPY] targetIds:', JSON.stringify(targetIds), 'contextTargetId:', contextTargetId, 'displayOrderIds:', JSON.stringify(displayOrderIds));
-            if (targetIds.length === 0) {
-                setStatus('复制失败: 未选中行（请先右键点击一行或开启管理行模式）');
-                return;
-            }
-
-            const rows = [];
-            targetIds.forEach(id => { if (idToTr.has(id)) rows.push(idToTr.get(id)); });
-            if (rows.length === 0) { setStatus('复制失败: 找不到行元素'); return; }
-
-            // 列顺序：遍历 thead 所有 th（含选择器列），用真实索引映射到 td，
-            // 这样行管理模式下选择器列不会造成列错位。
-            const colSpecs = []; // { idx, key, header }
-            const allThs = document.querySelectorAll('#tableHead th');
-            allThs.forEach((th, idx) => {
-                const ck = th.dataset.col || '';
-                if (!ck || ck === '__selector') return; // 无列键或选择器列 → 跳过（但仍占 idx）
-                colSpecs.push({ idx: idx, key: ck, header: th.textContent.trim() });
-            });
-            if (colSpecs.length === 0) { setStatus('复制失败: 找不到列信息'); return; }
-
-            const lines = [colSpecs.map(s => s.header || s.key).join('\t')];
-            rows.forEach(tr => {
-                const cells = [];
-                const tds = tr.querySelectorAll('td');
-                colSpecs.forEach(s => {
-                    const td = tds[s.idx];
-                    if (!td) { cells.push(''); return; }
-                    let txt = (td.innerText || td.textContent || '').trim();
-                    txt = txt.replace(/🔗/g, '').trim();
-                    txt = txt.replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
-                    cells.push(txt);
-                });
-                lines.push(cells.join('\t'));
-            });
-            const tsv = lines.join('\n');
+        // 写入剪贴板的辅助函数（优先 textarea+execCommand，兼容 HTTP；失败回退 navigator.clipboard）
+        async function writeClipboard(text) {
             let ok = false;
-            // 优先用 textarea + execCommand('copy')，兼容非 HTTPS 环境（HTTP 访问时 navigator.clipboard 不可用）
             try {
                 const ta = document.createElement('textarea');
-                ta.value = tsv;
+                ta.value = text;
                 ta.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;';
                 document.body.appendChild(ta);
                 ta.focus();
                 ta.select();
-                ta.setSelectionRange(0, tsv.length);
+                ta.setSelectionRange(0, text.length);
                 ok = document.execCommand('copy');
                 document.body.removeChild(ta);
-            } catch(e) { ok = false; }
-            // 如果 execCommand 失败，再尝试 navigator.clipboard（HTTPS / localhost 下可用）
+            } catch (e) { ok = false; }
             if (!ok) {
                 try {
                     if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(tsv);
+                        await navigator.clipboard.writeText(text);
                         ok = true;
                     }
-                } catch(e) { ok = false; }
+                } catch (e) { ok = false; }
             }
-            setStatus(ok ? `已复制 ${rows.length} 行到剪贴板` : '复制失败，请手动选择后 Ctrl+C');
+            return ok;
+        }
+
+        // 从某个 record 的某个 colKey 读出显示值（与已有 copy 监听器口径一致）
+        function readCellValue(rowId, colKey) {
+            // 先尝试从正在编辑的输入框读当前值
+            try {
+                if (colKey === 'password') {
+                    const cell = document.querySelector(`.password-cell[data-id="${rowId}"][data-col="${colKey}"]`);
+                    if (cell) {
+                        const input = cell.querySelector('.password-input');
+                        if (input && input.style.display !== 'none') return input.value || '';
+                    }
+                }
+                const input = document.querySelector(`input.cell-input[data-col="${colKey}"][data-id="${rowId}"]`);
+                if (input && document.activeElement === input) return input.value || '';
+            } catch (e) {}
+            const rec = state.records.find(r => r.id === rowId);
+            return rec && rec.data ? (rec.data[colKey] != null ? String(rec.data[colKey]) : '') : '';
+        }
+
+        try {
+            // 1) 浏览器原生选中文本
+            const sel = window.getSelection();
+            const nativeText = sel ? sel.toString() : '';
+            if (nativeText && nativeText.trim()) {
+                const ok = await writeClipboard(nativeText);
+                setStatus(ok ? '已复制选中文本到剪贴板' : '复制失败，请手动 Ctrl+C');
+                return;
+            }
+
+            // 2) 拖拽选中（某列多行）→ 只复制选中列的单元格值
+            const ds = window._dragSelect;
+            if (ds && ds.colKey && ds.startRowId != null && ds.endRowId != null) {
+                const tbodyTrs = document.querySelectorAll('#tableBody tr[data-id]');
+                const order = [];
+                tbodyTrs.forEach(tr => order.push(parseInt(tr.dataset.id)));
+                const sIdx = order.indexOf(ds.startRowId);
+                const eIdx = order.indexOf(ds.endRowId);
+                if (sIdx !== -1 && eIdx !== -1) {
+                    const [lo, hi] = sIdx < eIdx ? [sIdx, eIdx] : [eIdx, sIdx];
+                    const values = [];
+                    for (let i = lo; i <= hi; i++) {
+                        values.push(readCellValue(order[i], ds.colKey));
+                    }
+                    if (values.length > 0) {
+                        const ok = await writeClipboard(values.join('\n'));
+                        setStatus(ok ? `已复制 ${values.length} 个值到剪贴板` : '复制失败，请手动 Ctrl+C');
+                        return;
+                    }
+                }
+            }
+
+            // 3) 兜底：右键点击的单元格值
+            if (contextTargetId && contextTargetColKey) {
+                const v = readCellValue(contextTargetId, contextTargetColKey);
+                const ok = await writeClipboard(v || '');
+                setStatus(ok ? '已复制单元格值到剪贴板' : '复制失败，请手动 Ctrl+C');
+                return;
+            }
+
+            setStatus('复制失败: 未选中具体内容（请先选中文字、拖拽选中单元格或右键点击单元格）');
         } catch (err) { setStatus('复制失败: ' + err.message); }
     });
 
