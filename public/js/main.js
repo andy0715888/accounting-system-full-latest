@@ -6164,6 +6164,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 按刷新键：清除剪切/提取的服务器/客户信息（用户要求：剪切后不想粘贴了按刷新清除）
         state.copiedServerData = null;
         state.copiedServerRecordId = null;
+        state.copiedServerIsSimpleCut = false;
         state.copiedClientRecordId = null;
         state.extractedClientData = null;
         state.extractedBothData = null;
@@ -6396,10 +6397,27 @@ document.addEventListener('DOMContentLoaded', function() {
         ctxInsertAbove.style.display = (isDedicated || isShared || isSimple) ? 'block' : 'none';
 
         const isServerRow = recordType === 'server';
-        // 空白行判定：支出列总额 = 0 且 收入列总额 = 0（适用于所有标签）
+        // 动态切换服务器菜单项文本（独享/共享 → 服务器信息；普通 → 本行信息）
+        if (isSimple) {
+            ctxCopyServer.textContent = '✂️ 提取本行信息';
+            ctxPasteServer.textContent = '📌 粘贴本行信息';
+        } else {
+            ctxCopyServer.textContent = '✂️ 提取服务器信息';
+            ctxPasteServer.textContent = '📌 粘贴服务器信息';
+        }
+        // 空白行判定：
+        //   独享：支出列总额 = 0
+        //   共享：共享空白按收支 = 0（不变）
+        //   普通：支出列=0 且 收入列=0 且 备注为空（用户要求：备注/支出/收入 都是0）
         const expenseTotal = targetRec ? (targetRec._hostExpenseTotal || targetRec._expenseTotal || 0) : 0;
         const incomeTotal = targetRec ? (targetRec._incomeTotal || 0) : 0;
-        const isEmptyRow = (expenseTotal === 0 && incomeTotal === 0);
+        const remark = targetRec && targetRec.data ? (targetRec.data.remark || '').trim() : '';
+        let isEmptyRow;
+        if (isSimple) {
+            isEmptyRow = (expenseTotal === 0 && incomeTotal === 0 && remark === '');
+        } else {
+            isEmptyRow = (expenseTotal === 0 && incomeTotal === 0);
+        }
 
         if (isDedicated) {
             // ===== 独享标签：3个提取 + 3个粘贴（互斥）=====
@@ -6630,6 +6648,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!record) return;
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         const isDedicatedTab = tab && tab.tab_type === 'dedicated';
+        const isSimpleTab = tab && tab.tab_type === 'simple';
         // 尝试加载当前记录IP对应的主机信息（端口/用户名），粘贴时复制到目标IP
         let copiedHostInfo = null;
         if (record.data && record.data.ip_address) {
@@ -6654,15 +6673,34 @@ document.addEventListener('DOMContentLoaded', function() {
             if (tr) tr.classList.add('cut-pending');
             setStatus('本行信息已提取 ✂️，请在支出列为0的行右键粘贴');
         } else {
-            // 共享/简单标签：原有逻辑，同时保存主机端口/用户名
-            var hostTotal = record._hostExpenseTotal || 0;
-            if (hostTotal === 0) {
-                if (!await showConfirm('当前0支出,确定剪切吗?')) return;
+            // 共享标签：原有逻辑（只剪切服务器字段，迁移支出明细）
+            // 普通标签：剪切整行——备注 + 所有支出明细 + 所有收入明细（用户要求"剪切"语义）
+            if (isSimpleTab) {
+                // 普通：剪切所有字段 + 迁移收入+支出明细（类似 ctxExtractBoth）
+                state.copiedServerData = { ...record.data };
+                state.copiedServerHostInfo = copiedHostInfo;
+                state.copiedServerRecordId = record.id;
+                state.copiedServerIsSimpleCut = true; // 标记：是普通标签的"全量剪切"
+                // 互斥：清空其他提取状态
+                state.extractedClientData = null;
+                state.extractedBothData = null;
+                state.copiedClientRecordId = null;
+                $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
+                const tr = document.querySelector(`tr[data-id="${contextTargetId}"]`);
+                if (tr) tr.classList.add('cut-pending');
+                setStatus('本行信息已提取 ✂️（含备注+支出+收入明细），请在空白行（备注/支出/收入均为0）右键粘贴');
+            } else {
+                // 共享标签：原有逻辑
+                var hostTotal = record._hostExpenseTotal || 0;
+                if (hostTotal === 0) {
+                    if (!await showConfirm('当前0支出,确定剪切吗?')) return;
+                }
+                state.copiedServerData = { ...record.data };
+                state.copiedServerHostInfo = copiedHostInfo;
+                state.copiedServerRecordId = record.id;
+                state.copiedServerIsSimpleCut = false;
+                setStatus('服务器信息已提取，可在支出列为0的行右键粘贴');
             }
-            state.copiedServerData = { ...record.data };
-            state.copiedServerHostInfo = copiedHostInfo;
-            state.copiedServerRecordId = record.id;
-            setStatus('本行信息已提取，可在空白行右键粘贴（原行支出将清零）');
         }
     });
 
@@ -6673,6 +6711,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!targetRecord) return;
         const tab = state.tabs.find(t => t.id === state.currentTabId);
         const isDedicatedTab = tab && tab.tab_type === 'dedicated';
+        const isSimpleTab = tab && tab.tab_type === 'simple';
+        const isSimpleCut = !!state.copiedServerIsSimpleCut;
         if (isDedicatedTab) {
             // 独享标签：粘贴条件是支出列为0
             const expTotal = targetRecord._hostExpenseTotal || targetRecord._expenseTotal || 0;
@@ -6680,9 +6720,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 setStatus('粘贴失败：目标行支出列不为0');
                 return;
             }
+        } else if (isSimpleTab || isSimpleCut) {
+            // 普通标签：空白行判定 = 支出0 + 收入0 + 备注为空（必须同时满足）
+            const expTotal = targetRecord._hostExpenseTotal || targetRecord._expenseTotal || 0;
+            const incTotal = targetRecord._incomeTotal || 0;
+            const remark = (targetRecord.data && targetRecord.data.remark ? targetRecord.data.remark : '').trim();
+            if (expTotal !== 0 || incTotal !== 0 || remark !== '') {
+                setStatus('粘贴失败：目标行不是空白行（支出/收入/备注必须都为0）');
+                return;
+            }
         }
         try {
-            setStatus('粘贴服务器信息中...');
+            setStatus(isSimpleTab ? '粘贴本行信息中...' : '粘贴服务器信息中...');
             const sourceId = state.copiedServerRecordId;
             // 跨标签：找出剪切来源记录所在的 tabId（不是当前 tab 时，粘贴后需要刷新来源 tab 的数据）
             let sourceTabId = null;
@@ -6690,7 +6739,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 const srcInCurrent = state.records.find(r => r.id === sourceId);
                 if (srcInCurrent) sourceTabId = state.currentTabId;
                 else {
-                    // 在所有 tab 的缓存里找
                     for (const t of state.tabs) {
                         const cache = state.tabRecordCache && state.tabRecordCache[t.id];
                         if (cache && Array.isArray(cache) && cache.some(r => r.id === sourceId)) {
@@ -6698,7 +6746,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             break;
                         }
                     }
-                    if (!sourceTabId) sourceTabId = null; // 找不到就不强求刷新
+                    if (!sourceTabId) sourceTabId = null;
                 }
             }
             const updateData = { ...targetRecord.data };
@@ -6707,8 +6755,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 SERVER_FIELDS.forEach(k => {
                     updateData[k] = state.copiedServerData[k] !== undefined ? state.copiedServerData[k] : '';
                 });
+            } else if (isSimpleTab || isSimpleCut) {
+                // 普通标签的全量剪切：把所有字段原样写入（包含 remark、所有单价、IP、收入 display fee、支出 display expense）
+                Object.keys(state.copiedServerData).forEach(k => {
+                    updateData[k] = state.copiedServerData[k] !== undefined && state.copiedServerData[k] !== null ? state.copiedServerData[k] : '';
+                });
             } else {
-                // 共享/简单标签：写所有服务器相关字段（含单价持久化字段）
+                // 共享标签：写 OLD_SERVER_FIELDS
                 const OLD_SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'expense', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'fee', 'income_unit_price', 'expense_unit_price'];
                 OLD_SERVER_FIELDS.forEach(k => {
                     const val = state.copiedServerData[k];
@@ -6718,36 +6771,49 @@ document.addEventListener('DOMContentLoaded', function() {
             // 迁移支出明细
             if (sourceId && sourceId !== contextTargetId) {
                 try { await API.post('/host-expense/move', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
-                // 清空原行：共享/简单标签需要把原行 expense 显示清零（即使是跨标签也调用 API 清 display field）
-                if (!isDedicatedTab) {
+                // 普通标签全量剪切：同时迁移收入明细
+                if (isSimpleTab || isSimpleCut) {
+                    try { await API.post('/income/migrate', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
+                }
+                // 清空原行
+                if (isDedicatedTab) {
+                    // 独享标签：清空所有服务器字段
                     try {
-                        // 先尝试从当前内存里找，找不到也没关系，直接用 record API 拉原行再写回去
+                        const srcRec = state.records.find(r => r.id === sourceId);
+                        if (srcRec) {
+                            const clearData = { ...srcRec.data };
+                            SERVER_FIELDS.forEach(k => { clearData[k] = ''; });
+                            await API.put('/records/' + sourceId, { data: clearData });
+                        }
+                    } catch(e) {}
+                } else if (isSimpleTab || isSimpleCut) {
+                    // 普通标签全量剪切：清空原行所有关键字段（remark + expense display + fee display + 单价）
+                    try {
+                        let sourceData;
+                        const srcRec = state.records.find(r => r.id === sourceId);
+                        if (srcRec) {
+                            sourceData = { ...srcRec.data, remark: '', expense: '0', fee: '' };
+                        } else {
+                            sourceData = { remark: '', expense: '0', fee: '' };
+                        }
+                        await API.put('/records/' + sourceId, { data: sourceData });
+                    } catch(e) {}
+                } else {
+                    // 共享标签：只清 expense display
+                    try {
                         const srcRec = state.records.find(r => r.id === sourceId);
                         let sourceData;
                         if (srcRec) {
                             sourceData = { ...srcRec.data, expense: '0' };
                         } else {
-                            // 跨标签：获取当前 source 记录完整 data 再更新 expense 字段
-                            try {
-                                const r = await API.get('/records/single/' + sourceId).catch(async () => {
-                                    // 没有 single 接口时，查询所有 tab 的记录兜底（逐 tab 扫描成本高，就只写 expense=0 加上之前 copiedServerData 里其他字段）
-                                    return null;
-                                });
-                                if (r && r.data) {
-                                    sourceData = { ...r.data, expense: '0' };
-                                }
-                            } catch(e) { sourceData = null; }
-                            // 兜底：用之前 copiedServerData 写回 expense=0
-                            if (!sourceData) {
-                                sourceData = { ...state.copiedServerData, expense: '0' };
-                            }
+                            sourceData = { ...state.copiedServerData, expense: '0' };
                         }
                         await API.put('/records/' + sourceId, { data: sourceData });
                     } catch(e) {}
                 }
             }
             await API.put('/records/' + contextTargetId, { data: updateData });
-            // 把提取到的 IP 弹窗端口/用户名信息同步写入目标 IP 对应的 hosts 记录（持久化入库）
+            // 把提取到的 IP 弹窗端口/用户名信息同步写入目标 IP 对应的 hosts 记录
             if (state.copiedServerHostInfo && updateData.ip_address && updateData.ip_address !== '') {
                 try {
                     await API.post('/hosts/upsert-by-ip', {
@@ -6762,20 +6828,16 @@ document.addEventListener('DOMContentLoaded', function() {
             state.copiedServerData = null;
             state.copiedServerHostInfo = null;
             state.copiedServerRecordId = null;
+            state.copiedServerIsSimpleCut = false;
             $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
             renderTable(false);
-            // 跨标签：刷新来源 tab 的缓存，保证用户切回去时数据已更新
             if (sourceTabId && sourceTabId !== state.currentTabId) {
-                updateTabCache(sourceTabId); // 旧缓存标记失效
-                try {
-                    const invalidate = window.invalidateCurrentTabCache || (() => {});
-                    invalidate(sourceTabId);
-                } catch(e) {}
-                setStatus('服务器信息已粘贴 ✓（跨标签：来源标签已刷新缓存）');
+                updateTabCache(sourceTabId);
+                setStatus((isSimpleTab ? '本行信息' : '服务器信息') + '已粘贴 ✓（跨标签：来源标签已刷新缓存）');
             } else {
-                setStatus('服务器信息已粘贴 ✓');
+                setStatus((isSimpleTab ? '本行信息' : '服务器信息') + '已粘贴 ✓');
             }
         } catch (err) { setStatus('粘贴失败: ' + err.message); }
     });
@@ -6877,6 +6939,7 @@ document.addEventListener('DOMContentLoaded', function() {
         state.copiedServerData = null;
         state.copiedServerHostInfo = null;
         state.copiedServerRecordId = null;
+        state.copiedServerIsSimpleCut = false;
         state.extractedClientData = null;
         state.copiedClientRecordId = null;
         $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
@@ -12772,18 +12835,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 td.setAttribute('style', tdStyle);
             });
 
-            // ------- 第 2 步：放到临时容器中，让浏览器实际渲染 -------
-            const padding = 16;
+            // ------- 第 2 步：放到临时容器中测量，再统一添加四周等距 padding -------
+            const padding = 24; // 四周统一空隙（比之前稍大，确保视觉明显）
             const tmpContainer = document.createElement('div');
-            tmpContainer.style.cssText = `position:absolute;left:-99999px;top:-99999px;background:#fff;padding:${padding}px;display:inline-block;`;
+            tmpContainer.style.cssText = `position:absolute;left:-99999px;top:-99999px;background:#fff;display:inline-block;box-sizing:content-box;overflow:hidden;`;
             tmpContainer.appendChild(clone);
             document.body.appendChild(tmpContainer);
 
             await new Promise(r => requestAnimationFrame(() => r()));
             await new Promise(r => requestAnimationFrame(() => r()));
 
-            const totalW = Math.ceil(tmpContainer.getBoundingClientRect().width);
-            const totalH = Math.ceil(tmpContainer.getBoundingClientRect().height);
+            // 先测出纯表格尺寸，再加上四周等距 padding，彻底避免 box-sizing 不对称
+            const cloneW = Math.ceil(clone.getBoundingClientRect().width);
+            const cloneH = Math.ceil(clone.getBoundingClientRect().height);
+            const totalW = cloneW + padding * 2;
+            const totalH = cloneH + padding * 2;
 
             // ------- 第 3 步：显式断言用户设置的关键样式（在 getComputedStyle 之前！） -------
             // 关键：必须在 getComputedStyle 之前执行，因为 Step 3 会删除 data-row-id / data-col-id 属性
@@ -12953,7 +13019,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // ------- 第 5 步：XMLSerializer → SVG foreignObject -------
             const xml = new XMLSerializer().serializeToString(clone);
 
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${totalW}px;height:${totalH}px;display:inline-block;background:#fff;padding:${padding}px;box-sizing:border-box;">${xml}</div></foreignObject></svg>`;
+            // ★ 关键修复：foreignObject 和 div 都用显式 px 宽高 + box-sizing:border-box
+            // padding 四周都用同一个变量保证对称，避免只左/上有间隙的问题
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}"><foreignObject width="${totalW}" height="${totalH}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${totalW}px;height:${totalH}px;display:block;background:#fff;padding:${padding}px;box-sizing:border-box;overflow:hidden;">${xml}</div></foreignObject></svg>`;
 
             const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 
