@@ -6771,9 +6771,12 @@ document.addEventListener('DOMContentLoaded', function() {
             // 迁移支出明细（把原行"支出列弹窗"里所有明细移动到目标行——这是剪切语义的核心）
             if (sourceId && sourceId !== contextTargetId) {
                 try { await API.post('/host-expense/move', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
-                // 普通标签全量剪切：同时迁移收入明细（用户要求：备注、支出、收入 三部分都要真正"剪切走"）
+                // 普通标签全量剪切：同时迁移收入明细和支出记录（expense_records）
+                // ★ 普通标签的"支出列"显示的是 expense_records 表的汇总（_expenseTotal），
+                //   不是 host_expense_details，所以必须迁移 expense_records 才能把支出列真正搬走
                 if (isSimpleTab || isSimpleCut) {
                     try { await API.post('/income/migrate', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
+                    try { await API.post('/expense/migrate', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
                 }
                 // 清空原行：只做"用户要求的最小清除"，其他信息保留不删（用户自行审核后手动清除）
                 if (isDedicatedTab) {
@@ -7040,6 +7043,7 @@ document.addEventListener('DOMContentLoaded', function() {
     //   3) 否则 → 复制当前右键点击的行 (contextTargetId)
     ctxCopySelected.addEventListener('click', async () => {
         contextMenu.style.display = 'none';
+        setStatus('复制选中: 正在处理...');
         try {
             // Step 1: 确定要复制哪些行（按 tbody 展示顺序）
             // Collect candidate row IDs in display order (tbody order)
@@ -7075,29 +7079,33 @@ document.addEventListener('DOMContentLoaded', function() {
             if (targetIds.length === 0 && contextTargetId) {
                 targetIds = [contextTargetId];
             }
-            if (targetIds.length === 0) return;
+            console.log('[COPY] targetIds:', JSON.stringify(targetIds), 'contextTargetId:', contextTargetId, 'displayOrderIds:', JSON.stringify(displayOrderIds));
+            if (targetIds.length === 0) {
+                setStatus('复制失败: 未选中行（请先右键点击一行或开启管理行模式）');
+                return;
+            }
 
             const rows = [];
             targetIds.forEach(id => { if (idToTr.has(id)) rows.push(idToTr.get(id)); });
-            if (rows.length === 0) return;
+            if (rows.length === 0) { setStatus('复制失败: 找不到行元素'); return; }
 
-            // 列顺序：取当前显示的列（有可见的 th 的列）
-            const colKeys = [];
-            const colHeaders = {};
-            document.querySelectorAll('#tableHead th[data-col-key]').forEach(th => {
-                const ck = th.dataset.colKey;
-                if (!ck) return;
-                if (ck === '__selector') return;
-                colKeys.push(ck);
-                colHeaders[ck] = th.textContent.trim();
+            // 列顺序：遍历 thead 所有 th（含选择器列），用真实索引映射到 td，
+            // 这样行管理模式下选择器列不会造成列错位。
+            const colSpecs = []; // { idx, key, header }
+            const allThs = document.querySelectorAll('#tableHead th');
+            allThs.forEach((th, idx) => {
+                const ck = th.dataset.col || '';
+                if (!ck || ck === '__selector') return; // 无列键或选择器列 → 跳过（但仍占 idx）
+                colSpecs.push({ idx: idx, key: ck, header: th.textContent.trim() });
             });
-            if (colKeys.length === 0) return;
+            if (colSpecs.length === 0) { setStatus('复制失败: 找不到列信息'); return; }
 
-            const lines = [colKeys.map(k => colHeaders[k] || k).join('\t')];
+            const lines = [colSpecs.map(s => s.header || s.key).join('\t')];
             rows.forEach(tr => {
                 const cells = [];
-                colKeys.forEach(ck => {
-                    const td = tr.querySelector(`td.cell[data-col-key="${ck}"]`);
+                const tds = tr.querySelectorAll('td');
+                colSpecs.forEach(s => {
+                    const td = tds[s.idx];
                     if (!td) { cells.push(''); return; }
                     let txt = (td.innerText || td.textContent || '').trim();
                     txt = txt.replace(/🔗/g, '').trim();
@@ -7108,21 +7116,26 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const tsv = lines.join('\n');
             let ok = false;
+            // 优先用 textarea + execCommand('copy')，兼容非 HTTPS 环境（HTTP 访问时 navigator.clipboard 不可用）
             try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(tsv);
-                    ok = true;
-                }
-            } catch(e) { ok = false; }
-            if (!ok) {
                 const ta = document.createElement('textarea');
                 ta.value = tsv;
-                ta.style.position = 'fixed';
-                ta.style.left = '-9999px';
+                ta.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;';
                 document.body.appendChild(ta);
+                ta.focus();
                 ta.select();
-                try { ok = document.execCommand('copy'); } catch(e) { ok = false; }
+                ta.setSelectionRange(0, tsv.length);
+                ok = document.execCommand('copy');
                 document.body.removeChild(ta);
+            } catch(e) { ok = false; }
+            // 如果 execCommand 失败，再尝试 navigator.clipboard（HTTPS / localhost 下可用）
+            if (!ok) {
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(tsv);
+                        ok = true;
+                    }
+                } catch(e) { ok = false; }
             }
             setStatus(ok ? `已复制 ${rows.length} 行到剪贴板` : '复制失败，请手动选择后 Ctrl+C');
         } catch (err) { setStatus('复制失败: ' + err.message); }

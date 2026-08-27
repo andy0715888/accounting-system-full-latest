@@ -105,4 +105,23 @@ router.get('/by-tab/:tabId', requireAuth, async (req, res) => {
     }
 });
 
+// 迁移支出记录从一条 record 到另一条（普通标签剪切/粘贴时调用）
+router.post('/migrate', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const { from_record_id, to_record_id } = req.body;
+        if (!from_record_id || !to_record_id) {
+            return res.status(400).json({ error: '缺少参数' });
+        }
+        await execute(
+            'UPDATE expense_records SET record_id = ?, tab_id = (SELECT tab_id FROM records WHERE id = ?) WHERE user_id = ? AND record_id = ?',
+            [to_record_id, to_record_id, userId, from_record_id]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error('迁移支出记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 module.exports = router;
