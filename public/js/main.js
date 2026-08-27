@@ -6768,48 +6768,30 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateData[k] = val !== undefined && val !== null ? val : '';
                 });
             }
-            // 迁移支出明细
+            // 迁移支出明细（把原行"支出列弹窗"里所有明细移动到目标行——这是剪切语义的核心）
             if (sourceId && sourceId !== contextTargetId) {
                 try { await API.post('/host-expense/move', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
-                // 普通标签全量剪切：同时迁移收入明细
+                // 普通标签全量剪切：同时迁移收入明细（用户要求：备注、支出、收入 三部分都要真正"剪切走"）
                 if (isSimpleTab || isSimpleCut) {
                     try { await API.post('/income/migrate', { from_record_id: sourceId, to_record_id: contextTargetId }); } catch(e) {}
                 }
-                // 清空原行
+                // 清空原行：只做"用户要求的最小清除"，其他信息保留不删（用户自行审核后手动清除）
                 if (isDedicatedTab) {
-                    // 独享标签：清空所有服务器字段
-                    try {
-                        const srcRec = state.records.find(r => r.id === sourceId);
-                        if (srcRec) {
-                            const clearData = { ...srcRec.data };
-                            SERVER_FIELDS.forEach(k => { clearData[k] = ''; });
-                            await API.put('/records/' + sourceId, { data: clearData });
-                        }
-                    } catch(e) {}
+                    // ★ 独享标签：原行不要清空服务器字段！只把"支出列弹窗"的明细通过 /host-expense/move 搬走即可。
+                    // 不调用 /records/:id PUT 改写源行，其他信息（IP/服务商/备注/单价等）一律保留
                 } else if (isSimpleTab || isSimpleCut) {
-                    // 普通标签全量剪切：清空原行所有关键字段（remark + expense display + fee display + 单价）
+                    // ★ 普通标签：必须真正"剪切"—— 备注 清为空；支出显示 置0；收入显示 置空
+                    //   （支出/收入弹窗内的明细已经通过 /host-expense/move 和 /income/migrate 迁移走了）
                     try {
-                        let sourceData;
                         const srcRec = state.records.find(r => r.id === sourceId);
-                        if (srcRec) {
-                            sourceData = { ...srcRec.data, remark: '', expense: '0', fee: '' };
-                        } else {
-                            sourceData = { remark: '', expense: '0', fee: '' };
-                        }
+                        const sourceData = srcRec
+                            ? { ...srcRec.data, remark: '', expense: '0', fee: '' }
+                            : { remark: '', expense: '0', fee: '' };
                         await API.put('/records/' + sourceId, { data: sourceData });
                     } catch(e) {}
                 } else {
-                    // 共享标签：只清 expense display
-                    try {
-                        const srcRec = state.records.find(r => r.id === sourceId);
-                        let sourceData;
-                        if (srcRec) {
-                            sourceData = { ...srcRec.data, expense: '0' };
-                        } else {
-                            sourceData = { ...state.copiedServerData, expense: '0' };
-                        }
-                        await API.put('/records/' + sourceId, { data: sourceData });
-                    } catch(e) {}
+                    // ★ 共享标签：同独享——只把"支出列弹窗"明细搬走即可，其他服务器字段不清空
+                    // 不调用 /records/:id PUT 改写源行
                 }
             }
             await API.put('/records/' + contextTargetId, { data: updateData });
@@ -12836,18 +12818,23 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             // ------- 第 2 步：放到临时容器中测量，再统一添加四周等距 padding -------
-            const padding = 24; // 四周统一空隙（比之前稍大，确保视觉明显）
+            const padding = 24; // 四周统一空隙
             const tmpContainer = document.createElement('div');
-            tmpContainer.style.cssText = `position:absolute;left:-99999px;top:-99999px;background:#fff;display:inline-block;box-sizing:content-box;overflow:hidden;`;
-            tmpContainer.appendChild(clone);
+            tmpContainer.style.cssText = `position:absolute;left:-99999px;top:-99999px;background:#fff;display:inline-block;box-sizing:content-box;overflow:visible;`;
+            // ★ 关键：把 clone 放进一个"内容层 div"，用 content-box 测量纯内容尺寸，
+            // 然后外层 SVG 背景是白色，内容层通过 width=cloneW + margin=padding 实现真正的四周等距
+            const innerWrap = document.createElement('div');
+            innerWrap.style.cssText = `display:inline-block;box-sizing:content-box;width:auto;height:auto;background:#fff;`;
+            innerWrap.appendChild(clone);
+            tmpContainer.appendChild(innerWrap);
             document.body.appendChild(tmpContainer);
 
             await new Promise(r => requestAnimationFrame(() => r()));
             await new Promise(r => requestAnimationFrame(() => r()));
 
-            // 先测出纯表格尺寸，再加上四周等距 padding，彻底避免 box-sizing 不对称
-            const cloneW = Math.ceil(clone.getBoundingClientRect().width);
-            const cloneH = Math.ceil(clone.getBoundingClientRect().height);
+            // 先测出纯内容（inline-block 的 innerWrap + clone）的精确尺寸
+            const cloneW = Math.ceil(innerWrap.getBoundingClientRect().width);
+            const cloneH = Math.ceil(innerWrap.getBoundingClientRect().height);
             const totalW = cloneW + padding * 2;
             const totalH = cloneH + padding * 2;
 
@@ -13019,9 +13006,10 @@ document.addEventListener('DOMContentLoaded', function() {
             // ------- 第 5 步：XMLSerializer → SVG foreignObject -------
             const xml = new XMLSerializer().serializeToString(clone);
 
-            // ★ 关键修复：foreignObject 和 div 都用显式 px 宽高 + box-sizing:border-box
-            // padding 四周都用同一个变量保证对称，避免只左/上有间隙的问题
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}"><foreignObject width="${totalW}" height="${totalH}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${totalW}px;height:${totalH}px;display:block;background:#fff;padding:${padding}px;box-sizing:border-box;overflow:hidden;">${xml}</div></foreignObject></svg>`;
+            // ★ 彻底修复四周空隙不对称：外层 SVG 是 totalW*totalH 的白色画布，
+            // 内层 foreignObject 恰好是表格尺寸，使用 x/y 偏移把内容定位到正中央。
+            // 背景由 SVG 的白色矩形保证，表格内容从 (padding, padding) 开始绘制。
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}"><rect width="100%" height="100%" fill="#ffffff"/><foreignObject x="${padding}" y="${padding}" width="${cloneW}" height="${cloneH}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${cloneW}px;height:${cloneH}px;display:inline-block;background:#fff;box-sizing:content-box;overflow:visible;">${xml}</div></foreignObject></svg>`;
 
             const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 
