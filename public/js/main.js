@@ -12856,7 +12856,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // ★ 修复尺寸裁剪：
             // 1) 用数据模型计算"理论尺寸"（可见列宽之和、可见行高之和），避免亚像素渲染误差
             // 2) 再加上 table 自身声明的外边框（左右/上下各 1px = +2px）
-            // 3) 最后与 DOM 实际测量值取 max，再额外 +6px 缓冲，多重保障右/下边框完整
+            // 3) 最后与 DOM 实际测量值取 max，再额外 +2px 做像素舍入缓冲
+            //    ↑ 因为 table 已显式声明 border:1px，外边框完整归属于 table，DOM 测量必包含，
+            //    只需很小的缓冲即可避免亚像素裁剪，不会出现多余的边距或双重边框。
             const _visibleCols = g.columns.filter(c => !hiddenCols.has(c.id));
             const _hiddenRows = new Set(Array.isArray(g.hiddenRows) ? g.hiddenRows : []);
             const _visibleRows = g.rows.filter(r => !_hiddenRows.has(r.id));
@@ -12873,9 +12875,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const domW = Math.ceil(domRect.width);
             const domH = Math.ceil(domRect.height);
 
-            // 取 max(理论, DOM测量) 再加 +6px 安全缓冲
-            const cloneW = Math.max(theoryW, domW) + 6;
-            const cloneH = Math.max(theoryH, domH) + 6;
+            // 取 max(理论, DOM测量) 再加 +2px 缓冲（避免亚像素舍入误差）
+            const cloneW = Math.max(theoryW, domW) + 2;
+            const cloneH = Math.max(theoryH, domH) + 2;
             const totalW = cloneW + padding * 2;
             const totalH = cloneH + padding * 2;
 
@@ -13091,22 +13093,6 @@ document.addEventListener('DOMContentLoaded', function() {
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.scale(scale, scale);
             ctx.drawImage(img, 0, 0);
-
-            // ★ 兜底：Canvas 直接补一圈外边框（绝对保证右/下边框完整）
-            // border-collapse + foreignObject 无论怎么裁剪，这层 Canvas 描边会补上缺失的右/下边框。
-            // 颜色与内部 td 边框一致 (#dcdfe6)，线宽在缩放坐标系里用 0.5 近似 1 物理像素的视觉效果
-            // （避免和已有 SVG 内边框叠加变粗）
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // 切回物理像素坐标系
-            ctx.strokeStyle = '#dcdfe6';
-            ctx.lineWidth = 1;
-            // 边框矩形：padding 到 padding + cloneW 的区域（±0.5 对齐像素栅格，线宽 1 刚好）
-            const __bx = Math.round(padding * scale) + 0.5;
-            const __by = Math.round(padding * scale) + 0.5;
-            const __bw = Math.round(cloneW * scale) - 1;
-            const __bh = Math.round(cloneH * scale) - 1;
-            ctx.strokeRect(__bx, __by, __bw, __bh);
-            ctx.restore();
 
             // ------- 第 7 步：输出 -------
             const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
