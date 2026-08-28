@@ -12847,8 +12847,11 @@ document.addEventListener('DOMContentLoaded', function() {
             await new Promise(r => requestAnimationFrame(() => r()));
 
             // 先测出纯内容（inline-block 的 innerWrap + clone）的精确尺寸
-            const cloneW = Math.ceil(innerWrap.getBoundingClientRect().width);
-            const cloneH = Math.ceil(innerWrap.getBoundingClientRect().height);
+            // ★ +4px 缓冲：border-collapse: collapse 下 getBoundingClientRect 测量值可能亚像素，
+            // 导致表格最外一圈 1px 边框刚好落在 foreignObject 边界上被裁剪，右/下边框丢失。
+            // 多加 4px 给 SVG/foreignObject 留足渲染空间，保证最右列右边框、最下行下边框完整。
+            const cloneW = Math.ceil(innerWrap.getBoundingClientRect().width) + 4;
+            const cloneH = Math.ceil(innerWrap.getBoundingClientRect().height) + 4;
             const totalW = cloneW + padding * 2;
             const totalH = cloneH + padding * 2;
 
