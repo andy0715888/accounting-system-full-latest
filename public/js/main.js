@@ -12704,6 +12704,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 强制固定表格布局，确保列宽严格遵循 colgroup 设置，不被内容撑开
                 clone.style.tableLayout = 'fixed';
             }
+            // ★ 关键修复：给 <table> 本身显式加一圈完整边框。
+            // 原 CSS 里只有 td/th 有 border，border-collapse: collapse 下外边框是边缘 td 的"半边框共享"，
+            // 测量时这半像素常落在 getBoundingClientRect 之外，导致 SVG foreignObject 裁剪掉右/下边框。
+            // 显式给 table 加 border-collapse + 外边框声明，使外边框 1px 完整归属于 table 元素，尺寸测量必包含它。
+            clone.style.setProperty('border-collapse', 'collapse', 'important');
+            clone.style.setProperty('border', '1px solid #dcdfe6', 'important');
+            clone.style.setProperty('border-spacing', '0', 'important');
 
             // 1b. 删除 corner cell
             const corner = clone.querySelector('.corner-cell');
@@ -12846,12 +12853,29 @@ document.addEventListener('DOMContentLoaded', function() {
             await new Promise(r => requestAnimationFrame(() => r()));
             await new Promise(r => requestAnimationFrame(() => r()));
 
-            // 先测出纯内容（inline-block 的 innerWrap + clone）的精确尺寸
-            // ★ +4px 缓冲：border-collapse: collapse 下 getBoundingClientRect 测量值可能亚像素，
-            // 导致表格最外一圈 1px 边框刚好落在 foreignObject 边界上被裁剪，右/下边框丢失。
-            // 多加 4px 给 SVG/foreignObject 留足渲染空间，保证最右列右边框、最下行下边框完整。
-            const cloneW = Math.ceil(innerWrap.getBoundingClientRect().width) + 4;
-            const cloneH = Math.ceil(innerWrap.getBoundingClientRect().height) + 4;
+            // ★ 修复尺寸裁剪：
+            // 1) 用数据模型计算"理论尺寸"（可见列宽之和、可见行高之和），避免亚像素渲染误差
+            // 2) 再加上 table 自身声明的外边框（左右/上下各 1px = +2px）
+            // 3) 最后与 DOM 实际测量值取 max，再额外 +6px 缓冲，多重保障右/下边框完整
+            const _visibleCols = g.columns.filter(c => !hiddenCols.has(c.id));
+            const _hiddenRows = new Set(Array.isArray(g.hiddenRows) ? g.hiddenRows : []);
+            const _visibleRows = g.rows.filter(r => !_hiddenRows.has(r.id));
+            // 列宽和（不含 merge-covered 行的特殊列）
+            let theoryW = _visibleCols.reduce((s, c) => s + (g.colWidths[c.id] || 120), 0);
+            // 行高和（合并行不会改变 tbody 的总高，因为 covered 行的 td 已被删，tr 仍在）
+            let theoryH = _visibleRows.reduce((s, r) => s + (g.rowHeights[r.id] || 32), 0);
+            // table 自身 1px 外边框：左右各 1、上下各 1 → 各加 +2
+            theoryW += 2;
+            theoryH += 2;
+
+            // DOM 实际测量（包含渲染后的文本溢出导致的尺寸扩展）
+            const domRect = innerWrap.getBoundingClientRect();
+            const domW = Math.ceil(domRect.width);
+            const domH = Math.ceil(domRect.height);
+
+            // 取 max(理论, DOM测量) 再加 +6px 安全缓冲
+            const cloneW = Math.max(theoryW, domW) + 6;
+            const cloneH = Math.max(theoryH, domH) + 6;
             const totalW = cloneW + padding * 2;
             const totalH = cloneH + padding * 2;
 
@@ -13067,6 +13091,22 @@ document.addEventListener('DOMContentLoaded', function() {
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.scale(scale, scale);
             ctx.drawImage(img, 0, 0);
+
+            // ★ 兜底：Canvas 直接补一圈外边框（绝对保证右/下边框完整）
+            // border-collapse + foreignObject 无论怎么裁剪，这层 Canvas 描边会补上缺失的右/下边框。
+            // 颜色与内部 td 边框一致 (#dcdfe6)，线宽在缩放坐标系里用 0.5 近似 1 物理像素的视觉效果
+            // （避免和已有 SVG 内边框叠加变粗）
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // 切回物理像素坐标系
+            ctx.strokeStyle = '#dcdfe6';
+            ctx.lineWidth = 1;
+            // 边框矩形：padding 到 padding + cloneW 的区域（±0.5 对齐像素栅格，线宽 1 刚好）
+            const __bx = Math.round(padding * scale) + 0.5;
+            const __by = Math.round(padding * scale) + 0.5;
+            const __bw = Math.round(cloneW * scale) - 1;
+            const __bh = Math.round(cloneH * scale) - 1;
+            ctx.strokeRect(__bx, __by, __bw, __bh);
+            ctx.restore();
 
             // ------- 第 7 步：输出 -------
             const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
