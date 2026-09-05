@@ -6,3 +6,12 @@ uploads/
 .DS_Store
 *.log
 server.pid
+system-uploads/
+
+# ── 敏感运行期文件：绝不提交到仓库 ──
+# 含 AES 加密密钥 / 会话密钥 / 管理员凭据 / 代理 cookie，一旦公开
+# 攻击者可解密主机密码、伪造会话、直接读取数据。
+.encryption_key
+data/.session_secret
+data/.admin_credentials
+cookies.txt

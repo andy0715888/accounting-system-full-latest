@@ -277,6 +277,11 @@ function getDiskUsage() {
 }
 
 app.get('/api/server-status', (req, res) => {
+    // ── 安全加固：服务器状态（CPU/内存/磁盘）需登录后才能查看，
+    // 避免未授权来访者探知服务器资源信息。
+    if (!req.session || !req.session.userId) {
+        return res.status(401).json({ error: '请先登录' });
+    }
     res.json({
         cpu: getCpuUsage(),
         memory: getMemUsage(),

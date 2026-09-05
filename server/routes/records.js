@@ -82,6 +82,10 @@ function buildFilterConditions(filters, params) {
             conditions.push(`json_extract(data, '$.ip_address') IN (${placeholders})`);
         } else {
             // 通用列: json_extract
+            // ── 安全加固：colKey 来自前端 filters 的键名，之前直接拼接进 SQL
+            // json_extract(data, '$.${colKey}') 存在列名级 SQL 注入风险。
+            // 强制白名单：只允许由字母开头、由字母/数字/下划线组成的合法列名。
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(colKey)) continue;
             const placeholders = values.map(() => '?').join(',');
             allParams.push(...values);
             conditions.push(`json_extract(data, '$.${colKey}') IN (${placeholders})`);
