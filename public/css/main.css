@@ -3437,7 +3437,9 @@ tr.client-row.cut-pending {
 .memos-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    grid-auto-rows: minmax(260px, auto);
+    /* 固定行高 260px，这样 h-1=260px、h-2=520px、h-3=780px，外框严格对应用户选择的格数。
+       之前用 minmax(260px, auto) 里的 auto 会让内容撑高行高，导致 h-1 外框看起来像 2 格 */
+    grid-auto-rows: 260px;
     gap: 16px;
     overflow-y: auto;
     flex: 1;
@@ -3455,6 +3457,10 @@ tr.client-row.cut-pending {
     gap: 12px;
     transition: all 0.2s;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    /* 严格填满 grid 分配的行高，不再让 flex 内容把外框撑破 */
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .memo-card:hover {
@@ -3513,6 +3519,7 @@ tr.client-row.cut-pending {
     color: #606266;
     line-height: 1.7;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 6;
@@ -3569,12 +3576,6 @@ tr.client-row.cut-pending {
 .memo-card.h-1 { grid-row: span 1; }
 .memo-card.h-2 { grid-row: span 2; }
 .memo-card.h-3 { grid-row: span 3; }
-
-/* 1 格高时强制单格高度，避免内容 auto 撑高越过单格被网格塞到下一行 */
-.memo-card.h-1 .memo-card-body {
-    max-height: 120px;
-    min-height: 0;
-}
 
 .memo-size-select {
     display: flex;
