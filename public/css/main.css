@@ -247,6 +247,8 @@ body {
 .tool-btn.primary:hover { background:#3a5cd7; }
 .tool-btn.danger { color:#f56c6c; border-color:#f56c6c; }
 .tool-btn.danger:hover { background:#fef0f0; }
+/* 管理行按钮：固定宽度，避免"📝 管理行"和"✅ 完成"切换时大小跳动 */
+#manageRowsBtn { min-width: 92px; text-align: center; }
 .tool-divider { width:1px; height:24px; background:#dcdfe6; }
 .record-count { font-size:13px; color:#909399; }
 

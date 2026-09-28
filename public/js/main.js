@@ -6044,7 +6044,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (manageRowsBtn) {
             manageRowsBtn.classList.toggle('active', state.rowManageMode);
-            manageRowsBtn.textContent = state.rowManageMode ? '完成' : '管理行';
+            // 保持两个状态都带 emoji，避免切换时按钮宽度跳动
+            manageRowsBtn.textContent = state.rowManageMode ? '✅ 完成' : '📝 管理行';
         }
         renderTable(false);
     });
@@ -8172,30 +8173,43 @@ document.addEventListener('DOMContentLoaded', function() {
             input.disabled = false;
             sendBtn.disabled = false;
             disconnectBtn.style.display = 'inline-block';
+            disconnectBtn.textContent = '断开连接';
             if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
             // 隐藏占位符，显示 xterm
             const placeholder = terminal.querySelector('.terminal-placeholder');
             if (placeholder) placeholder.style.display = 'none';
             // 显示当前连接的 xterm 容器（用 flex 保持布局一致性）
             conn.xtermContainer.style.display = 'flex';
+            // 如果 xterm 还没挂载到 DOM（后台连接成功时未 open），现在补 open
+            // 否则 term.write / fitAddon.fit 都无效，界面会空白或滚动条位置错乱
+            if (!term._opened) {
+                term._opened = true;
+                term.open(conn.xtermContainer);
+            }
             // 如果有后台缓冲的数据，一次性写入
             if (conn.terminalContent && conn.terminalContent.length > 0) {
                 term.write(conn.terminalContent);
                 conn.terminalContent = '';
             }
+            term._initialized = true;
             // 每次切换都重新 fit（容器从 none 变为可见时尺寸可能不准）
-            setTimeout(() => {
+            // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
+            const fitAndResize = () => {
                 if (conn.fitAddon) {
                     try {
                         conn.fitAddon.fit();
                         const cols = term.cols;
                         const rows = term.rows;
-                        if (ws.readyState === WebSocket.OPEN) {
+                        if (ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
                             ws.send(JSON.stringify({ type: 'resize', cols, rows }));
                         }
                     } catch (e) {}
                 }
-            }, 100);
+            };
+            fitAndResize();
+            setTimeout(fitAndResize, 50);
+            setTimeout(fitAndResize, 200);
+            setTimeout(fitAndResize, 500);
             term.focus();
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
