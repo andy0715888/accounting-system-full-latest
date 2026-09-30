@@ -3118,6 +3118,33 @@ tr.client-row.cut-pending {
     background: #777;
 }
 
+/* xterm.js 终端：确保容器填满且滚动条可鼠标拖动 */
+.terminal-container .xterm {
+    width: 100%;
+    height: 100%;
+}
+/* xterm-viewport 是真正的滚动容器，提高层级并允许指针事件，
+   避免被 .xterm-screen 画布遮挡导致滚动条拖不动 */
+.terminal-container .xterm-viewport {
+    pointer-events: auto !important;
+    z-index: 10 !important;
+    right: 0 !important;
+}
+.terminal-container .xterm-viewport::-webkit-scrollbar {
+    width: 10px;
+}
+.terminal-container .xterm-viewport::-webkit-scrollbar-track {
+    background: #2d2d2d;
+}
+.terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: #777;
+}
+
 .terminal-input-area {
     display: flex;
     gap: 8px;

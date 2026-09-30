@@ -246,11 +246,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (view === 'hosts') {
                     loadHosts();
                     loadCommandFolders();
+                    // 从其他模块切回主机管理时，SSH 终端容器从 display:none 变为可见，
+                    // xterm 尺寸需要重新测量，否则会出现空白/滚动条位置错乱
+                    refitActiveTerminal();
                 }
                 if (view === 'memos') {
                     loadMemoTags();
                 }
             });
+        });
+    }
+
+    // 对当前活跃的 SSH 连接重新 fit 终端尺寸（模块切换回来时调用）
+    function refitActiveTerminal() {
+        if (!activeConnId) return;
+        const conn = sshConnections.find(c => c.id === activeConnId);
+        if (!conn || !conn.xterm || !conn.fitAddon) return;
+        const ws = conn.ws;
+        const fitAndResize = () => {
+            try {
+                conn.fitAddon.fit();
+                const cols = conn.xterm.cols;
+                const rows = conn.xterm.rows;
+                if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                }
+            } catch (e) {}
+        };
+        // 容器刚从 none 变为可见，尺寸可能还不稳定，多次 fit 确保正确
+        requestAnimationFrame(() => {
+            fitAndResize();
+            setTimeout(fitAndResize, 50);
+            setTimeout(fitAndResize, 200);
+            setTimeout(fitAndResize, 500);
         });
     }
     initMenu();
