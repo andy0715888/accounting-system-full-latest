@@ -3895,7 +3895,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadXLSX() { return new Promise((resolve, reject) => {
         if (typeof XLSX !== 'undefined') { resolve(); return; }
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+        script.src = '/js/xterm/xlsx.full.min.js';
         script.onload = resolve; script.onerror = reject;
         document.head.appendChild(script);
     }); }
