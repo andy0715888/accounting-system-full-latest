@@ -7918,7 +7918,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 点击 xterm 时确保获得焦点（全屏程序如 apt dialog 需要焦点在终端上）
         xtermContainer.addEventListener('mousedown', () => {
-            setTimeout(() => term.focus(), 10);
+            setTimeout(() => { try { term.focus(); } catch(e) {} }, 10);
         });
 
         // 窗口大小变化时调整终端
@@ -7989,7 +7989,6 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'connected') {
-                    console.log('[SSH] connected received, activeConnId=', activeConnId, 'connId=', connId);
                     fetch(`/api/hosts/${host.id}/touch`, { method: 'POST' }).then(() => loadHosts()).catch(() => {});
                     if (activeConnId === connId) {
                         title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
@@ -8004,25 +8003,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 先显示容器，强制重排确保布局生效后再 open xterm
                         xtermContainer.style.display = 'flex';
                         xtermContainer.offsetHeight;
-                        console.log('[SSH] container rect:', xtermContainer.getBoundingClientRect());
-                        console.log('[SSH] term._opened before:', term._opened);
                         if (!term._opened) {
                             term._opened = true;
                             try {
                                 term.open(xtermContainer);
-                                console.log('[SSH] term.open success, cols:', term.cols, 'rows:', term.rows);
                             } catch(e) {
                                 console.error('[SSH] term.open error:', e);
                             }
                         }
-                        console.log('[SSH] term._initialized before:', term._initialized);
                         if (!term._initialized) {
                             term._initialized = true;
-                            if (conn.terminalContent && conn.terminalContent.length > 0) {
-                                console.log('[SSH] writing buffered content, length:', conn.terminalContent.length);
-                                try { term.write(conn.terminalContent); } catch(e) { console.error('[SSH] write error:', e); }
-                                conn.terminalContent = '';
-                            }
                         }
                         const fitAndResize = () => {
                             try {
@@ -8043,16 +8033,21 @@ document.addEventListener('DOMContentLoaded', function() {
                                 }
                             } catch (e) {}
                         };
+                        // 先完成尺寸计算，再写入缓冲内容，避免 fit 内部 clear() 清掉刚写入的渲染
                         fitAndResize();
-                        setTimeout(fitAndResize, 50);
-                        setTimeout(fitAndResize, 200);
-                        setTimeout(fitAndResize, 500);
-                        term.focus();
+                        // 写入后台缓冲的数据（连接成功前累积的输出）
+                        if (conn.terminalContent && conn.terminalContent.length > 0) {
+                            try { term.write(conn.terminalContent); } catch(e) { console.error('[SSH] write error:', e); }
+                            conn.terminalContent = '';
+                        }
+                        // 延迟 fit，确保容器布局稳定后尺寸正确（仅在尺寸变化时才会 clear+resize）
+                        setTimeout(fitAndResize, 100);
+                        setTimeout(fitAndResize, 300);
+                        setTimeout(() => { term.focus(); }, 150);
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
                 } else if (msg.type === 'output') {
-                    console.log('[SSH] output received, length:', msg.data.length, 'activeConnId:', activeConnId, 'connId:', connId, 'initialized:', term._initialized);
                     if (activeConnId === connId && term._initialized) {
                         try {
                             term.write(msg.data);
@@ -8263,11 +8258,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 term._opened = true;
                 term.open(conn.xtermContainer);
             }
-            // 如果有后台缓冲的数据，一次性写入
-            if (conn.terminalContent && conn.terminalContent.length > 0) {
-                try { term.write(conn.terminalContent); } catch(e) {}
-                conn.terminalContent = '';
-            }
             term._initialized = true;
             // 每次切换都重新 fit
             const fitAndResize = () => {
@@ -8289,11 +8279,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 } catch (e) {}
             };
+            // 先完成尺寸计算，再写入缓冲内容
             fitAndResize();
-            setTimeout(fitAndResize, 50);
-            setTimeout(fitAndResize, 200);
-            setTimeout(fitAndResize, 500);
-            term.focus();
+            // 如果有后台缓冲的数据，一次性写入
+            if (conn.terminalContent && conn.terminalContent.length > 0) {
+                try { term.write(conn.terminalContent); } catch(e) {}
+                conn.terminalContent = '';
+            }
+            setTimeout(fitAndResize, 100);
+            setTimeout(fitAndResize, 300);
+            setTimeout(() => { term.focus(); }, 150);
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
             }

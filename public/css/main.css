@@ -3130,6 +3130,18 @@ tr.client-row.cut-pending {
 .terminal-container .xterm {
     width: 100%;
     height: 100%;
+    color: #e5e5e5;
+}
+/* 确保 xterm 的隐藏 textarea 可获取焦点（部分浏览器对 0x0 元素不触发 focus），
+   使其能捕获键盘输入并触发 term.onData */
+.terminal-container .xterm .xterm-helper-textarea {
+    width: 1px !important;
+    height: 1px !important;
+}
+/* 确保终端屏幕和行容器使用主题背景色，避免出现纯黑屏 */
+.terminal-container .xterm .xterm-screen,
+.terminal-container .xterm .xterm-rows {
+    background-color: #1e1e1e;
 }
 /* xterm-viewport 是真正的滚动容器，提高层级并允许指针事件，
    避免被 .xterm-screen 画布遮挡导致滚动条拖不动 */
