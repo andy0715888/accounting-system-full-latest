@@ -8000,14 +8000,14 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 隐藏占位符，显示 xterm
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
+                        // 先显示容器，再挂载 xterm，确保 open 时能测量到正确尺寸
+                        xtermContainer.style.display = 'flex';
                         if (!term._opened) {
                             term._opened = true;
                             term.open(xtermContainer);
                         }
-                        xtermContainer.style.display = 'flex';
                         if (!term._initialized) {
                             term._initialized = true;
-                            // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
                             const fitAndResize = () => {
                                 if (fitAddon) {
                                     try {
