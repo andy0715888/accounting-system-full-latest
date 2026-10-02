@@ -377,6 +377,21 @@ router.get('/filter-options', requireAuth, async (req, res) => {
     }
 });
 
+// 获取单条记录（跨标签粘贴时用于读取来源行的完整 data）
+router.get('/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const recordId = parseInt(req.params.id);
+        const row = await queryOne('SELECT * FROM records WHERE id = ? AND user_id = ?', [recordId, userId]);
+        if (!row) return res.status(404).json({ error: '记录不存在' });
+        try { row.data = JSON.parse(row.data || '{}'); } catch (e) { row.data = {}; }
+        res.json(row);
+    } catch (err) {
+        console.error('获取记录错误:', err);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
+
 router.put('/:id', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;

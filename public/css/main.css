@@ -2611,9 +2611,17 @@ tr.client-row.cut-pending {
     color: #303133;
     font-family: monospace;
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    width: 100%;
+    box-sizing: border-box;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 6px;
+    outline: none;
+}
+.fm-path:focus {
+    border-color: #4a6cf7;
+    background: #fff;
 }
 .fm-actions {
     display: flex;

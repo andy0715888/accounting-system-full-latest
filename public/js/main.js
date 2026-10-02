@@ -1068,17 +1068,16 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
-        // 跨标签剪切/粘贴服务器信息：切换标签时不再清空 copiedServerData/copiedServerRecordId
-        // （刷新键才清空）；其他提取状态保持原逻辑重置
-        state.copiedClientRecordId = null;
-        state.extractedClientData = null;
-        state.extractedBothData = null;
+        // 跨标签剪切/粘贴：切换标签时保留所有提取状态（服务器/客户/两者），
+        // 这样可以在一个标签提取、切到另一个标签粘贴。刷新键才清空。
         $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
-        // 如果有跨标签的服务器剪切，回到来源标签时重新给那行加 cut-pending 样式
-        if (state.copiedServerRecordId) {
-            const tr = document.querySelector(`tr[data-id="${state.copiedServerRecordId}"]`);
-            if (tr) tr.classList.add('cut-pending');
-        }
+        // 如果有跨标签的剪切，回到来源标签时重新给那行加 cut-pending 样式
+        [state.copiedServerRecordId, state.extractedClientData?.recordId, state.extractedBothData?.recordId]
+            .filter(Boolean)
+            .forEach(id => {
+                const tr = document.querySelector(`tr[data-id="${id}"]`);
+                if (tr) tr.classList.add('cut-pending');
+            });
         // 恢复目标标签的筛选状态
         state.filters = state.tabFilters[tabId] ? { ...state.tabFilters[tabId] } : {};
         renderTabs();
@@ -6919,21 +6918,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateData[k] = src.data[k] !== undefined ? src.data[k] : '';
             });
             await API.put('/records/' + contextTargetId, { data: updateData });
-            // 3. 清空原行客户字段（移动语义）
+            // 3. 清空原行客户字段（移动语义）——支持跨标签：原行不在当前 state.records 时从后端获取
             if (src.recordId !== contextTargetId) {
+                let srcData = null;
                 const srcRec = state.records.find(r => r.id === src.recordId);
                 if (srcRec) {
-                    const clearData = { ...srcRec.data };
-                    CLIENT_FIELDS.forEach(k => { clearData[k] = ''; });
-                    try { await API.put('/records/' + src.recordId, { data: clearData }); } catch(e) {}
+                    srcData = { ...srcRec.data };
+                } else {
+                    // 跨标签：从后端读取来源行的完整 data
+                    try {
+                        const r = await API.get('/records/' + src.recordId);
+                        srcData = { ...(r.data || {}) };
+                    } catch (e) { srcData = null; }
+                }
+                if (srcData) {
+                    CLIENT_FIELDS.forEach(k => { srcData[k] = ''; });
+                    try { await API.put('/records/' + src.recordId, { data: srcData }); } catch(e) {}
                 }
             }
             state.extractedClientData = null;
             $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
+            // 跨标签：刷新来源标签缓存，这样切回去时原行客户字段已清空
+            if (src.tabId && src.tabId !== state.currentTabId) {
+                updateTabCache(src.tabId);
+                setStatus('客户信息已粘贴 ✓（跨标签：来源标签已刷新缓存）');
+            } else {
+                setStatus('客户信息已粘贴 ✓');
+            }
             renderTable(false);
-            setStatus('客户信息已粘贴 ✓');
         } catch (err) { setStatus('粘贴客户信息失败: ' + err.message); }
     });
 
@@ -7014,21 +7028,36 @@ document.addEventListener('DOMContentLoaded', function() {
                     }).catch(() => {});
                 } catch(e) {}
             }
-            // 3. 清空原行所有服务器+客户字段（移动语义）
+            // 3. 清空原行所有服务器+客户字段（移动语义）——支持跨标签：原行不在当前 state.records 时从后端获取
             if (src.recordId !== contextTargetId) {
+                let srcData = null;
                 const srcRec = state.records.find(r => r.id === src.recordId);
                 if (srcRec) {
-                    const clearData = { ...srcRec.data };
-                    [...SERVER_FIELDS, ...CLIENT_FIELDS].forEach(k => { clearData[k] = ''; });
-                    try { await API.put('/records/' + src.recordId, { data: clearData }); } catch(e) {}
+                    srcData = { ...srcRec.data };
+                } else {
+                    // 跨标签：从后端读取来源行的完整 data
+                    try {
+                        const r = await API.get('/records/' + src.recordId);
+                        srcData = { ...(r.data || {}) };
+                    } catch (e) { srcData = null; }
+                }
+                if (srcData) {
+                    [...SERVER_FIELDS, ...CLIENT_FIELDS].forEach(k => { srcData[k] = ''; });
+                    try { await API.put('/records/' + src.recordId, { data: srcData }); } catch(e) {}
                 }
             }
             state.extractedBothData = null;
             $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
             await loadRecords(state.currentTabId);
             updateTabCache(state.currentTabId);
+            // 跨标签：刷新来源标签缓存，这样切回去时原行服务器+客户字段已清空
+            if (src.tabId && src.tabId !== state.currentTabId) {
+                updateTabCache(src.tabId);
+                setStatus('服务器+客户信息已粘贴 ✓（跨标签：来源标签已刷新缓存）');
+            } else {
+                setStatus('服务器+客户信息已粘贴 ✓');
+            }
             renderTable(false);
-            setStatus('服务器+客户信息已粘贴 ✓');
         } catch (err) { setStatus('粘贴失败: ' + err.message); }
     });
 
@@ -8350,7 +8379,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;padding:16px;">
                     <div style="display:flex;gap:8px;align-items:center;">
                         <button class="tool-btn sm" id="fmBackBtn">⬅️ 上级</button>
-                        <span id="fmPath" style="flex:1;font-family:monospace;font-size:13px;background:#f5f7fa;padding:6px 10px;border-radius:4px;">/root</span>
+                        <input id="fmPath" value="/root" title="输入路径后回车跳转" style="flex:1;font-family:monospace;font-size:13px;background:#f5f7fa;padding:6px 10px;border-radius:4px;border:1px solid #dcdfe6;outline:none;" />
                         <button class="tool-btn sm" id="fmRefreshBtn">🔄 刷新</button>
                         <button class="tool-btn sm" id="fmUploadBtn" style="background:#67c23a;color:#fff;">📤 上传文件</button>
                         <input type="file" id="fmFileInput" style="display:none;" />
@@ -8395,6 +8424,18 @@ document.addEventListener('DOMContentLoaded', function() {
             loadFileList(fileManagerState.currentPath);
         };
 
+        // 弹窗路径栏回车直达
+        const overlayFmPath = overlay.querySelector('#fmPath');
+        if (overlayFmPath) overlayFmPath.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                let p = overlayFmPath.value.trim();
+                if (!p) return;
+                if (!p.startsWith('/')) p = '/' + p;
+                loadFileList(p);
+            }
+        });
+
         overlay.querySelector('#fmUploadBtn').onclick = () => {
             overlay.querySelector('#fmFileInput').click();
         };
@@ -8431,7 +8472,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fileManagerState.currentPath = path;
         const fmPath = document.getElementById('fmPath');
         const fmList = document.getElementById('fmList');
-        if (fmPath) fmPath.textContent = path;
+        if (fmPath) fmPath.value = path;
         if (fmList) fmList.innerHTML = '<div style="text-align:center;color:#999;padding:30px 0;">加载中...</div>';
         getActiveWs().send(JSON.stringify({ type: 'sftp_list', path }));
     }
@@ -8442,7 +8483,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!fmList) return;
         fileManagerState.files = data.files || [];
         fileManagerState.currentPath = data.path;
-        if (fmPath) fmPath.textContent = data.path;
+        if (fmPath) fmPath.value = data.path;
         const files = data.files || [];
         if (files.length === 0) {
             fmList.innerHTML = '<div style="text-align:center;color:#999;padding:30px 0;">空目录</div>';
@@ -8733,7 +8774,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fileManagerState.currentPath = path;
         const overlay = fileManagerState.overlay;
         if (!overlay) return;
-        overlay.querySelector('#fmPath').textContent = path;
+        overlay.querySelector('#fmPath').value = path;
         overlay.querySelector('#fmFileList').innerHTML = '<div style="text-align:center;color:#999;padding:40px 0;">加载中...</div>';
         overlay.querySelector('#fmStatus').textContent = '';
         getActiveWs().send(JSON.stringify({ type: 'sftp_list', path }));
@@ -8744,7 +8785,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!overlay) return;
         fileManagerState.files = data.files || [];
         fileManagerState.currentPath = data.path;
-        overlay.querySelector('#fmPath').textContent = data.path;
+        overlay.querySelector('#fmPath').value = data.path;
 
         const listEl = overlay.querySelector('#fmFileList');
         const files = data.files || [];
@@ -9685,6 +9726,17 @@ document.addEventListener('DOMContentLoaded', function() {
         if (fmRefreshBtn) fmRefreshBtn.onclick = () => {
             if (fileManagerState.currentPath) loadFileListPanel(fileManagerState.currentPath);
         };
+        // 路径栏回车直达
+        const fmPathInput = document.getElementById('fmPath');
+        if (fmPathInput) fmPathInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                let p = fmPathInput.value.trim();
+                if (!p) return;
+                if (!p.startsWith('/')) p = '/' + p;
+                loadFileListPanel(p);
+            }
+        });
 
         const fmUploadBtn = document.getElementById('fmUploadBtn');
         const fmFileInput = document.getElementById('fmFileInput');
