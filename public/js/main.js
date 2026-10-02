@@ -8000,11 +8000,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 隐藏占位符，显示 xterm
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
+                        // 先显示容器再 open，否则 xterm 测量到 0 尺寸导致渲染全黑
+                        xtermContainer.style.display = 'block';
                         if (!term._opened) {
                             term._opened = true;
                             term.open(xtermContainer);
                         }
-                        xtermContainer.style.display = 'flex';
                         if (!term._initialized) {
                             term._initialized = true;
                             // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
@@ -8235,8 +8236,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // 隐藏占位符，显示 xterm
             const placeholder = terminal.querySelector('.terminal-placeholder');
             if (placeholder) placeholder.style.display = 'none';
-            // 显示当前连接的 xterm 容器（用 flex 保持布局一致性）
-            conn.xtermContainer.style.display = 'flex';
+            // 显示当前连接的 xterm 容器（xterm.js 需要 block 布局，不能用 flex，否则 canvas 尺寸测量失败）
+            conn.xtermContainer.style.display = 'block';
             // 如果 xterm 还没挂载到 DOM（后台连接成功时未 open），现在补 open
             // 否则 term.write / fitAddon.fit 都无效，界面会空白或滚动条位置错乱
             if (!term._opened) {
