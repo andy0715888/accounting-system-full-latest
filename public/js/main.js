@@ -8000,48 +8000,49 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 隐藏占位符，显示 xterm
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
-                        // 先显示容器，等浏览器布局完成后再 open xterm
+                        // 先显示容器，强制重排确保布局生效后再 open xterm
                         // 否则 open 时容器 display:none，xterm 测量到 cell 尺寸为 0
                         // fitAddon.fit() 会因 cell.width===0 直接返回 null，canvas 变成 0x0 全黑
                         xtermContainer.style.display = 'flex';
-                        requestAnimationFrame(() => {
-                            if (!term._opened) {
-                                term._opened = true;
-                                term.open(xtermContainer);
+                        // 访问 offsetHeight 强制浏览器完成布局，替代 requestAnimationFrame
+                        // 确保即使页面在后台也能正确执行
+                        xtermContainer.offsetHeight;
+                        if (!term._opened) {
+                            term._opened = true;
+                            term.open(xtermContainer);
+                        }
+                        if (!term._initialized) {
+                            term._initialized = true;
+                            // 写入连接过程中可能已到达的缓冲输出
+                            if (conn.terminalContent && conn.terminalContent.length > 0) {
+                                try { term.write(conn.terminalContent); } catch(e) {}
+                                conn.terminalContent = '';
                             }
-                            if (!term._initialized) {
-                                term._initialized = true;
-                                // 写入连接过程中可能已到达的缓冲输出
-                                if (conn.terminalContent && conn.terminalContent.length > 0) {
-                                    try { term.write(conn.terminalContent); } catch(e) {}
-                                    conn.terminalContent = '';
+                        }
+                        const fitAndResize = () => {
+                            try {
+                                if (fitAddon) {
+                                    fitAddon.fit();
                                 }
-                            }
-                            const fitAndResize = () => {
-                                try {
-                                    if (fitAddon) {
-                                        fitAddon.fit();
+                                // 兜底：如果 fit 后尺寸仍为 0，手动 resize
+                                if (term.cols <= 0 || term.rows <= 0) {
+                                    const rect = xtermContainer.getBoundingClientRect();
+                                    if (rect.width > 10 && rect.height > 10) {
+                                        term.resize(Math.max(2, Math.floor(rect.width / 8)), Math.max(1, Math.floor(rect.height / 16)));
                                     }
-                                    // 兜底：如果 fit 后尺寸仍为 0，手动 resize
-                                    if (term.cols <= 0 || term.rows <= 0) {
-                                        const rect = xtermContainer.getBoundingClientRect();
-                                        if (rect.width > 10 && rect.height > 10) {
-                                            term.resize(Math.max(2, Math.floor(rect.width / 8)), Math.max(1, Math.floor(rect.height / 16)));
-                                        }
-                                    }
-                                    const cols = term.cols;
-                                    const rows = term.rows;
-                                    if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-                                        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-                                    }
-                                } catch (e) {}
-                            };
-                            fitAndResize();
-                            setTimeout(fitAndResize, 50);
-                            setTimeout(fitAndResize, 200);
-                            setTimeout(fitAndResize, 500);
-                            term.focus();
-                        });
+                                }
+                                const cols = term.cols;
+                                const rows = term.rows;
+                                if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+                                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                                }
+                            } catch (e) {}
+                        };
+                        fitAndResize();
+                        setTimeout(fitAndResize, 50);
+                        setTimeout(fitAndResize, 200);
+                        setTimeout(fitAndResize, 500);
+                        term.focus();
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
@@ -8247,46 +8248,45 @@ document.addEventListener('DOMContentLoaded', function() {
             // 隐藏占位符，显示 xterm
             const placeholder = terminal.querySelector('.terminal-placeholder');
             if (placeholder) placeholder.style.display = 'none';
-            // 先显示容器，等布局完成后再 open/fit（避免 display:none 时 cell 尺寸为 0）
+            // 先显示容器，强制重排后再 open/fit
             conn.xtermContainer.style.display = 'flex';
-            requestAnimationFrame(() => {
-                // 如果 xterm 还没挂载到 DOM（后台连接成功时未 open），现在补 open
-                if (!term._opened) {
-                    term._opened = true;
-                    term.open(conn.xtermContainer);
-                }
-                // 如果有后台缓冲的数据，一次性写入
-                if (conn.terminalContent && conn.terminalContent.length > 0) {
-                    try { term.write(conn.terminalContent); } catch(e) {}
-                    conn.terminalContent = '';
-                }
-                term._initialized = true;
-                // 每次切换都重新 fit
-                const fitAndResize = () => {
-                    try {
-                        if (conn.fitAddon) {
-                            conn.fitAddon.fit();
+            conn.xtermContainer.offsetHeight;
+            // 如果 xterm 还没挂载到 DOM（后台连接成功时未 open），现在补 open
+            if (!term._opened) {
+                term._opened = true;
+                term.open(conn.xtermContainer);
+            }
+            // 如果有后台缓冲的数据，一次性写入
+            if (conn.terminalContent && conn.terminalContent.length > 0) {
+                try { term.write(conn.terminalContent); } catch(e) {}
+                conn.terminalContent = '';
+            }
+            term._initialized = true;
+            // 每次切换都重新 fit
+            const fitAndResize = () => {
+                try {
+                    if (conn.fitAddon) {
+                        conn.fitAddon.fit();
+                    }
+                    // 兜底：如果 fit 后尺寸仍为 0，手动 resize
+                    if (term.cols <= 0 || term.rows <= 0) {
+                        const rect = conn.xtermContainer.getBoundingClientRect();
+                        if (rect.width > 10 && rect.height > 10) {
+                            term.resize(Math.max(2, Math.floor(rect.width / 8)), Math.max(1, Math.floor(rect.height / 16)));
                         }
-                        // 兜底：如果 fit 后尺寸仍为 0，手动 resize
-                        if (term.cols <= 0 || term.rows <= 0) {
-                            const rect = conn.xtermContainer.getBoundingClientRect();
-                            if (rect.width > 10 && rect.height > 10) {
-                                term.resize(Math.max(2, Math.floor(rect.width / 8)), Math.max(1, Math.floor(rect.height / 16)));
-                            }
-                        }
-                        const cols = term.cols;
-                        const rows = term.rows;
-                        if (ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-                            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-                        }
-                    } catch (e) {}
-                };
-                fitAndResize();
-                setTimeout(fitAndResize, 50);
-                setTimeout(fitAndResize, 200);
-                setTimeout(fitAndResize, 500);
-                term.focus();
-            });
+                    }
+                    const cols = term.cols;
+                    const rows = term.rows;
+                    if (ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+                        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                    }
+                } catch (e) {}
+            };
+            fitAndResize();
+            setTimeout(fitAndResize, 50);
+            setTimeout(fitAndResize, 200);
+            setTimeout(fitAndResize, 500);
+            term.focus();
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
             }
