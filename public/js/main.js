@@ -8000,11 +8000,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 隐藏占位符，显示 xterm
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
-                        xtermContainer.style.display = 'flex';
                         if (!term._opened) {
                             term._opened = true;
                             term.open(xtermContainer);
                         }
+                        xtermContainer.style.display = 'flex';
                         if (!term._initialized) {
                             term._initialized = true;
                             // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
@@ -8020,11 +8020,16 @@ document.addEventListener('DOMContentLoaded', function() {
                                     } catch (e) {}
                                 }
                             };
-                            fitAndResize();
-                            setTimeout(fitAndResize, 100);
-                            setTimeout(fitAndResize, 300);
+                            requestAnimationFrame(() => {
+                                fitAndResize();
+                                setTimeout(fitAndResize, 50);
+                                setTimeout(fitAndResize, 200);
+                                setTimeout(fitAndResize, 500);
+                                term.focus();
+                            });
+                        } else {
+                            term.focus();
                         }
-                        term.focus();
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
