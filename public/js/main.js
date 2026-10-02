@@ -8000,14 +8000,22 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 隐藏占位符，显示 xterm
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
-                        // 先显示容器，再挂载 xterm，确保 open 时能测量到正确尺寸
+                        // 先显示容器
                         xtermContainer.style.display = 'flex';
-                        if (!term._opened) {
-                            term._opened = true;
-                            term.open(xtermContainer);
-                        }
-                        if (!term._initialized) {
-                            term._initialized = true;
+                        // 等浏览器完成布局后再 open，否则 xterm 测量到 0 尺寸导致渲染全黑
+                        requestAnimationFrame(() => {
+                            if (!term._opened) {
+                                term._opened = true;
+                                term.open(xtermContainer);
+                            }
+                            if (!term._initialized) {
+                                term._initialized = true;
+                                // 写入连接过程中可能已到达的缓冲输出
+                                if (conn.terminalContent && conn.terminalContent.length > 0) {
+                                    try { term.write(conn.terminalContent); } catch(e) {}
+                                    conn.terminalContent = '';
+                                }
+                            }
                             const fitAndResize = () => {
                                 if (fitAddon) {
                                     try {
@@ -8020,16 +8028,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                     } catch (e) {}
                                 }
                             };
-                            requestAnimationFrame(() => {
-                                fitAndResize();
-                                setTimeout(fitAndResize, 50);
-                                setTimeout(fitAndResize, 200);
-                                setTimeout(fitAndResize, 500);
-                                term.focus();
-                            });
-                        } else {
+                            fitAndResize();
+                            setTimeout(fitAndResize, 50);
+                            setTimeout(fitAndResize, 200);
+                            setTimeout(fitAndResize, 500);
                             term.focus();
-                        }
+                        });
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
@@ -8237,36 +8241,38 @@ document.addEventListener('DOMContentLoaded', function() {
             if (placeholder) placeholder.style.display = 'none';
             // 显示当前连接的 xterm 容器
             conn.xtermContainer.style.display = 'flex';
-            // 如果 xterm 还没挂载到 DOM（后台连接成功时未 open），现在补 open
-            // 否则 term.write / fitAddon.fit 都无效，界面会空白或滚动条位置错乱
-            if (!term._opened) {
-                term._opened = true;
-                term.open(conn.xtermContainer);
-            }
-            // 如果有后台缓冲的数据，一次性写入
-            if (conn.terminalContent && conn.terminalContent.length > 0) {
-                term.write(conn.terminalContent);
-                conn.terminalContent = '';
-            }
-            term._initialized = true;
-            // 每次切换都重新 fit（容器从 none 变为可见时尺寸可能不准）
-            // 多次 fit 确保尺寸正确（容器刚显示时尺寸可能不稳定）
-            const fitAndResize = () => {
-                if (conn.fitAddon) {
-                    try {
-                        conn.fitAddon.fit();
-                        const cols = term.cols;
-                        const rows = term.rows;
-                        if (ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-                            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-                        }
-                    } catch (e) {}
+            // 等浏览器完成布局后再 open/fit，避免容器刚从 none 变 flex 时测量到 0 尺寸
+            requestAnimationFrame(() => {
+                // 如果 xterm 还没挂载到 DOM（后台连接成功时未 open），现在补 open
+                if (!term._opened) {
+                    term._opened = true;
+                    term.open(conn.xtermContainer);
                 }
-            };
-            fitAndResize();
-            setTimeout(fitAndResize, 100);
-            setTimeout(fitAndResize, 300);
-            term.focus();
+                // 如果有后台缓冲的数据，一次性写入
+                if (conn.terminalContent && conn.terminalContent.length > 0) {
+                    try { term.write(conn.terminalContent); } catch(e) {}
+                    conn.terminalContent = '';
+                }
+                term._initialized = true;
+                // 每次切换都重新 fit（容器从 none 变为可见时尺寸可能不准）
+                const fitAndResize = () => {
+                    if (conn.fitAddon) {
+                        try {
+                            conn.fitAddon.fit();
+                            const cols = term.cols;
+                            const rows = term.rows;
+                            if (ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+                                ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                            }
+                        } catch (e) {}
+                    }
+                };
+                fitAndResize();
+                setTimeout(fitAndResize, 50);
+                setTimeout(fitAndResize, 200);
+                setTimeout(fitAndResize, 500);
+                term.focus();
+            });
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
             }
