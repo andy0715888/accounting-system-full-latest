@@ -7998,6 +7998,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const placeholder = terminal.querySelector('.terminal-placeholder');
                     if (placeholder) placeholder.style.display = 'none';
                     xtermContainer.style.display = 'flex';
+                    // 强制重排，确保容器从 display:none 变为 flex 后有非零尺寸，
+                    // 否则 term.open() 内部测量到 0 尺寸会导致 xterm 渲染空白
+                    xtermContainer.offsetHeight;
                     if (!term._initialized) {
                         term._initialized = true;
                         try { term.open(xtermContainer); } catch(e) {}
@@ -8221,6 +8224,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const placeholder = terminal.querySelector('.terminal-placeholder');
             if (placeholder) placeholder.style.display = 'none';
             conn.xtermContainer.style.display = 'flex';
+            // 强制重排，确保容器可见后有非零尺寸再 open/fit
+            conn.xtermContainer.offsetHeight;
             if (!term._initialized) {
                 term._initialized = true;
                 try { term.open(conn.xtermContainer); } catch(e) {}
