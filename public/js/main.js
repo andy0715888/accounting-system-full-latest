@@ -7989,6 +7989,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'connected') {
+                    console.log('[SSH] connected received, activeConnId=', activeConnId, 'connId=', connId);
                     fetch(`/api/hosts/${host.id}/touch`, { method: 'POST' }).then(() => loadHosts()).catch(() => {});
                     if (activeConnId === connId) {
                         title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
@@ -8001,21 +8002,25 @@ document.addEventListener('DOMContentLoaded', function() {
                         const placeholder = terminal.querySelector('.terminal-placeholder');
                         if (placeholder) placeholder.style.display = 'none';
                         // 先显示容器，强制重排确保布局生效后再 open xterm
-                        // 否则 open 时容器 display:none，xterm 测量到 cell 尺寸为 0
-                        // fitAddon.fit() 会因 cell.width===0 直接返回 null，canvas 变成 0x0 全黑
                         xtermContainer.style.display = 'flex';
-                        // 访问 offsetHeight 强制浏览器完成布局，替代 requestAnimationFrame
-                        // 确保即使页面在后台也能正确执行
                         xtermContainer.offsetHeight;
+                        console.log('[SSH] container rect:', xtermContainer.getBoundingClientRect());
+                        console.log('[SSH] term._opened before:', term._opened);
                         if (!term._opened) {
                             term._opened = true;
-                            term.open(xtermContainer);
+                            try {
+                                term.open(xtermContainer);
+                                console.log('[SSH] term.open success, cols:', term.cols, 'rows:', term.rows);
+                            } catch(e) {
+                                console.error('[SSH] term.open error:', e);
+                            }
                         }
+                        console.log('[SSH] term._initialized before:', term._initialized);
                         if (!term._initialized) {
                             term._initialized = true;
-                            // 写入连接过程中可能已到达的缓冲输出
                             if (conn.terminalContent && conn.terminalContent.length > 0) {
-                                try { term.write(conn.terminalContent); } catch(e) {}
+                                console.log('[SSH] writing buffered content, length:', conn.terminalContent.length);
+                                try { term.write(conn.terminalContent); } catch(e) { console.error('[SSH] write error:', e); }
                                 conn.terminalContent = '';
                             }
                         }
@@ -8047,10 +8052,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
                 } else if (msg.type === 'output') {
+                    console.log('[SSH] output received, length:', msg.data.length, 'activeConnId:', activeConnId, 'connId:', connId, 'initialized:', term._initialized);
                     if (activeConnId === connId && term._initialized) {
-                        term.write(msg.data);
+                        try {
+                            term.write(msg.data);
+                        } catch(e) { console.error('[SSH] output write error:', e); }
                     } else {
-                        // 后台连接时缓冲，切换回来时一次性写入
                         conn.terminalContent += msg.data;
                     }
                 } else if (msg.type === 'error') {
