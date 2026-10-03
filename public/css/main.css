@@ -3127,6 +3127,11 @@ tr.client-row.cut-pending {
 }
 
 /* xterm.js 终端：确保容器填满且滚动条可鼠标拖动 */
+.terminal-container [data-conn-id] {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
 .terminal-container .xterm {
     width: 100%;
     height: 100%;
