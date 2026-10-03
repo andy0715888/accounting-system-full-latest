@@ -3151,11 +3151,12 @@ tr.client-row.cut-pending {
 .terminal-container .xterm .xterm-rows {
     background-color: #1e1e1e;
 }
-/* xterm-viewport 是真正的滚动容器，提高层级并允许指针事件，
-   避免被 .xterm-screen 画布遮挡导致滚动条拖不动 */
+/* xterm-viewport 是真正的滚动容器，允许指针事件以拖动滚动条。
+   注意：不要给 viewport 设置高于 screen 的 z-index，否则会遮挡 canvas 渲染的文字。
+   canvas 渲染器下 screen 与 viewport 为兄弟节点，screen 在 DOM 顺序中靠后会自然覆盖在 viewport 之上，
+   而 canvas 宽度不包含滚动条区域，因此滚动条仍可正常交互。 */
 .terminal-container .xterm-viewport {
     pointer-events: auto !important;
-    z-index: 10 !important;
     right: 0 !important;
 }
 .terminal-container .xterm-viewport::-webkit-scrollbar {
