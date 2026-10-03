@@ -7989,59 +7989,67 @@ document.addEventListener('DOMContentLoaded', function() {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'connected') {
                     fetch(`/api/hosts/${host.id}/touch`, { method: 'POST' }).then(() => loadHosts()).catch(() => {});
-                    title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
-                    input.disabled = false;
-                    sendBtn.disabled = false;
-                    disconnectBtn.style.display = 'inline-block';
-                    disconnectBtn.textContent = '断开连接';
-                    if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                    // 隐藏占位符，显示 xterm
-                    const placeholder = terminal.querySelector('.terminal-placeholder');
-                    if (placeholder) placeholder.style.display = 'none';
-                    xtermContainer.style.display = 'flex';
-                    // 强制重排，确保容器从 display:none 变为 flex 后有非零尺寸，
-                    // 否则 term.open() 内部测量到 0 尺寸会导致 xterm 渲染空白
-                    xtermContainer.offsetHeight;
-                    // 用 _opened 单独记录 open 是否真正成功，避免 open 抛异常后
-                    // _initialized 仍为 true 导致后续永远不再重试 open
-                    if (!term._opened) {
-                        try {
-                            term.open(xtermContainer);
-                            term._opened = true;
-                            term._initialized = true;
-                        } catch(e) {
-                            console.error('[SSH] term.open error:', e);
-                        }
-                    }
-                    // 带兜底的尺寸计算：fit 抛异常或测量到 0 尺寸时，
-                    // 用容器实际宽高手动 resize，避免终端画布保持 0x0 空白
-                    const fitAndResize = () => {
-                        try {
-                            if (fitAddon) fitAddon.fit();
-                        } catch(e) {}
-                        if (term.cols <= 0 || term.rows <= 0) {
-                            const rect = xtermContainer.getBoundingClientRect();
-                            if (rect.width > 10 && rect.height > 10) {
-                                try { term.resize(Math.max(2, Math.floor(rect.width / 8)), Math.max(1, Math.floor(rect.height / 16))); } catch(e) {}
+                    // 只有当前激活的连接才操作 DOM / 打开终端 / 调整尺寸。
+                    // 若连接在后台（用户已切到其他标签）成功，此处跳过所有 UI 与
+                    // term.open/fit 工作，交由 switchToConnection 在用户切回时处理，
+                    // 避免在容器被 display:none 或与其他容器共享空间时测量到错误尺寸。
+                    if (activeConnId === connId) {
+                        title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
+                        input.disabled = false;
+                        sendBtn.disabled = false;
+                        disconnectBtn.style.display = 'inline-block';
+                        disconnectBtn.textContent = '断开连接';
+                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+                        // 隐藏占位符，显示 xterm
+                        const placeholder = terminal.querySelector('.terminal-placeholder');
+                        if (placeholder) placeholder.style.display = 'none';
+                        xtermContainer.style.display = 'flex';
+                        // 强制重排，确保容器从 display:none 变为 flex 后有非零尺寸，
+                        // 否则 term.open() 内部测量到 0 尺寸会导致 xterm 渲染空白
+                        xtermContainer.offsetHeight;
+                        // 用 _opened 单独记录 open 是否真正成功，避免 open 抛异常后
+                        // _initialized 仍为 true 导致后续永远不再重试 open
+                        if (!term._opened) {
+                            try {
+                                term.open(xtermContainer);
+                                term._opened = true;
+                                term._initialized = true;
+                            } catch(e) {
+                                console.error('[SSH] term.open error:', e);
                             }
                         }
-                        const cols = term.cols;
-                        const rows = term.rows;
-                        if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-                            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                        // 带兜底的尺寸计算：fit 抛异常或测量到 0 尺寸时，
+                        // 用容器实际宽高手动 resize，避免终端画布保持 0x0 空白
+                        const fitAndResize = () => {
+                            // 若用户已切走，不再对隐藏容器做尺寸测量，避免把终端缩成 0
+                            if (activeConnId !== connId) return;
+                            try {
+                                if (fitAddon) fitAddon.fit();
+                            } catch(e) {}
+                            if (term.cols <= 0 || term.rows <= 0) {
+                                const rect = xtermContainer.getBoundingClientRect();
+                                if (rect.width > 10 && rect.height > 10) {
+                                    try { term.resize(Math.max(2, Math.floor(rect.width / 8)), Math.max(1, Math.floor(rect.height / 16))); } catch(e) {}
+                                }
+                            }
+                            const cols = term.cols;
+                            const rows = term.rows;
+                            if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+                                ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+                            }
+                        };
+                        fitAndResize();
+                        // 写入后台缓冲的数据（连接成功前累积的输出）
+                        if (conn.terminalContent && conn.terminalContent.length > 0) {
+                            try { term.write(conn.terminalContent); } catch(e) {}
+                            conn.terminalContent = '';
                         }
-                    };
-                    fitAndResize();
-                    // 写入后台缓冲的数据（连接成功前累积的输出）
-                    if (conn.terminalContent && conn.terminalContent.length > 0) {
-                        try { term.write(conn.terminalContent); } catch(e) {}
-                        conn.terminalContent = '';
+                        // 布局/字体可能尚未稳定，多次重试确保终端画布有正确尺寸
+                        setTimeout(fitAndResize, 50);
+                        setTimeout(fitAndResize, 200);
+                        setTimeout(fitAndResize, 500);
+                        setTimeout(() => { try { term.focus(); } catch(e) {} }, 150);
                     }
-                    // 布局/字体可能尚未稳定，多次重试确保终端画布有正确尺寸
-                    setTimeout(fitAndResize, 50);
-                    setTimeout(fitAndResize, 200);
-                    setTimeout(fitAndResize, 500);
-                    setTimeout(() => { try { term.focus(); } catch(e) {} }, 150);
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
                 } else if (msg.type === 'output') {
@@ -8262,6 +8270,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             // 带兜底的尺寸计算
             const fitAndResize = () => {
+                // 若用户已切走，不再对隐藏容器做尺寸测量，避免把终端缩成 0
+                if (activeConnId !== connId) return;
                 try {
                     if (conn.fitAddon) conn.fitAddon.fit();
                 } catch(e) {}
