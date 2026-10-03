@@ -6071,7 +6071,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (manageRowsBtn) {
             manageRowsBtn.classList.toggle('active', state.rowManageMode);
-            manageRowsBtn.textContent = state.rowManageMode ? '完成' : '管理行';
+            manageRowsBtn.textContent = state.rowManageMode ? '✅ 完成' : '📝 管理行';
         }
         renderTable(false);
     });
