@@ -261,24 +261,14 @@ document.addEventListener('DOMContentLoaded', function() {
     function refitActiveTerminal() {
         if (!activeConnId) return;
         const conn = sshConnections.find(c => c.id === activeConnId);
-        if (!conn || !conn.xterm || !conn.fitAddon) return;
-        const ws = conn.ws;
-        const fitAndResize = () => {
-            try {
-                conn.fitAddon.fit();
-                const cols = conn.xterm.cols;
-                const rows = conn.xterm.rows;
-                if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-                }
-            } catch (e) {}
-        };
+        if (!conn || !conn.xterm) return;
         // 容器刚从 none 变为可见，尺寸可能还不稳定，多次 fit 确保正确
+        fitTerm(conn);
         requestAnimationFrame(() => {
-            fitAndResize();
-            setTimeout(fitAndResize, 50);
-            setTimeout(fitAndResize, 200);
-            setTimeout(fitAndResize, 500);
+            fitTerm(conn);
+            setTimeout(() => fitTerm(conn), 50);
+            setTimeout(() => fitTerm(conn), 200);
+            setTimeout(() => fitTerm(conn), 500);
         });
     }
     initMenu();
@@ -7857,101 +7847,105 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /**
-     * 打开 xterm 终端并校正尺寸。
-     * 同步打开（不使用 requestAnimationFrame），打开后立即用容器实际尺寸
-     * 计算 cols/rows 并 resize，确保终端画布和滚动条位置正确。
+     * 确保 xterm 已挂载到 DOM（只做一次）。
+     * 即使容器此时 display:none 也能 open，xterm 会用默认尺寸，
+     * 后续 fitTerm 会在容器可见时校正为实际尺寸。
      */
-    function openAndFitTerm(term, container, fitAddon, conn, ws) {
-        // 打开终端（若尚未打开）
-        if (!term._opened) {
-            try {
-                term.open(container);
-                term._opened = true;
-                term._initialized = true;
-            } catch(e) {
-                console.error('[SSH] term.open error:', e);
-                return;
-            }
+    function ensureTermOpened(conn) {
+        if (conn.xterm._opened) return;
+        try {
+            conn.xterm.open(conn.xtermContainer);
+            conn.xterm._opened = true;
+        } catch (e) {
+            console.error('[SSH] term.open error:', e);
         }
-
-        const connId = conn.id;
-
-        // 尺寸校正函数：用容器实际像素尺寸 + xterm 真实字符宽高计算 cols/rows
-        const doFit = () => {
-            if (activeConnId !== connId) return;
-            const rect = container.getBoundingClientRect();
-            if (rect.width <= 10 || rect.height <= 10) return;
-
-            // 取 xterm 真实字符宽高
-            let cellW = 8, cellH = 16;
-            try {
-                const dim = term._core && term._core._renderService && term._core._renderService.dimensions;
-                if (dim && dim.css && dim.css.cell) {
-                    cellW = dim.css.cell.width || cellW;
-                    cellH = dim.css.cell.height || cellH;
-                }
-            } catch(e) {}
-            if (cellW <= 0) cellW = 8;
-            if (cellH <= 0) cellH = 16;
-
-            const sbw = 14; // 滚动条预留
-            const cols = Math.max(2, Math.floor((rect.width - sbw) / cellW));
-            const rows = Math.max(1, Math.floor(rect.height / cellH));
-
-            // 先尝试 fitAddon
-            try {
-                if (fitAddon) fitAddon.fit();
-            } catch(e) {}
-
-            // 无论 fit 结果如何，用计算值强校验一次
-            if (cols !== term.cols || rows !== term.rows) {
-                try { term.resize(cols, rows); } catch(e) {}
-            }
-
-            // 强制 xterm 根元素尺寸与容器一致（防止 xterm 内部 inline width 导致宽度不足）
-            if (term.element) {
-                term.element.style.width = rect.width + 'px';
-                term.element.style.height = rect.height + 'px';
-            }
-
-            const c = term.cols, r = term.rows;
-            if (ws && ws.readyState === WebSocket.OPEN && c > 0 && r > 0) {
-                ws.send(JSON.stringify({ type: 'resize', cols: c, rows: r }));
-            }
-        };
-
-        doFit();
-        // 写入后台缓冲的数据
-        if (conn.terminalContent && conn.terminalContent.length > 0) {
-            try { term.write(conn.terminalContent); } catch(e) {}
-            conn.terminalContent = '';
-        }
-        // 多次重试确保尺寸正确（布局/字体可能延迟稳定）
-        setTimeout(doFit, 50);
-        setTimeout(doFit, 200);
-        setTimeout(doFit, 500);
-        setTimeout(doFit, 1000);
-        setTimeout(() => { try { term.focus(); } catch(e) {} }, 150);
     }
 
-    function connectSSH(host) {
-        const connId = ++connIdCounter;
-        const terminal = document.getElementById('terminalContainer');
+    /**
+     * 把终端尺寸适配到容器，并通知服务端 PTY resize。
+     * 只对当前激活的连接生效。
+     */
+    function fitTerm(conn) {
+        const term = conn.xterm;
+        const container = conn.xtermContainer;
+        if (!term || !container || !term._opened) return;
+        if (activeConnId !== conn.id) return;
+
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 10 || rect.height <= 10) return;
+
+        try {
+            if (conn.fitAddon) conn.fitAddon.fit();
+        } catch (e) {}
+
+        const cols = term.cols, rows = term.rows;
+        if (conn.ws && conn.ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
+            conn.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+    }
+
+    /**
+     * 把后台缓冲的输出一次性刷到终端。
+     */
+    function flushBuffer(conn) {
+        if (!conn.buffer || conn.buffer.length === 0) return;
+        try {
+            conn.xterm.write(conn.buffer);
+        } catch (e) {
+            console.error('[SSH] buffer flush error:', e);
+        }
+        conn.buffer = '';
+    }
+
+    /**
+     * 根据连接状态更新标题、输入框、按钮等 UI 元素。
+     * state: 'connected' | 'connecting' | 'disconnected'
+     */
+    function showConnUI(conn, state) {
         const title = document.querySelector('.terminal-title');
         const input = document.getElementById('terminalInput');
         const sendBtn = document.getElementById('sendCmdBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
         const fileManagerBtn = document.getElementById('fileManagerBtn');
+        const host = conn.host;
 
-        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProto}//${location.host}/ssh`;
-        const ws = new WebSocket(wsUrl);
+        if (state === 'connected') {
+            title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
+            input.disabled = false;
+            sendBtn.disabled = false;
+            disconnectBtn.style.display = 'inline-block';
+            disconnectBtn.textContent = '断开连接';
+            if (fileManagerBtn) fileManagerBtn.style.display = 'inline-block';
+            const terminal = document.getElementById('terminalContainer');
+            const placeholder = terminal.querySelector('.terminal-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
+        } else if (state === 'connecting') {
+            title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
+            input.disabled = true;
+            sendBtn.disabled = true;
+            disconnectBtn.style.display = 'none';
+            if (fileManagerBtn) fileManagerBtn.style.display = 'none';
+        } else {
+            title.textContent = `${host.name} - 已断开`;
+            input.disabled = true;
+            sendBtn.disabled = true;
+            disconnectBtn.style.display = 'inline-block';
+            disconnectBtn.textContent = '发起连接';
+            if (fileManagerBtn) fileManagerBtn.style.display = 'inline-block';
+        }
+    }
 
-        // 每个连接有自己的 xterm 容器和实例
+    function connectSSH(host) {
+        const connId = ++connIdCounter;
+        const terminal = document.getElementById('terminalContainer');
+
+        // 每个连接有自己的 xterm 容器
         const xtermContainer = document.createElement('div');
-        xtermContainer.style.cssText = 'width:100%;flex:1;min-height:0;display:none;';
+        xtermContainer.style.cssText = 'flex:1;min-height:0;display:none;width:100%;height:100%;';
         xtermContainer.dataset.connId = connId;
         terminal.appendChild(xtermContainer);
+
+        // 创建 xterm 实例
         const savedBg = localStorage.getItem('sshTerminalBg') || '#1e1e1e';
         const term = new Terminal({
             cursorBlink: true,
@@ -7973,8 +7967,6 @@ document.addEventListener('DOMContentLoaded', function() {
             scrollback: 5000,
             convertEol: false
         });
-        // 注意：term.open 延迟到连接成功后再执行，避免容器 display:none 时 xterm 测量到 0 尺寸
-        term._initialized = false;
         term._opened = false;
 
         // Fit 插件
@@ -7986,70 +7978,53 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (e) {}
 
+        // 连接对象（先创建，后续 WS 回调里要用）
+        const conn = {
+            id: connId,
+            host: host,
+            ws: null,
+            clientPing: null,
+            buffer: '',
+            xterm: term,
+            xtermContainer: xtermContainer,
+            fitAddon: fitAddon,
+            status: 'connecting',
+            monitorData: null,
+            _connected: false
+        };
+        sshConnections.push(conn);
+
+        // 立即打开 xterm（即使容器隐藏也不影响，后续 fit 会校正尺寸）
+        ensureTermOpened(conn);
+
         // xterm 输入发送到后端
         term.onData((data) => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'input', data: data }));
+            if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
+                conn.ws.send(JSON.stringify({ type: 'input', data: data }));
             }
         });
 
-        // 点击 xterm 时确保获得焦点（全屏程序如 apt dialog 需要焦点在终端上）
+        // 点击 xterm 时确保获得焦点
         xtermContainer.addEventListener('mousedown', () => {
             setTimeout(() => { try { term.focus(); } catch(e) {} }, 10);
         });
 
-        // 窗口大小变化时调整终端（仅当前激活的连接）
-        const handleResize = () => {
-            if (activeConnId !== connId) return;
-            if (!fitAddon || !term._initialized) return;
-            try {
-                fitAddon.fit();
-                const rect = xtermContainer.getBoundingClientRect();
-                if (rect.width > 10 && rect.height > 10) {
-                    let cellW = 8, cellH = 16;
-                    try {
-                        const dim = term._core && term._core._renderService && term._core._renderService.dimensions;
-                        if (dim && dim.css && dim.css.cell) {
-                            cellW = dim.css.cell.width || cellW;
-                            cellH = dim.css.cell.height || cellH;
-                        }
-                    } catch(e) {}
-                    const cols = Math.max(2, Math.floor((rect.width - 14) / cellW));
-                    const rows = Math.max(1, Math.floor(rect.height / cellH));
-                    if (cols !== term.cols || rows !== term.rows) {
-                        term.resize(cols, rows);
-                    }
-                    if (term.element) {
-                        term.element.style.width = rect.width + 'px';
-                        term.element.style.height = rect.height + 'px';
-                    }
-                }
-                const cols = term.cols;
-                const rows = term.rows;
-                if (ws && ws.readyState === WebSocket.OPEN && cols > 0 && rows > 0) {
-                    ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-                }
-            } catch (e) {}
-        };
-        window.addEventListener('resize', handleResize);
+        // ResizeObserver：容器尺寸变化时自动 fit（比 window.resize 更可靠）
+        const ro = new ResizeObserver(() => {
+            if (activeConnId === connId) fitTerm(conn);
+        });
+        ro.observe(xtermContainer);
+        conn._resizeObserver = ro;
 
-        const conn = {
-            id: connId,
-            host: host,
-            ws: ws,
-            clientPing: null,
-            terminalContent: '',   // 保留用于后台连接时的缓冲
-            xterm: term,
-            xtermContainer: xtermContainer,
-            fitAddon: fitAddon,
-            handleResize: handleResize
-        };
-        sshConnections.push(conn);
-
-        switchToConnection(connId);
+        // 设为当前激活并显示连接中状态
+        activeConnId = connId;
         renderSshTabs();
+        showConnUI(conn, 'connecting');
 
-        title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
+        // 发起 WebSocket
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProto}//${location.host}/ssh`);
+        conn.ws = ws;
 
         const clientPing = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -8078,7 +8053,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 ws.send(JSON.stringify({ type: 'connect', host: host.host, port: host.port, username: host.username, password, proxy }));
             } catch (err) {
-                term.writeln('\r\n\x1b[31m获取密码失败: ' + err.message + '\x1b[0m');
+                try { term.writeln('\r\n\x1b[31m获取密码失败: ' + err.message + '\x1b[0m'); } catch(e) {}
             }
         };
 
@@ -8087,55 +8062,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'connected') {
                     fetch(`/api/hosts/${host.id}/touch`, { method: 'POST' }).then(() => loadHosts()).catch(() => {});
-                    // 标记连接已建立（供 output 缓冲判断）
                     conn._connected = true;
-                    // 只有当前激活的连接才操作 DOM / 打开终端 / 调整尺寸。
+                    conn.status = 'connected';
                     if (activeConnId === connId) {
-                        title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
-                        input.disabled = false;
-                        sendBtn.disabled = false;
-                        disconnectBtn.style.display = 'inline-block';
-                        disconnectBtn.textContent = '断开连接';
-                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-                        // 隐藏占位符，显示 xterm
-                        const placeholder = terminal.querySelector('.terminal-placeholder');
-                        if (placeholder) placeholder.style.display = 'none';
-                        xtermContainer.style.display = 'block';
-                        // 强制重排
-                        xtermContainer.offsetHeight;
-                        openAndFitTerm(term, xtermContainer, fitAddon, conn, ws);
+                        showConnUI(conn, 'connected');
+                        xtermContainer.style.display = 'flex';
+                        xtermContainer.offsetHeight; // 强制重排
+                        fitTerm(conn);
+                        flushBuffer(conn);
+                        requestAnimationFrame(() => fitTerm(conn));
+                        setTimeout(() => fitTerm(conn), 100);
+                        setTimeout(() => fitTerm(conn), 300);
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
                 } else if (msg.type === 'output') {
-                    if (activeConnId === connId && term._initialized) {
-                        try {
-                            term.write(msg.data);
-                        } catch(e) { console.error('[SSH] output write error:', e); }
+                    // 激活且已打开 → 直接写；否则缓冲
+                    if (activeConnId === connId && term._opened) {
+                        try { term.write(msg.data); } catch(e) { console.error('[SSH] output write error:', e); }
                     } else {
-                        conn.terminalContent += msg.data;
+                        conn.buffer += msg.data;
+                        if (conn.buffer.length > 500000) conn.buffer = conn.buffer.slice(-200000);
                     }
                 } else if (msg.type === 'error') {
-                    if (activeConnId === connId) {
-                        term.writeln('\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m');
-                        title.textContent = `${host.name} - 连接失败`;
-                        input.disabled = true;
-                        sendBtn.disabled = true;
-                        disconnectBtn.style.display = 'inline-block';
-                        disconnectBtn.textContent = '发起连接';
-                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+                    if (activeConnId === connId && term._opened) {
+                        try { term.writeln('\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m'); } catch(e) {}
+                        showConnUI(conn, 'disconnected');
                     }
+                    conn.status = 'error';
                     updateTabStatus(connId, 'error');
                 } else if (msg.type === 'disconnected') {
-                    if (activeConnId === connId) {
-                        title.textContent = `${host.name} - 已断开`;
-                        term.writeln('\r\n\x1b[33m' + msg.data + '\x1b[0m');
-                        input.disabled = true;
-                        sendBtn.disabled = true;
-                        disconnectBtn.style.display = 'inline-block';
-                        disconnectBtn.textContent = '发起连接';
-                        if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+                    if (activeConnId === connId && term._opened) {
+                        try { term.writeln('\r\n\x1b[33m' + msg.data + '\x1b[0m'); } catch(e) {}
+                        showConnUI(conn, 'disconnected');
                     }
+                    conn.status = 'disconnected';
                     updateTabStatus(connId, 'disconnected');
                     clearInterval(clientPing);
                     stopMonitor(connId);
@@ -8168,14 +8129,10 @@ document.addEventListener('DOMContentLoaded', function() {
         ws.onerror = () => {
             if (conn.ws === ws) conn.ws = null;
             if (activeConnId === connId) {
-                title.textContent = '连接失败';
-                term.writeln('\r\n\x1b[31mWebSocket 连接失败\x1b[0m');
-                input.disabled = true;
-                sendBtn.disabled = true;
-                disconnectBtn.style.display = 'inline-block';
-                disconnectBtn.textContent = '发起连接';
-                if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+                if (term._opened) { try { term.writeln('\r\n\x1b[31mWebSocket 连接失败\x1b[0m'); } catch(e) {} }
+                showConnUI(conn, 'disconnected');
             }
+            conn.status = 'error';
             updateTabStatus(connId, 'error');
             clearInterval(clientPing);
             stopMonitor(connId);
@@ -8185,16 +8142,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (conn.ws === ws) conn.ws = null;
             clearInterval(clientPing);
             stopMonitor(connId);
-            window.removeEventListener('resize', handleResize);
-            if (activeConnId === connId && title.textContent.indexOf('已断开') === -1 && title.textContent.indexOf('连接失败') === -1) {
-                title.textContent = `${host.name} - 连接已关闭`;
-                term.writeln('\r\n\x1b[33m[连接已关闭]\x1b[0m');
-                input.disabled = true;
-                sendBtn.disabled = true;
-                disconnectBtn.style.display = 'inline-block';
-                disconnectBtn.textContent = '发起连接';
-                if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+            if (activeConnId === connId && !conn._connected) {
+                if (term._opened) { try { term.writeln('\r\n\x1b[33m[连接已关闭]\x1b[0m'); } catch(e) {} }
+                showConnUI(conn, 'disconnected');
             }
+            conn.status = 'closed';
             updateTabStatus(connId, 'closed');
         };
     }
@@ -8210,28 +8162,10 @@ document.addEventListener('DOMContentLoaded', function() {
         stopMonitor(connId);
         updateTabStatus(connId, 'disconnected');
         if (activeConnId === connId) {
-            const title = document.querySelector('.terminal-title');
-            const input = document.getElementById('terminalInput');
-            const sendBtn = document.getElementById('sendCmdBtn');
-            const disconnectBtn = document.getElementById('disconnectBtn');
-            const fileManagerBtn = document.getElementById('fileManagerBtn');
-            const terminal = document.getElementById('terminalContainer');
-            title.textContent = `${conn.host.name} - 已断开`;
-            if (terminal) {
-                const out = document.getElementById('terminalOutput');
-                if (out) {
-                    const span = document.createElement('span');
-                    span.style.color = '#e6a23c';
-                    span.textContent = '\n[连接已断开]\n';
-                    out.appendChild(span);
-                    out.scrollTop = out.scrollHeight;
-                }
+            if (conn.xterm && conn.xterm._opened) {
+                try { conn.xterm.writeln('\r\n\x1b[33m[连接已断开]\x1b[0m'); } catch(e) {}
             }
-            input.disabled = true;
-            sendBtn.disabled = true;
-            disconnectBtn.style.display = 'inline-block';
-            disconnectBtn.textContent = '发起连接';
-            if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
+            showConnUI(conn, 'disconnected');
         }
     }
 
@@ -8284,60 +8218,37 @@ document.addEventListener('DOMContentLoaded', function() {
         renderSshTabs();
 
         const terminal = document.getElementById('terminalContainer');
-        const title = document.querySelector('.terminal-title');
-        const input = document.getElementById('terminalInput');
-        const sendBtn = document.getElementById('sendCmdBtn');
-        const disconnectBtn = document.getElementById('disconnectBtn');
-        const fileManagerBtn = document.getElementById('fileManagerBtn');
 
         // 先隐藏所有 xterm 容器
         terminal.querySelectorAll('[data-conn-id]').forEach(el => {
             el.style.display = 'none';
         });
 
-        const ws = conn.ws;
-        const host = conn.host;
-        const isOpen = ws && ws.readyState === WebSocket.OPEN;
-        const term = conn.xterm;
+        // 确保 xterm 已挂载（创建时就 open 了，这里兜底）
+        ensureTermOpened(conn);
 
-        if (isOpen && term) {
-            title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
-            input.disabled = false;
-            sendBtn.disabled = false;
-            disconnectBtn.style.display = 'inline-block';
-            disconnectBtn.textContent = '断开连接';
-            if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-            // 隐藏占位符，显示 xterm
-            const placeholder = terminal.querySelector('.terminal-placeholder');
-            if (placeholder) placeholder.style.display = 'none';
-            conn.xtermContainer.style.display = 'block';
-            // 强制重排
-            conn.xtermContainer.offsetHeight;
-            // 同步打开终端并校正尺寸
-            openAndFitTerm(term, conn.xtermContainer, conn.fitAddon, conn, ws);
+        const ws = conn.ws;
+        const isOpen = ws && ws.readyState === WebSocket.OPEN;
+        const isConnecting = ws && ws.readyState === WebSocket.CONNECTING;
+
+        if (isOpen) {
+            showConnUI(conn, 'connected');
+            conn.xtermContainer.style.display = 'flex';
+            conn.xtermContainer.offsetHeight; // 强制重排
+            fitTerm(conn);
+            flushBuffer(conn);
+            requestAnimationFrame(() => fitTerm(conn));
+            setTimeout(() => fitTerm(conn), 100);
+            setTimeout(() => fitTerm(conn), 300);
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
             }
-        } else if (ws && ws.readyState === WebSocket.CONNECTING) {
-            title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
-            input.disabled = true;
-            sendBtn.disabled = true;
-            disconnectBtn.style.display = 'none';
-            if (fileManagerBtn) fileManagerBtn.style.display = "none";
+        } else if (isConnecting) {
+            showConnUI(conn, 'connecting');
         } else {
-            title.textContent = `${host.name} - 已断开`;
-            input.disabled = true;
-            sendBtn.disabled = true;
-            disconnectBtn.style.display = 'inline-block';
-            disconnectBtn.textContent = '发起连接';
-            if (fileManagerBtn) fileManagerBtn.style.display = "inline-block";
-            if (term && conn.xtermContainer) {
-                conn.xtermContainer.style.display = 'block';
-                if (conn.terminalContent && conn.terminalContent.length > 0) {
-                    term.write(conn.terminalContent);
-                    conn.terminalContent = '';
-                }
-            }
+            showConnUI(conn, 'disconnected');
+            conn.xtermContainer.style.display = 'flex';
+            flushBuffer(conn);
         }
     }
 
@@ -8357,7 +8268,7 @@ document.addEventListener('DOMContentLoaded', function() {
             try { conn.ws.close(); } catch(e) {}
         }
         if (conn.clientPing) clearInterval(conn.clientPing);
-        if (conn.handleResize) window.removeEventListener('resize', conn.handleResize);
+        if (conn._resizeObserver) conn._resizeObserver.disconnect();
         stopMonitor(connId);
         // 销毁 xterm 实例和容器
         if (conn.xterm) {
@@ -9678,7 +9589,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!conn) return;
 
         if (type) {
-            conn.terminalContent += text;
+            conn.buffer += text;
             const span = document.createElement('span');
             if (type === 'error') span.style.color = '#f56c6c';
             else if (type === 'warning') span.style.color = '#e6a23c';
@@ -9689,12 +9600,12 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        conn.terminalContent += text;
+        conn.buffer += text;
 
         // 处理清屏序列（全屏程序如 mtr/nano/top 会发送这些）
         // \x1b[2J = 清全屏，\x1b[H = 光标回原点，\x0c = Ctrl+L 清屏
         // 策略：找到最后一个清屏序列，只保留其后的内容
-        let buffer = conn.terminalContent;
+        let buffer = conn.buffer;
         const clearPatterns = [
             /\x1b\[2J/g,        // 清全屏
             /\x1b\[H\x1b\[2J/g, // 光标回原点+清屏（mtr常用）
@@ -9710,7 +9621,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (lastClearPos > 0) {
             buffer = buffer.substring(lastClearPos);
-            conn.terminalContent = buffer;
+            conn.buffer = buffer;
         }
 
         // 处理单独回车符 \r（apt 进度条、mtr 行内刷新用）
@@ -10210,7 +10121,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 } else if (action === 'clear') {
                     if (conn && conn.xterm) conn.xterm.clear();
-                    if (conn) conn.terminalContent = '';
+                    if (conn) conn.buffer = '';
                 } else if (action === 'paste') {
                     // 粘贴并运行：读取剪贴板，发送到 SSH
                     let text = '';
