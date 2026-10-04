@@ -7994,8 +7994,10 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         sshConnections.push(conn);
 
-        // 立即打开 xterm（即使容器隐藏也不影响，后续 fit 会校正尺寸）
-        ensureTermOpened(conn);
+        // 注意：不在此处打开 xterm。
+        // 若在容器 display:none 时 open，xterm 会测量到 0 尺寸的单元格，
+        // 导致 fit addon 的 proposeDimensions 永远返回 undefined，终端无法渲染。
+        // 终端将在容器可见后（connected/switchToConnection）再打开。
 
         // xterm 输入发送到后端
         term.onData((data) => {
@@ -8067,7 +8069,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (activeConnId === connId) {
                         showConnUI(conn, 'connected');
                         xtermContainer.style.display = 'flex';
-                        xtermContainer.offsetHeight; // 强制重排
+                        xtermContainer.offsetHeight; // 强制重排，确保容器可见后再 open
+                        // 关键：必须在容器可见后再 open，否则 xterm 测量到 0 尺寸单元格
+                        ensureTermOpened(conn);
                         fitTerm(conn);
                         flushBuffer(conn);
                         requestAnimationFrame(() => fitTerm(conn));
@@ -8085,14 +8089,20 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (conn.buffer.length > 500000) conn.buffer = conn.buffer.slice(-200000);
                     }
                 } else if (msg.type === 'error') {
-                    if (activeConnId === connId && term._opened) {
+                    if (activeConnId === connId) {
+                        xtermContainer.style.display = 'flex';
+                        xtermContainer.offsetHeight;
+                        ensureTermOpened(conn);
                         try { term.writeln('\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m'); } catch(e) {}
                         showConnUI(conn, 'disconnected');
                     }
                     conn.status = 'error';
                     updateTabStatus(connId, 'error');
                 } else if (msg.type === 'disconnected') {
-                    if (activeConnId === connId && term._opened) {
+                    if (activeConnId === connId) {
+                        xtermContainer.style.display = 'flex';
+                        xtermContainer.offsetHeight;
+                        ensureTermOpened(conn);
                         try { term.writeln('\r\n\x1b[33m' + msg.data + '\x1b[0m'); } catch(e) {}
                         showConnUI(conn, 'disconnected');
                     }
@@ -8129,7 +8139,10 @@ document.addEventListener('DOMContentLoaded', function() {
         ws.onerror = () => {
             if (conn.ws === ws) conn.ws = null;
             if (activeConnId === connId) {
-                if (term._opened) { try { term.writeln('\r\n\x1b[31mWebSocket 连接失败\x1b[0m'); } catch(e) {} }
+                xtermContainer.style.display = 'flex';
+                xtermContainer.offsetHeight;
+                ensureTermOpened(conn);
+                try { term.writeln('\r\n\x1b[31mWebSocket 连接失败\x1b[0m'); } catch(e) {}
                 showConnUI(conn, 'disconnected');
             }
             conn.status = 'error';
@@ -8143,7 +8156,10 @@ document.addEventListener('DOMContentLoaded', function() {
             clearInterval(clientPing);
             stopMonitor(connId);
             if (activeConnId === connId && !conn._connected) {
-                if (term._opened) { try { term.writeln('\r\n\x1b[33m[连接已关闭]\x1b[0m'); } catch(e) {} }
+                xtermContainer.style.display = 'flex';
+                xtermContainer.offsetHeight;
+                ensureTermOpened(conn);
+                try { term.writeln('\r\n\x1b[33m[连接已关闭]\x1b[0m'); } catch(e) {}
                 showConnUI(conn, 'disconnected');
             }
             conn.status = 'closed';
@@ -8224,9 +8240,6 @@ document.addEventListener('DOMContentLoaded', function() {
             el.style.display = 'none';
         });
 
-        // 确保 xterm 已挂载（创建时就 open 了，这里兜底）
-        ensureTermOpened(conn);
-
         const ws = conn.ws;
         const isOpen = ws && ws.readyState === WebSocket.OPEN;
         const isConnecting = ws && ws.readyState === WebSocket.CONNECTING;
@@ -8234,7 +8247,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (isOpen) {
             showConnUI(conn, 'connected');
             conn.xtermContainer.style.display = 'flex';
-            conn.xtermContainer.offsetHeight; // 强制重排
+            conn.xtermContainer.offsetHeight; // 强制重排，确保容器可见
+            // 关键：容器可见后再 open，避免 xterm 测量到 0 尺寸单元格
+            ensureTermOpened(conn);
             fitTerm(conn);
             flushBuffer(conn);
             requestAnimationFrame(() => fitTerm(conn));
@@ -8248,6 +8263,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             showConnUI(conn, 'disconnected');
             conn.xtermContainer.style.display = 'flex';
+            conn.xtermContainer.offsetHeight;
+            ensureTermOpened(conn);
             flushBuffer(conn);
         }
     }
