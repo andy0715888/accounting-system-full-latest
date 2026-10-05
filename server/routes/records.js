@@ -378,7 +378,7 @@ router.get('/filter-options', requireAuth, async (req, res) => {
 });
 
 // 获取单条记录（跨标签粘贴时用于读取来源行的完整 data）
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id(\\d+)', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const recordId = parseInt(req.params.id);
@@ -392,7 +392,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     }
 });
 
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id(\\d+)', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const recordId = req.params.id;
@@ -420,7 +420,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     }
 });
 
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id(\\d+)', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const recordId = req.params.id;
