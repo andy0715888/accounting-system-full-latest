@@ -7994,8 +7994,10 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         sshConnections.push(conn);
 
-        // 立即打开 xterm（即使容器隐藏也不影响，后续 fit 会校正尺寸）
-        ensureTermOpened(conn);
+        // 注意：不能在此处调用 ensureTermOpened！
+        // 容器此时 display:none，xterm 会测量到单元格尺寸为 0，
+        // 导致所有行被创建为 0x0，文字永远无法渲染。
+        // term.open() 延迟到容器可见后（connected 回调 / switchToConnection）执行。
 
         // xterm 输入发送到后端
         term.onData((data) => {
@@ -8068,6 +8070,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         showConnUI(conn, 'connected');
                         xtermContainer.style.display = 'flex';
                         xtermContainer.offsetHeight; // 强制重排
+                        // 容器可见后再 open，确保 xterm 能测量到正确的单元格尺寸
+                        ensureTermOpened(conn);
                         fitTerm(conn);
                         flushBuffer(conn);
                         requestAnimationFrame(() => fitTerm(conn));
@@ -8224,9 +8228,6 @@ document.addEventListener('DOMContentLoaded', function() {
             el.style.display = 'none';
         });
 
-        // 确保 xterm 已挂载（创建时就 open 了，这里兜底）
-        ensureTermOpened(conn);
-
         const ws = conn.ws;
         const isOpen = ws && ws.readyState === WebSocket.OPEN;
         const isConnecting = ws && ws.readyState === WebSocket.CONNECTING;
@@ -8235,6 +8236,8 @@ document.addEventListener('DOMContentLoaded', function() {
             showConnUI(conn, 'connected');
             conn.xtermContainer.style.display = 'flex';
             conn.xtermContainer.offsetHeight; // 强制重排
+            // 容器可见后再 open，确保 xterm 能测量到正确的单元格尺寸
+            ensureTermOpened(conn);
             fitTerm(conn);
             flushBuffer(conn);
             requestAnimationFrame(() => fitTerm(conn));
@@ -8248,6 +8251,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             showConnUI(conn, 'disconnected');
             conn.xtermContainer.style.display = 'flex';
+            conn.xtermContainer.offsetHeight;
+            ensureTermOpened(conn);
             flushBuffer(conn);
         }
     }
