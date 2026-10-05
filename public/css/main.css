@@ -3151,11 +3151,15 @@ tr.client-row.cut-pending {
 .terminal-container .xterm .xterm-rows {
     background-color: #1e1e1e;
 }
-/* xterm-viewport 是真正的滚动容器，提高层级并允许指针事件，
-   避免被 .xterm-screen 画布遮挡导致滚动条拖不动 */
+/* xterm-screen 必须在 xterm-viewport 之上，否则文字会被黑色 viewport 层遮盖 */
+.terminal-container .xterm .xterm-screen {
+    z-index: 1;
+    position: relative;
+}
+/* xterm-viewport 是滚动容器，层级低于 screen，但滚动条在右侧边缘仍可拖动 */
 .terminal-container .xterm-viewport {
     pointer-events: auto !important;
-    z-index: 10 !important;
+    z-index: 0 !important;
     right: 0 !important;
 }
 .terminal-container .xterm-viewport::-webkit-scrollbar {

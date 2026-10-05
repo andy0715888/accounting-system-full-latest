@@ -7908,6 +7908,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const disconnectBtn = document.getElementById('disconnectBtn');
         const fileManagerBtn = document.getElementById('fileManagerBtn');
         const host = conn.host;
+        const terminal = document.getElementById('terminalContainer');
+        const placeholder = terminal.querySelector('.terminal-placeholder');
 
         if (state === 'connected') {
             title.textContent = `${host.name} (${host.host}:${host.port}) - 已连接`;
@@ -7916,8 +7918,6 @@ document.addEventListener('DOMContentLoaded', function() {
             disconnectBtn.style.display = 'inline-block';
             disconnectBtn.textContent = '断开连接';
             if (fileManagerBtn) fileManagerBtn.style.display = 'inline-block';
-            const terminal = document.getElementById('terminalContainer');
-            const placeholder = terminal.querySelector('.terminal-placeholder');
             if (placeholder) placeholder.style.display = 'none';
         } else if (state === 'connecting') {
             title.textContent = `正在连接 ${host.name} (${host.host}:${host.port})...`;
@@ -7925,6 +7925,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sendBtn.disabled = true;
             disconnectBtn.style.display = 'none';
             if (fileManagerBtn) fileManagerBtn.style.display = 'none';
+            if (placeholder) placeholder.style.display = 'none';
         } else {
             title.textContent = `${host.name} - 已断开`;
             input.disabled = true;
@@ -7932,6 +7933,7 @@ document.addEventListener('DOMContentLoaded', function() {
             disconnectBtn.style.display = 'inline-block';
             disconnectBtn.textContent = '发起连接';
             if (fileManagerBtn) fileManagerBtn.style.display = 'inline-block';
+            if (placeholder) placeholder.style.display = 'none';
         }
     }
 
@@ -7939,9 +7941,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const connId = ++connIdCounter;
         const terminal = document.getElementById('terminalContainer');
 
-        // 每个连接有自己的 xterm 容器
+        // 每个连接有自己的 xterm 容器（display:block 而非 flex，确保 xterm 能正确测量尺寸）
         const xtermContainer = document.createElement('div');
-        xtermContainer.style.cssText = 'flex:1;min-height:0;display:none;width:100%;height:100%;';
+        xtermContainer.style.cssText = 'flex:1;min-height:0;display:none;';
         xtermContainer.dataset.connId = connId;
         terminal.appendChild(xtermContainer);
 
@@ -8068,15 +8070,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     conn.status = 'connected';
                     if (activeConnId === connId) {
                         showConnUI(conn, 'connected');
-                        xtermContainer.style.display = 'flex';
-                        xtermContainer.offsetHeight; // 强制重排
-                        // 容器可见后再 open，确保 xterm 能测量到正确的单元格尺寸
+                        xtermContainer.style.display = 'block';
+                        xtermContainer.offsetHeight; // 强制重排，确保容器有非零尺寸
                         ensureTermOpened(conn);
                         fitTerm(conn);
                         flushBuffer(conn);
-                        requestAnimationFrame(() => fitTerm(conn));
-                        setTimeout(() => fitTerm(conn), 100);
-                        setTimeout(() => fitTerm(conn), 300);
+                        setTimeout(() => fitTerm(conn), 50);
+                        setTimeout(() => fitTerm(conn), 200);
+                        setTimeout(() => fitTerm(conn), 500);
                     }
                     updateTabStatus(connId, 'connected');
                     startMonitor(connId);
@@ -8089,21 +8090,41 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (conn.buffer.length > 500000) conn.buffer = conn.buffer.slice(-200000);
                     }
                 } else if (msg.type === 'error') {
-                    if (activeConnId === connId && term._opened) {
-                        try { term.writeln('\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m'); } catch(e) {}
-                        showConnUI(conn, 'disconnected');
-                    }
                     conn.status = 'error';
                     updateTabStatus(connId, 'error');
-                } else if (msg.type === 'disconnected') {
-                    if (activeConnId === connId && term._opened) {
-                        try { term.writeln('\r\n\x1b[33m' + msg.data + '\x1b[0m'); } catch(e) {}
+                    if (activeConnId === connId) {
+                        xtermContainer.style.display = 'block';
+                        xtermContainer.offsetHeight;
+                        ensureTermOpened(conn);
+                        fitTerm(conn);
+                        if (term._opened) {
+                            try { term.writeln('\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m'); } catch(e) {}
+                        } else {
+                            conn.buffer += '\r\n\x1b[31m[错误] ' + msg.data + '\x1b[0m';
+                            flushBuffer(conn);
+                        }
                         showConnUI(conn, 'disconnected');
+                        setTimeout(() => fitTerm(conn), 50);
                     }
+                } else if (msg.type === 'disconnected') {
                     conn.status = 'disconnected';
                     updateTabStatus(connId, 'disconnected');
                     clearInterval(clientPing);
                     stopMonitor(connId);
+                    if (activeConnId === connId) {
+                        xtermContainer.style.display = 'block';
+                        xtermContainer.offsetHeight;
+                        ensureTermOpened(conn);
+                        fitTerm(conn);
+                        if (term._opened) {
+                            try { term.writeln('\r\n\x1b[33m' + msg.data + '\x1b[0m'); } catch(e) {}
+                        } else {
+                            conn.buffer += '\r\n\x1b[33m' + msg.data + '\x1b[0m';
+                            flushBuffer(conn);
+                        }
+                        showConnUI(conn, 'disconnected');
+                        setTimeout(() => fitTerm(conn), 50);
+                    }
                 } else if (msg.type === 'sftp_list') {
                     handleSftpList(msg.data);
                     const filesTab = document.querySelector('[data-cmd-tab="files"]');
@@ -8234,15 +8255,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (isOpen) {
             showConnUI(conn, 'connected');
-            conn.xtermContainer.style.display = 'flex';
-            conn.xtermContainer.offsetHeight; // 强制重排
-            // 容器可见后再 open，确保 xterm 能测量到正确的单元格尺寸
+            conn.xtermContainer.style.display = 'block';
+            conn.xtermContainer.offsetHeight;
             ensureTermOpened(conn);
             fitTerm(conn);
             flushBuffer(conn);
-            requestAnimationFrame(() => fitTerm(conn));
-            setTimeout(() => fitTerm(conn), 100);
-            setTimeout(() => fitTerm(conn), 300);
+            setTimeout(() => fitTerm(conn), 50);
+            setTimeout(() => fitTerm(conn), 200);
             if (conn.monitorData) {
                 updateMonitorUI(conn.monitorData);
             }
@@ -8250,9 +8269,10 @@ document.addEventListener('DOMContentLoaded', function() {
             showConnUI(conn, 'connecting');
         } else {
             showConnUI(conn, 'disconnected');
-            conn.xtermContainer.style.display = 'flex';
+            conn.xtermContainer.style.display = 'block';
             conn.xtermContainer.offsetHeight;
             ensureTermOpened(conn);
+            fitTerm(conn);
             flushBuffer(conn);
         }
     }
