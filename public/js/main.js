@@ -7856,6 +7856,12 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             conn.xterm.open(conn.xtermContainer);
             conn.xterm._opened = true;
+            // open() 后 xterm 内部 DOM（viewport/screen/rows）才被创建，
+            // 用 JS 覆盖掉 xterm.css 和 main.css 的硬编码黑色背景
+            const bg = localStorage.getItem('sshTerminalBg') || '#1e1e1e';
+            conn.xtermContainer.querySelectorAll('.xterm-viewport, .xterm-screen, .xterm-rows').forEach(el => {
+                el.style.backgroundColor = bg;
+            });
         } catch (e) {
             console.error('[SSH] term.open error:', e);
         }
@@ -7943,7 +7949,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 每个连接有自己的 xterm 容器（display:block 而非 flex，确保 xterm 能正确测量尺寸）
         const xtermContainer = document.createElement('div');
-        xtermContainer.style.cssText = 'flex:1;min-height:0;display:none;';
+        const savedContainerBg = localStorage.getItem('sshTerminalBg') || '#1e1e1e';
+        xtermContainer.style.cssText = `flex:1;min-height:0;display:none;background-color:${savedContainerBg};`;
         xtermContainer.dataset.connId = connId;
         terminal.appendChild(xtermContainer);
 
@@ -10219,6 +10226,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 terminalBgColorText.value = savedBg;
                 document.getElementById('terminalContainer').style.background = savedBg;
                 document.getElementById('terminalInput').style.background = savedBg;
+                // 覆盖 xterm.css 和 main.css 里的硬编码黑色背景
+                document.querySelectorAll('.terminal-container .xterm-viewport, .terminal-container .xterm-screen, .terminal-container .xterm-rows').forEach(el => {
+                    el.style.backgroundColor = savedBg;
+                });
+                // 更新已创建的 xterm 实例
+                sshConnections.forEach(conn => {
+                    if (conn.xterm) {
+                        conn.xterm.options = { theme: { ...conn.xterm.options.theme, background: savedBg } };
+                    }
+                    if (conn.xtermContainer) {
+                        conn.xtermContainer.style.backgroundColor = savedBg;
+                    }
+                });
             }
 
             const savedProxy = localStorage.getItem('sshProxySettings');
@@ -10267,6 +10287,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 terminalBgColorText.value = savedBg;
                 document.getElementById('terminalContainer').style.background = savedBg;
                 document.getElementById('terminalInput').style.background = savedBg;
+                // 覆盖 xterm.css 和 main.css 里的硬编码黑色背景
+                document.querySelectorAll('.terminal-container .xterm-viewport, .terminal-container .xterm-screen, .terminal-container .xterm-rows').forEach(el => {
+                    el.style.backgroundColor = savedBg;
+                });
+                // 更新已创建的 xterm 实例
+                sshConnections.forEach(conn => {
+                    if (conn.xterm) {
+                        conn.xterm.options = { theme: { ...conn.xterm.options.theme, background: savedBg } };
+                    }
+                    if (conn.xtermContainer) {
+                        conn.xtermContainer.style.backgroundColor = savedBg;
+                    }
+                });
             }
 
             const savedProxies = localStorage.getItem('sshProxyConfigs');
@@ -10432,13 +10465,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
         saveSshSettingsBtn.onclick = () => {
             const color = terminalBgColor.value;
+            localStorage.setItem('sshTerminalBg', color);
+            // 更新外层容器和输入框背景
             document.getElementById('terminalContainer').style.background = color;
             document.getElementById('terminalInput').style.background = color;
-            localStorage.setItem('sshTerminalBg', color);
-            // 同步更新所有 xterm 实例的背景色
+            // 更新 xterm 内部元素背景（覆盖 xterm.css 和 main.css 的硬编码）
+            document.querySelectorAll('.terminal-container .xterm-viewport, .terminal-container .xterm-screen, .terminal-container .xterm-rows').forEach(el => {
+                el.style.backgroundColor = color;
+            });
+            // 同步更新所有 xterm 实例的主题背景色
             sshConnections.forEach(conn => {
                 if (conn.xterm) {
-                    conn.xterm.options.theme = { ...conn.xterm.options.theme, background: color };
+                    // 通过 options setter 触发 xterm 内部重绘（直接改 options.theme 不会触发 onChange 事件）
+                    conn.xterm.options = { theme: { ...conn.xterm.options.theme, background: color } };
+                }
+                if (conn.xtermContainer) {
+                    conn.xtermContainer.style.backgroundColor = color;
                 }
             });
 
