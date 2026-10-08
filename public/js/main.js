@@ -8029,8 +8029,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 设为当前激活并显示连接中状态
         activeConnId = connId;
+        // 切换 xterm 容器：隐藏其他所有连接的容器，只显示当前新连接的容器
+        // （不做这步会导致老连接终端仍可见，用户看到"两个连接反馈在一个界面"）
+        terminal.querySelectorAll('[data-conn-id]').forEach(el => {
+            el.style.display = (parseInt(el.dataset.connId) === connId) ? 'block' : 'none';
+        });
+        xtermContainer.offsetHeight; // 强制重排，确保容器有非零尺寸
         renderSshTabs();
         showConnUI(conn, 'connecting');
+        // 容器已可见，提前打开 xterm，让连接中/连接成功的反馈能直接写入新窗口
+        ensureTermOpened(conn);
+        fitTerm(conn);
+        setTimeout(() => fitTerm(conn), 50);
+        setTimeout(() => fitTerm(conn), 200);
 
         // 发起 WebSocket
         const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
