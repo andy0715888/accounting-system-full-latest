@@ -231,7 +231,7 @@ body {
     gap: 4px;
 }
 .toolbar-left { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
-.toolbar-right { font-size:13px; color:#666; }
+.toolbar-right { display:flex; align-items:center; gap:6px; font-size:13px; color:#666; }
 .tool-btn {
     padding: 4px 12px;
     border: 1px solid #dcdfe6;
