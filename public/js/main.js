@@ -103,6 +103,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const exportClientStatus = $('#exportClientStatus');
     const refreshBtn = $('#refreshBtn');
     const globalSearchBtn = $('#globalSearchBtn');
+    const globalSearchModal = $('#globalSearchModal');
+    const globalSearchInput = $('#globalSearchInput');
+    const closeGlobalSearchModal = $('#closeGlobalSearchModal');
+    const cancelGlobalSearchBtn = $('#cancelGlobalSearchBtn');
+    const confirmGlobalSearchBtn = $('#confirmGlobalSearchBtn');
     const manageColumnsBtn = $('#manageColumnsBtn');
     const conditionalFormatBtn = $('#conditionalFormatBtn');
     const conditionalFormatModal = $('#conditionalFormatModal');
@@ -6307,8 +6312,41 @@ document.addEventListener('DOMContentLoaded', function() {
             if (state.globalSearchActive) {
                 clearGlobalSearch();
             } else {
-                const kw = prompt('请输入全局搜索关键词（将搜索当前标签所有行所有列，不受筛选影响）：', state.globalSearchKeyword || '');
-                if (kw !== null) performGlobalSearch(kw);
+                openGlobalSearchModal();
+            }
+        });
+    }
+
+    function openGlobalSearchModal() {
+        if (!globalSearchModal) return;
+        globalSearchInput.value = state.globalSearchKeyword || '';
+        globalSearchModal.classList.add('show');
+        setTimeout(() => { globalSearchInput.focus(); globalSearchInput.select(); }, 100);
+    }
+    function closeGlobalSearchModalFn() {
+        if (globalSearchModal) globalSearchModal.classList.remove('show');
+    }
+    if (closeGlobalSearchModal) closeGlobalSearchModal.addEventListener('click', closeGlobalSearchModalFn);
+    if (cancelGlobalSearchBtn) cancelGlobalSearchBtn.addEventListener('click', closeGlobalSearchModalFn);
+    if (globalSearchModal) {
+        globalSearchModal.addEventListener('click', (e) => { if (e.target === globalSearchModal) closeGlobalSearchModalFn(); });
+    }
+    if (confirmGlobalSearchBtn) {
+        confirmGlobalSearchBtn.addEventListener('click', () => {
+            const kw = globalSearchInput.value;
+            closeGlobalSearchModalFn();
+            performGlobalSearch(kw);
+        });
+    }
+    if (globalSearchInput) {
+        globalSearchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const kw = globalSearchInput.value;
+                closeGlobalSearchModalFn();
+                performGlobalSearch(kw);
+            } else if (e.key === 'Escape') {
+                closeGlobalSearchModalFn();
             }
         });
     }
