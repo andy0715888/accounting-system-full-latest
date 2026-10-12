@@ -64,7 +64,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // 撤销栈
         undoStack: [],
         // 焦点行高亮色
-        focusHighlightColor: '#fff3cd'
+        focusHighlightColor: '#fff3cd',
+        // 全局搜索
+        globalSearchActive: false,
+        globalSearchKeyword: '',
+        savedPage: 1,
+        savedPageSize: 100
     };
 
     // DOM 引用
@@ -97,6 +102,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const exportClientCancel = $('#exportClientCancel');
     const exportClientStatus = $('#exportClientStatus');
     const refreshBtn = $('#refreshBtn');
+    const globalSearchBtn = $('#globalSearchBtn');
     const manageColumnsBtn = $('#manageColumnsBtn');
     const conditionalFormatBtn = $('#conditionalFormatBtn');
     const conditionalFormatModal = $('#conditionalFormatModal');
@@ -1058,6 +1064,16 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
+        // 切换标签时退出全局搜索模式
+        if (state.globalSearchActive) {
+            state.globalSearchActive = false;
+            state.globalSearchKeyword = '';
+            state.pageSize = state.savedPageSize;
+            if (globalSearchBtn) {
+                globalSearchBtn.textContent = '🔍 全局搜索';
+                globalSearchBtn.classList.remove('active');
+            }
+        }
         // 跨标签剪切/粘贴：切换标签时保留所有提取状态（服务器/客户/两者），
         // 这样可以在一个标签提取、切到另一个标签粘贴。刷新键才清空。
         $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
@@ -1325,6 +1341,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const visibleColumns = state.columns.filter(c => c.col_visible !== 0);
         const filteredRecords = getFilteredRecords();
 
+        // 全局搜索模式下隐藏分页栏（结果不分页）
+        if (paginationBar) {
+            paginationBar.style.display = state.globalSearchActive ? 'none' : '';
+        }
+
         let theadHtml = `<tr>${state.rowManageMode ? '<th style="width:36px;min-width:36px;max-width:36px;text-align:center;"><input type="checkbox" id="selectAll" /></th>' : ''}`;
         visibleColumns.forEach(col => {
             const isIncome = col.is_income || 0;
@@ -1350,7 +1371,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (filteredRecords.length === 0) {
             tableBody.innerHTML = `<tr><td colspan="${visibleColumns.length + (state.rowManageMode ? 1 : 0)}" style="text-align:center;padding:40px 0;color:#999;">暂无数据</td></tr>`;
-            recordCount.textContent = Object.keys(state.filters).length > 0 ? `共 0 / 全部 ${state.records.length} 条记录` : `共 0 条记录`;
+            if (state.globalSearchActive) {
+                recordCount.textContent = `🔍 搜索"${state.globalSearchKeyword}"：0 条结果`;
+                if (globalSearchBtn) {
+                    globalSearchBtn.textContent = '❌ 清除搜索';
+                    globalSearchBtn.classList.add('active');
+                }
+            } else {
+                recordCount.textContent = Object.keys(state.filters).length > 0 ? `共 0 / 全部 ${state.records.length} 条记录` : `共 0 条记录`;
+            }
             bindFilterEvents();
             return;
         }
@@ -1576,7 +1605,15 @@ document.addEventListener('DOMContentLoaded', function() {
             tbodyHtml += '</tr>';
         });
         tableBody.innerHTML = tbodyHtml;
-        recordCount.textContent = Object.keys(state.filters).length > 0 ? `筛选 ${filteredRecords.length} 条 / 共 ${state.total} 条` : `共 ${state.total} 条记录`;
+        if (state.globalSearchActive) {
+            recordCount.textContent = `🔍 搜索"${state.globalSearchKeyword}"：${filteredRecords.length} 条结果`;
+            if (globalSearchBtn) {
+                globalSearchBtn.textContent = '❌ 清除搜索';
+                globalSearchBtn.classList.add('active');
+            }
+        } else {
+            recordCount.textContent = Object.keys(state.filters).length > 0 ? `筛选 ${filteredRecords.length} 条 / 共 ${state.total} 条` : `共 ${state.total} 条记录`;
+        }
 
         bindTableEvents();
         bindFilterEvents();
@@ -6183,6 +6220,16 @@ document.addEventListener('DOMContentLoaded', function() {
         state.copiedServerRecordId = null;
         state.copiedServerIsSimpleCut = false;
         state.copiedClientRecordId = null;
+        // 刷新时也退出全局搜索模式
+        if (state.globalSearchActive) {
+            state.globalSearchActive = false;
+            state.globalSearchKeyword = '';
+            state.pageSize = state.savedPageSize;
+            if (globalSearchBtn) {
+                globalSearchBtn.textContent = '🔍 全局搜索';
+                globalSearchBtn.classList.remove('active');
+            }
+        }
         state.extractedClientData = null;
         state.extractedBothData = null;
         $$('tr.cut-pending').forEach(tr => tr.classList.remove('cut-pending'));
@@ -6198,6 +6245,74 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     manageColumnsBtn.addEventListener('click', showColumnManager);
+
+    // ===== 全局搜索 =====
+    async function performGlobalSearch(keyword) {
+        if (!state.currentTabId) return;
+        const kw = String(keyword || '').trim().toLowerCase();
+        if (!kw) return;
+        try {
+            showTableLoading();
+            setStatus('正在全局搜索...');
+            // 获取当前标签全部记录（不带筛选，不分页）
+            const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0');
+            const allRecords = result.records || [];
+            // 对所有列的 data 值做不区分大小写的包含匹配
+            const matched = allRecords.filter(r => {
+                if (!r || !r.data) return false;
+                for (const key in r.data) {
+                    const v = r.data[key];
+                    if (v === null || v === undefined) continue;
+                    if (String(v).toLowerCase().includes(kw)) return true;
+                }
+                return false;
+            });
+            // 保存当前分页状态，搜索模式下不分页
+            state.savedPage = state.page;
+            state.savedPageSize = state.pageSize;
+            state.page = 1;
+            state.pageSize = 999999;
+            state.globalSearchActive = true;
+            state.globalSearchKeyword = keyword;
+            state.records = matched;
+            state.total = matched.length;
+            state.totalPages = 1;
+            renderTable(false);
+            setStatus(`全局搜索"${keyword}"：找到 ${matched.length} 条`);
+        } catch (err) {
+            setStatus('全局搜索失败: ' + err.message);
+        } finally {
+            hideTableLoading();
+        }
+    }
+
+    function clearGlobalSearch() {
+        state.globalSearchActive = false;
+        state.globalSearchKeyword = '';
+        state.page = state.savedPage;
+        state.pageSize = state.savedPageSize;
+        if (globalSearchBtn) {
+            globalSearchBtn.textContent = '🔍 全局搜索';
+            globalSearchBtn.classList.remove('active');
+        }
+        if (state.currentTabId) {
+            showTableLoading();
+            loadRecords(state.currentTabId).then(() => { renderTable(false); hideTableLoading(); });
+        }
+        setStatus('已清除全局搜索');
+    }
+
+    if (globalSearchBtn) {
+        globalSearchBtn.addEventListener('click', function() {
+            if (state.globalSearchActive) {
+                clearGlobalSearch();
+            } else {
+                const kw = prompt('请输入全局搜索关键词（将搜索当前标签所有行所有列，不受筛选影响）：', state.globalSearchKeyword || '');
+                if (kw !== null) performGlobalSearch(kw);
+            }
+        });
+    }
+    // ===== 全局搜索 end =====
     conditionalFormatBtn.addEventListener('click', openConditionalFormatModal);
     closeConditionalFormatModal.addEventListener('click', () => conditionalFormatModal.classList.remove('show'));
 
