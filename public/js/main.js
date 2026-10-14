@@ -4658,8 +4658,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     await API.delete('/income/' + id);
                     await loadIncomeRecords(state.incomeRecordId);
-                    await loadRecords(state.currentTabId);
-                    renderTable(false);
+                    await refreshTableData();
                     setIncomeStatus('已删除');
                 } catch (err) { setIncomeStatus('删除失败: ' + err.message, '#f56c6c'); }
             });
@@ -4684,8 +4683,7 @@ document.addEventListener('DOMContentLoaded', function() {
             await persistModalTopPrice(state.incomeRecordId, 'income_unit_price', String(amount));
             incomeRemarkInput.value = '';
             await loadIncomeRecords(state.incomeRecordId);
-            await loadRecords(state.currentTabId);
-            renderTable(false);
+            await refreshTableData();
             setIncomeStatus('添加成功');
         } catch (err) { setIncomeStatus('添加失败: ' + err.message, '#f56c6c'); }
     }
@@ -4841,8 +4839,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     await API.delete('/expense/' + id);
                     await loadExpenseRecords(state.expenseRecordId);
-                    await loadRecords(state.currentTabId);
-                    renderTable(false);
+                    await refreshTableData();
                     setExpenseStatus('已删除');
                 } catch (err) { setExpenseStatus('删除失败: ' + err.message, '#f56c6c'); }
             });
@@ -4867,8 +4864,7 @@ document.addEventListener('DOMContentLoaded', function() {
             await persistModalTopPrice(state.expenseRecordId, 'expense_unit_price', String(amount));
             expenseRemarkInput.value = '';
             await loadExpenseRecords(state.expenseRecordId);
-            await loadRecords(state.currentTabId);
-            renderTable(false);
+            await refreshTableData();
             setExpenseStatus('添加成功');
         } catch (err) { setExpenseStatus('添加失败: ' + err.message, '#f56c6c'); }
     }
@@ -5039,8 +5035,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                     await loadHostExpenseDetails(state.hostExpenseRecordId);
-                    await loadRecords(state.currentTabId);
-                    renderTable(false);
+                    await refreshTableData();
                     hostExpenseStatus.textContent = '已删除';
                     hostExpenseStatus.style.color = '#67c23a';
                     setTimeout(() => hostExpenseStatus.textContent = '', 1200);
@@ -5152,8 +5147,7 @@ document.addEventListener('DOMContentLoaded', function() {
             record._updated = true;
             await saveRecord(record);
             await loadHostExpenseDetails(state.hostExpenseRecordId);
-            await loadRecords(state.currentTabId);
-            renderTable(false);
+            await refreshTableData();
             hostExpenseStatus.textContent = '已添加明细';
             hostExpenseStatus.style.color = '#67c23a';
             setTimeout(() => hostExpenseStatus.textContent = '', 1200);
@@ -6293,8 +6287,11 @@ document.addEventListener('DOMContentLoaded', function() {
             // 共享标签：命中的客户行需带上其父服务器行，否则分组渲染时整组被丢弃（搜索后无内容）
             const displayRecords = attachParentServers(matched, allRecords);
             // 保存当前分页状态，搜索模式下不分页
-            state.savedPage = state.page;
-            state.savedPageSize = state.pageSize;
+            // 若已处于全局搜索模式（如编辑收入后刷新），不覆盖原始 savedPage/savedPageSize
+            if (!state.globalSearchActive) {
+                state.savedPage = state.page;
+                state.savedPageSize = state.pageSize;
+            }
             state.page = 1;
             state.pageSize = 999999;
             state.globalSearchActive = true;
@@ -6325,6 +6322,17 @@ document.addEventListener('DOMContentLoaded', function() {
             loadRecords(state.currentTabId).then(() => { renderTable(false); hideTableLoading(); });
         }
         setStatus('已清除全局搜索');
+    }
+
+    // 数据变更后刷新表格：全局搜索模式下重跑搜索以保留结果集（仅更新被改行的金额等），
+    // 否则走正常分页加载。避免编辑收入/支出后把全局搜索结果清回搜索前的筛选内容。
+    async function refreshTableData() {
+        if (state.globalSearchActive) {
+            await performGlobalSearch(state.globalSearchKeyword);
+        } else {
+            await loadRecords(state.currentTabId);
+            renderTable(false);
+        }
     }
 
     if (globalSearchBtn) {
