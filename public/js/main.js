@@ -1340,6 +1340,24 @@ document.addEventListener('DOMContentLoaded', function() {
         return result;
     }
 
+    // 共享标签：分组渲染要求"服务器在上、客户在下"，从 pool 中补全缺失的父服务器行。
+    // 用于全局搜索（在本地匹配出的客户行不含父服务器行）等场景。
+    function attachParentServers(records, pool) {
+        if (!records || records.length === 0 || !isSharedTab()) return records;
+        const result = new Map(records.map(r => [r.id, r]));
+        const missingIds = [];
+        records.forEach(r => {
+            if (r.record_type === 'client' && r.parent_id && !result.has(r.parent_id)) missingIds.push(r.parent_id);
+        });
+        if (missingIds.length === 0) return records;
+        const byId = new Map((pool || []).map(r => [r.id, r]));
+        missingIds.forEach(id => {
+            const parent = byId.get(id);
+            if (parent && !result.has(parent.id)) result.set(parent.id, parent);
+        });
+        return Array.from(result.values());
+    }
+
     // 渲染表格（刷新时不自动适配列宽）
     function renderTable(shouldAutoFit = false) {
         if (!state.currentTabId) return;
@@ -6272,6 +6290,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 return false;
             });
+            // 共享标签：命中的客户行需带上其父服务器行，否则分组渲染时整组被丢弃（搜索后无内容）
+            const displayRecords = attachParentServers(matched, allRecords);
             // 保存当前分页状态，搜索模式下不分页
             state.savedPage = state.page;
             state.savedPageSize = state.pageSize;
@@ -6279,11 +6299,11 @@ document.addEventListener('DOMContentLoaded', function() {
             state.pageSize = 999999;
             state.globalSearchActive = true;
             state.globalSearchKeyword = keyword;
-            state.records = matched;
-            state.total = matched.length;
+            state.records = displayRecords;
+            state.total = displayRecords.length;
             state.totalPages = 1;
             renderTable(false);
-            setStatus(`全局搜索"${keyword}"：找到 ${matched.length} 条`);
+            setStatus(`全局搜索"${keyword}"：找到 ${displayRecords.length} 条`);
         } catch (err) {
             setStatus('全局搜索失败: ' + err.message);
         } finally {

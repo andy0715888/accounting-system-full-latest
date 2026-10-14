@@ -134,6 +134,25 @@ router.get('/', requireAuth, async (req, res) => {
             `SELECT * FROM records WHERE user_id = ? AND tab_id = ?${filterWhere} ORDER BY sort_order, id LIMIT ? OFFSET ?`,
             [userId, tabId, ...filterParams, limit, offset]
         );
+
+        // 共享标签：筛选命中的可能是客户行，而客户行的父服务器行本身不满足筛选条件，
+        // 不会出现在结果里。前端按"服务器在上、客户在下"分组渲染，缺少父服务器行的
+        // 客户行会整组被丢弃，表现为"筛选后无内容"。这里补出本页客户行的父服务器行。
+        // 独享/普通标签没有子行，不存在需要补的行，行为不变。
+        if (filterWhere && records.length > 0) {
+            const presentIds = new Set(records.map(r => r.id));
+            const parentIds = [...new Set(records
+                .filter(r => r.record_type === 'client' && r.parent_id && !presentIds.has(r.parent_id))
+                .map(r => r.parent_id))];
+            if (parentIds.length > 0) {
+                const placeholders = parentIds.map(() => '?').join(',');
+                const parentRows = await query(
+                    `SELECT * FROM records WHERE user_id = ? AND tab_id = ? AND id IN (${placeholders})`,
+                    [userId, tabId, ...parentIds]
+                );
+                records.push(...parentRows);
+            }
+        }
         const parsed = records.map(r => {
             try { return { ...r, data: JSON.parse(r.data || '{}') }; }
             catch { return { ...r, data: {} }; }
