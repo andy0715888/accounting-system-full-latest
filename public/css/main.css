@@ -1358,14 +1358,97 @@ body {
     font-weight: 500;
     color: #333;
 }
-.suffix-setting .input-group input {
+.suffix-setting .input-group input,
+.suffix-setting .input-group select {
+    width: 100%;
+    box-sizing: border-box;
     padding: 8px 12px;
     border: 1px solid #dcdfe6;
-    border-radius: 4px;
+    border-radius: 6px;
     font-size: 14px;
     outline: none;
+    background: #fff;
 }
-.suffix-setting .input-group input:focus { border-color: #4a6cf7; }
+.suffix-setting .input-group input:focus,
+.suffix-setting .input-group select:focus { border-color: #4a6cf7; }
+.suffix-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #ebeef5;
+}
+.suffix-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.suffix-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.suffix-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #f5f7fa;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.suffix-item-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+.suffix-item-name {
+    font-weight: 500;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.suffix-item-detail {
+    font-size: 12px;
+    color: #909399;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.suffix-item button {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.suffix-item .suffix-edit-btn {
+    color: #4a6cf7;
+    background: #ecf1ff;
+}
+.suffix-item .suffix-edit-btn:hover { background: #dde6ff; }
+.suffix-item .suffix-del-btn {
+    color: #f56c6c;
+    background: #fef0f0;
+}
+.suffix-item .suffix-del-btn:hover { background: #fde2e2; }
+.suffix-empty {
+    padding: 18px 0;
+    color: #999;
+    text-align: center;
+    font-size: 14px;
+}
+#suffixStatus {
+    min-height: 18px;
+    font-size: 13px;
+    color: #67c23a;
+}
 
 /* 导入 */
 .import-desc { color:#666; font-size:14px; margin-bottom:14px; }

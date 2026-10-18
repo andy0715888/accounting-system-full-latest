@@ -790,10 +790,22 @@
             </div>
             <div class="modal-body">
                 <div class="suffix-setting">
-                    <div class="input-group"><label>IP地址后缀 (如 :666)</label><input type="text" id="ipPortSuffixInput" placeholder=":666" /></div>
-                    <div class="input-group"><label>域名后缀 (如 :666/666)</label><input type="text" id="domainPortSuffixInput" placeholder=":666/666" /></div>
-                    <button class="tool-btn primary" id="saveSuffixBtn">保存后缀设置</button>
-                    <span id="suffixStatus"></span>
+                    <div class="suffix-form">
+                        <div class="input-group"><label>显示名字（地址列下拉菜单中显示的名称）</label><input type="text" id="suffixNameInput" placeholder="如：IP①" /></div>
+                        <div class="input-group"><label>前缀（取自记录中的对应列）</label>
+                            <select id="suffixPrefixSelect">
+                                <option value="ip">IP（取自“IP地址”列）</option>
+                                <option value="domain">域名（取自“域名”列）</option>
+                            </select>
+                        </div>
+                        <div class="input-group"><label>后缀（自定义端口，或端口+后缀）</label><input type="text" id="suffixValueInput" placeholder="如：:666 或 :666/andy" /></div>
+                        <div class="suffix-form-actions">
+                            <button class="tool-btn primary" id="addSuffixBtn">添加</button>
+                            <button class="tool-btn" id="cancelSuffixEditBtn" style="display:none;">取消编辑</button>
+                            <span id="suffixStatus"></span>
+                        </div>
+                    </div>
+                    <div class="suffix-list" id="suffixList"></div>
                 </div>
             </div>
         </div>

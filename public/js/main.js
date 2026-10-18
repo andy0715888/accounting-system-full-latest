@@ -23,6 +23,9 @@ document.addEventListener('DOMContentLoaded', function() {
         isAdmin: false,
         ipPortSuffix: '',
         domainPortSuffix: '',
+        // 地址后缀条目：{ name: 显示名字, prefix: 'ip'|'domain', suffix: ':666/andy' }
+        addressSuffixList: [],
+        editingSuffixIndex: -1,
         // 统计时间范围（0=所有）
         statsMonthRange: 6,
         statsYearRange: 6,
@@ -168,9 +171,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const addressSuffixModal = $('#addressSuffixModal');
     const closeAddressSuffixModal = $('#closeAddressSuffixModal');
-    const ipPortSuffixInput = $('#ipPortSuffixInput');
-    const domainPortSuffixInput = $('#domainPortSuffixInput');
-    const saveSuffixBtn = $('#saveSuffixBtn');
+    const suffixNameInput = $('#suffixNameInput');
+    const suffixPrefixSelect = $('#suffixPrefixSelect');
+    const suffixValueInput = $('#suffixValueInput');
+    const addSuffixBtn = $('#addSuffixBtn');
+    const cancelSuffixEditBtn = $('#cancelSuffixEditBtn');
+    const suffixList = $('#suffixList');
     const suffixStatus = $('#suffixStatus');
     const renameTabModal = $('#renameTabModal');
     const closeRenameTabModal = $('#closeRenameTabModal');
@@ -645,6 +651,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (col.col_type === 'date' || col.col_type === 'days_remaining') maxCellWidth = Math.min(maxCellWidth, 120);
         if (col.col_key === 'password') maxCellWidth = Math.min(maxCellWidth, 120);
         if (col.col_key === 'fee') maxCellWidth = Math.min(maxCellWidth, 80);
+        // 地址列：下拉框要能完整显示“地址后缀”里的自定义名字，且与“打开”按钮同排
+        if (col.col_key === 'address') {
+            const names = ['IP', '域名'].concat((state.addressSuffixList || []).map(item => item.name));
+            const maxNameWidth = names.reduce((max, name) => Math.max(max, measureTextWidth(name, 400, 13)), 0);
+            maxCellWidth = Math.max(maxCellWidth, maxNameWidth + 68);
+        }
         return Math.max(60, Math.min(250, Math.max(maxHeaderWidth, maxCellWidth)));
     }
 
@@ -1477,13 +1489,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     const cellStyle = `cursor:pointer;${fmtStyle || ''}`;
                     inputHtml = `<span class="ip-info-cell" data-id="${record.id}" style="${cellStyle}">${escapeHtml(ipVal)}${ipVal ? ' 🔗' : ''}</span>`;
                 } else if (col.col_type === 'address_select') {
-                    const optionsArr = col.col_options || [];
-                    const options = optionsArr.map(opt => {
-                        let display = opt;
-                        if (opt === 'IP地址') display = 'IP';
-                        else if (opt === '域名地址') display = '域名';
-                        return `<option value="${escapeAttr(opt)}" ${val === opt ? 'selected' : ''}>${escapeHtml(display)}</option>`;
-                    }).join('');
+                    // 内置 IP/域名 选项始终保留（兼容旧记录与旧后缀设置），其后追加“地址后缀”中配置的自定义条目
+                    const optionsArr = (col.col_options || []).map(opt => ({
+                        value: opt,
+                        display: opt === 'IP地址' ? 'IP' : (opt === '域名地址' ? '域名' : opt)
+                    }));
+                    (state.addressSuffixList || []).forEach(item => {
+                        if (!optionsArr.some(o => o.value === item.name)) optionsArr.push({ value: item.name, display: item.name });
+                    });
+                    // 记录地址值已不是任何有效选项时（条目改名/删除）保留该值并标记，避免显示为空
+                    if (val && !optionsArr.some(o => o.value === val)) {
+                        optionsArr.unshift({ value: val, display: val + '（已失效）' });
+                    }
+                    const options = optionsArr.map(opt => `<option value="${escapeAttr(opt.value)}" ${val === opt.value ? 'selected' : ''}>${escapeHtml(opt.display)}</option>`).join('');
                     const addressValue = val || '';
                     const fmt = getConditionalFormat(colKey, val);
                     const fmtStyle = applyFormatStyle(fmt);
@@ -5812,29 +5830,162 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (err) { registerSwitchStatus.textContent = '❌ 保存失败: ' + err.message; }
     }
 
-    // --- 地址后缀 ---
+    // --- 地址后缀（添加式）---
+    function normalizeAddressSuffixList(list) {
+        if (!Array.isArray(list)) return [];
+        const result = [];
+        list.forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const name = String(item.name || '').trim();
+            if (!name) return;
+            if (result.some(r => r.name === name)) return;
+            result.push({
+                name,
+                prefix: item.prefix === 'domain' ? 'domain' : 'ip',
+                suffix: String(item.suffix || '').trim()
+            });
+        });
+        return result;
+    }
+
+    // 统一后缀格式：省略开头的 ":" 时自动补上（如 "666/andy" => ":666/andy"）
+    function normalizeSuffixValue(raw) {
+        let v = String(raw || '').trim().replace(/\s+/g, '');
+        if (!v) return '';
+        if (/^\d/.test(v)) v = ':' + v;
+        return v;
+    }
+
+    function getAddressSuffixEntry(name) {
+        return (state.addressSuffixList || []).find(item => item.name === name) || null;
+    }
+
     async function loadSuffixSettings() {
+        // 兼容旧版记录（地址列值为 "IP地址"/"域名地址"）仍使用旧的全局后缀
         try {
             const ipSuffix = await API.get('/settings/ip_port_suffix');
             const domainSuffix = await API.get('/settings/domain_port_suffix');
-            if (ipSuffix.value !== null) { state.ipPortSuffix = ipSuffix.value; ipPortSuffixInput.value = ipSuffix.value; }
-            if (domainSuffix.value !== null) { state.domainPortSuffix = domainSuffix.value; domainPortSuffixInput.value = domainSuffix.value; }
-        } catch (err) { console.warn('加载后缀设置失败:', err); }
-    }
-    async function saveSuffixSettings() {
-        const ipSuffix = ipPortSuffixInput.value.trim();
-        const domainSuffix = domainPortSuffixInput.value.trim();
+            if (ipSuffix.value !== null && ipSuffix.value !== undefined) state.ipPortSuffix = String(ipSuffix.value);
+            if (domainSuffix.value !== null && domainSuffix.value !== undefined) state.domainPortSuffix = String(domainSuffix.value);
+        } catch (err) { /* 旧设置读取失败不影响新功能 */ }
+
         try {
-            await API.post('/settings/batch', {
-                settings: {
-                    ip_port_suffix: ipSuffix,
-                    domain_port_suffix: domainSuffix
-                }
-            });
-            state.ipPortSuffix = ipSuffix; state.domainPortSuffix = domainSuffix;
-            suffixStatus.textContent = '✅ 已保存';
-            setTimeout(() => suffixStatus.textContent = '', 3000);
-        } catch (err) { suffixStatus.textContent = '❌ 保存失败: ' + err.message; }
+            const data = await API.get('/settings/address_suffix_list');
+            state.addressSuffixList = normalizeAddressSuffixList(data.value);
+        } catch (err) {
+            state.addressSuffixList = [];
+        }
+        renderSuffixList();
+        // 表格首次渲染早于设置加载，配置了条目时需要刷新地址列下拉菜单
+        if (state.addressSuffixList.length > 0 && state.columns.length > 0) {
+            try { renderTable(false); } catch (err) { /* 忽略刷新失败 */ }
+        }
+    }
+
+    async function saveAddressSuffixList() {
+        await API.post('/settings', { key: 'address_suffix_list', value: state.addressSuffixList });
+    }
+
+    function setSuffixStatus(msg, keep) {
+        suffixStatus.textContent = msg;
+        if (!keep) setTimeout(() => { suffixStatus.textContent = ''; }, 3000);
+    }
+
+    function resetSuffixForm() {
+        state.editingSuffixIndex = -1;
+        suffixNameInput.value = '';
+        suffixPrefixSelect.value = 'ip';
+        suffixValueInput.value = '';
+        addSuffixBtn.textContent = '添加';
+        cancelSuffixEditBtn.style.display = 'none';
+    }
+
+    function renderSuffixList() {
+        if (!suffixList) return;
+        const list = state.addressSuffixList || [];
+        if (list.length === 0) {
+            suffixList.innerHTML = '<div class="suffix-empty">暂无后缀条目，请在上方添加</div>';
+            return;
+        }
+        suffixList.innerHTML = list.map((item, idx) => {
+            const prefixLabel = item.prefix === 'domain' ? '域名' : 'IP';
+            const full = item.suffix ? `${prefixLabel} + ${item.suffix}` : prefixLabel;
+            return `
+                <div class="suffix-item">
+                    <div class="suffix-item-info">
+                        <span class="suffix-item-name">${escapeHtml(item.name)}</span>
+                        <span class="suffix-item-detail">${escapeHtml(full)}</span>
+                    </div>
+                    <button type="button" class="suffix-edit-btn" data-index="${idx}">编辑</button>
+                    <button type="button" class="suffix-del-btn" data-index="${idx}">删除</button>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function openAddressSuffixModal() {
+        resetSuffixForm();
+        renderSuffixList();
+        suffixStatus.textContent = '';
+        addressSuffixModal.classList.add('show');
+        setTimeout(() => suffixNameInput.focus(), 0);
+    }
+
+    async function addOrUpdateSuffix() {
+        const name = suffixNameInput.value.trim();
+        const prefix = suffixPrefixSelect.value === 'domain' ? 'domain' : 'ip';
+        const suffix = normalizeSuffixValue(suffixValueInput.value);
+
+        if (!name) { setSuffixStatus('⚠️ 请输入显示名字'); return; }
+        if (name.length > 40) { setSuffixStatus('⚠️ 显示名字过长'); return; }
+        if (!suffix) { setSuffixStatus('⚠️ 请输入端口或端口+后缀'); return; }
+        if (/[<>\"']/.test(suffix)) { setSuffixStatus('⚠️ 后缀不能包含 < > " \' 字符'); return; }
+        const dup = state.addressSuffixList.findIndex((item, idx) => item.name === name && idx !== state.editingSuffixIndex);
+        if (dup !== -1) { setSuffixStatus('⚠️ 显示名字已存在'); return; }
+
+        try {
+            if (state.editingSuffixIndex === -1) {
+                state.addressSuffixList.push({ name, prefix, suffix });
+            } else {
+                state.addressSuffixList[state.editingSuffixIndex] = { name, prefix, suffix };
+            }
+            await saveAddressSuffixList();
+            renderSuffixList();
+            resetSuffixForm();
+            setSuffixStatus('✅ 已保存');
+            renderTable(false);
+        } catch (err) {
+            setSuffixStatus('❌ 保存失败: ' + err.message);
+        }
+    }
+
+    async function deleteSuffixEntry(index) {
+        const item = state.addressSuffixList[index];
+        if (!item) return;
+        if (!await showConfirm(`确定删除“${item.name}”吗？地址列中已选择该条目的记录将显示原值。`)) return;
+        try {
+            state.addressSuffixList.splice(index, 1);
+            await saveAddressSuffixList();
+            renderSuffixList();
+            if (state.editingSuffixIndex === index) resetSuffixForm();
+            setSuffixStatus('✅ 已删除');
+            renderTable(false);
+        } catch (err) {
+            setSuffixStatus('❌ 删除失败: ' + err.message);
+        }
+    }
+
+    function startEditSuffixEntry(index) {
+        const item = state.addressSuffixList[index];
+        if (!item) return;
+        state.editingSuffixIndex = index;
+        suffixNameInput.value = item.name;
+        suffixPrefixSelect.value = item.prefix === 'domain' ? 'domain' : 'ip';
+        suffixValueInput.value = item.suffix;
+        addSuffixBtn.textContent = '保存修改';
+        cancelSuffixEditBtn.style.display = '';
+        suffixStatus.textContent = '';
+        suffixNameInput.focus();
     }
 
     // --- 服务商管理 ---
@@ -6429,7 +6580,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try { await API.post('/auth/logout'); window.location.href = '/login'; } catch (err) { setStatus('❌ 退出失败: ' + err.message); }
     });
 
-    addressSuffixBtn.addEventListener('click', () => addressSuffixModal.classList.add('show'));
+    addressSuffixBtn.addEventListener('click', openAddressSuffixModal);
     providerManageBtn.addEventListener('click', openProviderModal);
     closeAddressSuffixModal.addEventListener('click', () => addressSuffixModal.classList.remove('show'));
     closeProviderModal.addEventListener('click', () => providerModal.classList.remove('show'));
@@ -7471,7 +7622,17 @@ document.addEventListener('DOMContentLoaded', function() {
         if (appLogoUrlInput) appLogoUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); uploadAppLogoFromUrl(); } });
     } catch (e) { /* 旧版本页面 DOM 缺元素时忽略 */ }
     saveRegisterSwitchBtn.addEventListener('click', saveRegisterSwitch);
-    saveSuffixBtn.addEventListener('click', saveSuffixSettings);
+    // 地址后缀：添加/保存修改、取消编辑、列表内编辑与删除
+    addSuffixBtn.addEventListener('click', addOrUpdateSuffix);
+    cancelSuffixEditBtn.addEventListener('click', () => { resetSuffixForm(); suffixStatus.textContent = ''; });
+    suffixNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addOrUpdateSuffix(); } });
+    suffixValueInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addOrUpdateSuffix(); } });
+    suffixList.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('.suffix-edit-btn');
+        if (editBtn) { startEditSuffixEntry(parseInt(editBtn.dataset.index)); return; }
+        const delBtn = e.target.closest('.suffix-del-btn');
+        if (delBtn) { deleteSuffixEntry(parseInt(delBtn.dataset.index)); }
+    });
 
     // 标题栏颜色设置
     const DEFAULT_HEADER_COLORS = { navbar: '#1a1a2e', navbarText: '#ffffff', menubar: '#16213e', menubarText: '#ffffff' };
@@ -7702,34 +7863,54 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!address) { setStatus('⚠️ 请先选择地址类型'); return; }
                 let ip = btn.dataset.ip || '';
                 let domain = btn.dataset.domain || '';
-                // 判断是否为 IP 类型：选中值包含 "IP" 或为 "地址"
-                const isIP = address.includes('IP') || address === '地址';
-                if (isIP) {
-                    if (!ip) {
-                        const ipInput = tr ? tr.querySelector('input[data-col="ip_address"]') : null;
-                        if (ipInput && ipInput.value.trim()) ip = ipInput.value.trim();
+
+                // 优先匹配"地址后缀"中自定义的条目：前缀决定取 IP 列还是域名列，后缀自定义
+                const suffixEntry = getAddressSuffixEntry(address);
+                let base = '';
+                let suffix = '';
+                if (suffixEntry) {
+                    if (suffixEntry.prefix === 'domain') {
+                        if (!domain) {
+                            const domainInput = tr ? tr.querySelector('input[data-col="domain"]') : null;
+                            if (domainInput && domainInput.value.trim()) domain = domainInput.value.trim();
+                        }
+                        if (!domain) { setStatus('⚠️ 域名为空'); return; }
+                        base = domain;
+                    } else {
+                        if (!ip) {
+                            const ipInput = tr ? tr.querySelector('input[data-col="ip_address"]') : null;
+                            if (ipInput && ipInput.value.trim()) ip = ipInput.value.trim();
+                        }
+                        if (!ip) { setStatus('⚠️ IP地址为空'); return; }
+                        base = ip;
                     }
-                    if (!ip) { setStatus('⚠️ IP地址为空'); return; }
-                    let base = ip;
-                    let suffix = state.ipPortSuffix || '';
-                    const url = base + suffix;
-                    let fullUrl = url;
-                    if (!/^https?:\/\//i.test(fullUrl)) fullUrl = 'http://' + fullUrl;
-                    window.open(fullUrl, '_blank');
+                    suffix = suffixEntry.suffix || '';
                 } else {
-                    // 域名类型
-                    if (!domain) {
-                        const domainInput = tr ? tr.querySelector('input[data-col="domain"]') : null;
-                        if (domainInput && domainInput.value.trim()) domain = domainInput.value.trim();
+                    // 判断是否为 IP 类型：选中值包含 "IP" 或为 "地址"
+                    const isIP = address.includes('IP') || address === '地址';
+                    if (isIP) {
+                        if (!ip) {
+                            const ipInput = tr ? tr.querySelector('input[data-col="ip_address"]') : null;
+                            if (ipInput && ipInput.value.trim()) ip = ipInput.value.trim();
+                        }
+                        if (!ip) { setStatus('⚠️ IP地址为空'); return; }
+                        base = ip;
+                        suffix = state.ipPortSuffix || '';
+                    } else {
+                        if (!domain) {
+                            const domainInput = tr ? tr.querySelector('input[data-col="domain"]') : null;
+                            if (domainInput && domainInput.value.trim()) domain = domainInput.value.trim();
+                        }
+                        if (!domain) { setStatus('⚠️ 域名为空'); return; }
+                        base = domain;
+                        suffix = state.domainPortSuffix || '';
                     }
-                    if (!domain) { setStatus('⚠️ 域名为空'); return; }
-                    let base = domain;
-                    let suffix = state.domainPortSuffix || '';
-                    const url = base + suffix;
-                    let fullUrl = url;
-                    if (!/^https?:\/\//i.test(fullUrl)) fullUrl = 'http://' + fullUrl;
-                    window.open(fullUrl, '_blank');
                 }
+
+                const url = base + suffix;
+                let fullUrl = url;
+                if (!/^https?:\/\//i.test(fullUrl)) fullUrl = 'http://' + fullUrl;
+                window.open(fullUrl, '_blank');
             });
 
             initHostsModule();
