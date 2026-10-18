@@ -1489,18 +1489,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const cellStyle = `cursor:pointer;${fmtStyle || ''}`;
                     inputHtml = `<span class="ip-info-cell" data-id="${record.id}" style="${cellStyle}">${escapeHtml(ipVal)}${ipVal ? ' 🔗' : ''}</span>`;
                 } else if (col.col_type === 'address_select') {
-                    // 内置 IP/域名 选项始终保留（兼容旧记录与旧后缀设置），其后追加“地址后缀”中配置的自定义条目
-                    const optionsArr = (col.col_options || []).map(opt => ({
-                        value: opt,
-                        display: opt === 'IP地址' ? 'IP' : (opt === '域名地址' ? '域名' : opt)
-                    }));
+                    // 下拉只显示“地址后缀”中配置的自定义条目；内置 IP/域名 与“已失效”兜底选项已移除
+                    // 记录当前值不在列表中时，浏览器会默认选中第一项（即“地址后缀”里的第一个条目）；列表为空则下拉为空白
+                    const optionsArr = [];
                     (state.addressSuffixList || []).forEach(item => {
                         if (!optionsArr.some(o => o.value === item.name)) optionsArr.push({ value: item.name, display: item.name });
                     });
-                    // 记录地址值已不是任何有效选项时（条目改名/删除）保留该值并标记，避免显示为空
-                    if (val && !optionsArr.some(o => o.value === val)) {
-                        optionsArr.unshift({ value: val, display: val + '（已失效）' });
-                    }
                     const options = optionsArr.map(opt => `<option value="${escapeAttr(opt.value)}" ${val === opt.value ? 'selected' : ''}>${escapeHtml(opt.display)}</option>`).join('');
                     const addressValue = val || '';
                     const fmt = getConditionalFormat(colKey, val);
@@ -5962,7 +5956,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function deleteSuffixEntry(index) {
         const item = state.addressSuffixList[index];
         if (!item) return;
-        if (!await showConfirm(`确定删除“${item.name}”吗？地址列中已选择该条目的记录将显示原值。`)) return;
+        if (!await showConfirm(`确定删除“${item.name}”吗？地址列中已选择该条目的记录将改为显示下拉列表中的第一项（列表为空则显示空白）。`)) return;
         try {
             state.addressSuffixList.splice(index, 1);
             await saveAddressSuffixList();
