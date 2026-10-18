@@ -931,6 +931,24 @@ function startHttp() {
                             }
                         });
                     });
+                } else if (msg.type === 'sftp_rename') {
+                    const oldPath = sanitizeSftpPath(msg.old_path, false);
+                    const newPath = sanitizeSftpPath(msg.new_path, true);
+                    if (!oldPath || !newPath) { sendSftpError('文件路径不能为空或非法'); return; }
+                    // 限制：新旧路径必须在同一目录下（纯重命名，禁止跨目录移动）
+                    const oldDir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+                    const newDir = newPath.substring(0, newPath.lastIndexOf('/'));
+                    if (oldDir !== newDir) { sendSftpError('重命名仅允许在同一目录内进行'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        sftpConn.rename(oldPath, newPath, (err2) => {
+                            if (err2) { sendSftpError('重命名失败: ' + err2.message); return; }
+                            logAudit(sessionUser.userId, 'sftp_rename', `${oldPath} -> ${newPath}`);
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'sftp_rename', data: { oldPath, newPath, success: true } }));
+                            }
+                        });
+                    });
                 }
             } catch (err) {
                 console.error('WebSocket 消息处理错误:', err);

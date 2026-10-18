@@ -8340,6 +8340,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     handleSftpDelete(msg.data);
                 } else if (msg.type === 'sftp_download') {
                     handleSftpDownload(msg.data);
+                } else if (msg.type === 'sftp_rename') {
+                    handleSftpRename(msg.data);
                 } else if (msg.type === 'sftp_error') {
                     handleSftpError(msg.data);
                 } else if (msg.type === 'monitor_data') {
@@ -8905,6 +8907,58 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function renameFile(oldPath) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) {
+            setStatus('⚠️ 请先连接主机');
+            return;
+        }
+        const oldName = oldPath.substring(oldPath.lastIndexOf('/') + 1);
+        const dirPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
+        const html = `
+            <div style="padding:16px;min-width:340px;">
+                <h3 style="margin:0 0 12px;font-size:14px;">✏️ 重命名</h3>
+                <div style="font-size:12px;color:#909399;margin-bottom:8px;">路径: ${escapeHtml(dirPath)}/</div>
+                <input id="renameInput" value="${escapeHtml(oldName)}" style="width:100%;padding:8px 10px;border:1px solid #dcdfe6;border-radius:6px;font-size:13px;box-sizing:border-box;outline:none;font-family:monospace;" />
+                <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="tool-btn sm" id="renameCancelBtn">取消</button>
+                    <button class="tool-btn sm" id="renameOkBtn" style="background:#67c23a;color:#fff;">确定</button>
+                </div>
+            </div>
+        `;
+        showModal(html, 'renameModal');
+        const input = document.getElementById('renameInput');
+        if (input) {
+            // 选中文件名（不含扩展名），方便直接改
+            const dotIdx = oldName.lastIndexOf('.');
+            if (dotIdx > 0) {
+                input.setSelectionRange(0, dotIdx);
+            } else {
+                input.select();
+            }
+            input.focus();
+            const submit = () => {
+                const newName = input.value.trim();
+                if (!newName) { setStatus('⚠️ 文件名不能为空'); return; }
+                if (newName.indexOf('/') !== -1 || newName === '.' || newName === '..') {
+                    setStatus('⚠️ 文件名非法'); return;
+                }
+                if (newName === oldName) { closeModal('renameModal'); return; }
+                const newPath = dirPath + '/' + newName;
+                closeModal('renameModal');
+                setFmPanelStatus('重命名中...', '#909399');
+                getActiveWs().send(JSON.stringify({ type: 'sftp_rename', old_path: oldPath, new_path: newPath }));
+            };
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); submit(); }
+                else if (e.key === 'Escape') { closeModal('renameModal'); }
+            });
+            const okBtn = document.getElementById('renameOkBtn');
+            if (okBtn) okBtn.onclick = submit;
+            const cancelBtn = document.getElementById('renameCancelBtn');
+            if (cancelBtn) cancelBtn.onclick = () => closeModal('renameModal');
+        }
+    }
+
     function showPanelContextMenu(x, y, filePath, isDir) {
         hideFmContextMenu();
         const menu = document.createElement('div');
@@ -8915,6 +8969,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const editItem = !isDir ? '<div class="fm-context-item" data-action="edit-file">✏️ 在线编辑</div>' : '';
         menu.innerHTML = `
             <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            <div class="fm-context-item" data-action="rename-file">✏️ 重命名</div>
             ${editItem}
             ${downloadItem}
             <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
@@ -8926,6 +8981,11 @@ document.addEventListener('DOMContentLoaded', function() {
             copyToClipboard(filePath);
             hideFmContextMenu();
             setFmPanelStatus('✅ 路径已复制到剪贴板', '#67c23a');
+        };
+
+        menu.querySelector('[data-action="rename-file"]').onclick = () => {
+            hideFmContextMenu();
+            renameFile(filePath);
         };
 
         if (!isDir) {
@@ -9035,6 +9095,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const editItem = !isDir ? '<div class="fm-context-item" data-action="edit-file">✏️ 在线编辑</div>' : '';
         menu.innerHTML = `
             <div class="fm-context-item" data-action="copy-path">📋 复制路径</div>
+            <div class="fm-context-item" data-action="rename-file">✏️ 重命名</div>
             ${editItem}
             ${downloadItem}
             <div class="fm-context-item" data-action="delete-file" style="color:#f56c6c;">🗑️ 删除文件</div>
@@ -9052,6 +9113,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 statusEl.textContent = '✅ 路径已复制到剪贴板';
                 setTimeout(() => { statusEl.textContent = ''; }, 2000);
             }
+        };
+
+        menu.querySelector('[data-action="rename-file"]').onclick = () => {
+            hideFmContextMenu();
+            renameFile(filePath);
         };
 
         if (!isDir) {
@@ -9558,6 +9624,20 @@ document.addEventListener('DOMContentLoaded', function() {
         const filesTab = document.querySelector('[data-cmd-tab="files"]');
         if (filesTab && filesTab.classList.contains('active')) {
             setFmPanelStatus('✅ 删除成功', '#67c23a');
+            loadFileListPanel(fileManagerState.currentPath);
+        }
+    }
+
+    function handleSftpRename(data) {
+        const overlay = fileManagerState.overlay;
+        if (overlay) {
+            overlay.querySelector('#fmStatus').style.color = '#67c23a';
+            overlay.querySelector('#fmStatus').textContent = '✅ 重命名成功';
+            loadFileList(fileManagerState.currentPath);
+        }
+        const filesTab = document.querySelector('[data-cmd-tab="files"]');
+        if (filesTab && filesTab.classList.contains('active')) {
+            setFmPanelStatus('✅ 重命名成功', '#67c23a');
             loadFileListPanel(fileManagerState.currentPath);
         }
     }
