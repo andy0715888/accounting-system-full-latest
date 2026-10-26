@@ -131,7 +131,7 @@
                     <div class="pagination-center">
                         <button class="page-btn" id="firstPageBtn" disabled>首页</button>
                         <button class="page-btn" id="prevPageBtn" disabled>上一页</button>
-                        <span class="page-indicator" id="pageIndicator">1 / 1</span>
+                        <span class="page-numbers" id="pageNumbers"></span>
                         <button class="page-btn" id="nextPageBtn" disabled>下一页</button>
                         <button class="page-btn" id="lastPageBtn" disabled>尾页</button>
                         <span class="page-jump" id="pageJumpWrap">
@@ -140,6 +140,10 @@
                         </span>
                     </div>
                     <div class="pagination-right">
+                        <span class="keyword-jump-wrap">
+                            <input type="text" id="keywordJumpInput" placeholder="搜索关键字" autocomplete="off" />
+                            <button class="page-btn" id="keywordJumpBtn">跳转</button>
+                        </span>
                         <label class="page-size-label">每页</label>
                         <select class="page-size-select" id="pageSizeSelect">
                             <option value="50">50</option>

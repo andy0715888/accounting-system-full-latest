@@ -72,7 +72,9 @@ document.addEventListener('DOMContentLoaded', function() {
         globalSearchActive: false,
         globalSearchKeyword: '',
         savedPage: 1,
-        savedPageSize: 100
+        savedPageSize: 100,
+        // 关键字跳转搜索
+        keywordSearch: { keyword: '', matches: [], index: 0 }
     };
 
     // DOM 引用
@@ -204,12 +206,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const nextPageBtn = $('#nextPageBtn');
     const firstPageBtn = $('#firstPageBtn');
     const lastPageBtn = $('#lastPageBtn');
-    const pageIndicator = $('#pageIndicator');
+    const pageNumbers = $('#pageNumbers');
     const pageSizeSelect = $('#pageSizeSelect');
     // 同步 state.pageSize 与下拉框初始值
     state.pageSize = parseInt(pageSizeSelect ? pageSizeSelect.value : 1000) || 1000;
     const pageJumpInput = $('#pageJumpInput');
     const pageJumpBtn = $('#pageJumpBtn');
+    const keywordJumpInput = $('#keywordJumpInput');
+    const keywordJumpBtn = $('#keywordJumpBtn');
 
     const incomeModal = $('#incomeModal');
     const closeIncomeModal = $('#closeIncomeModal');
@@ -967,12 +971,46 @@ document.addEventListener('DOMContentLoaded', function() {
         const start = (state.page - 1) * state.pageSize + 1;
         const end = Math.min(state.page * state.pageSize, state.total);
         paginationInfo.textContent = state.total > 0 ? `第 ${start}-${end} 条，共 ${state.total} 条` : '共 0 条';
-        if (pageIndicator) pageIndicator.textContent = `${state.page} / ${state.totalPages}`;
         if (firstPageBtn) firstPageBtn.disabled = state.page <= 1;
         if (prevPageBtn) prevPageBtn.disabled = state.page <= 1;
         if (nextPageBtn) nextPageBtn.disabled = state.page >= state.totalPages;
         if (lastPageBtn) lastPageBtn.disabled = state.page >= state.totalPages;
         if (pageJumpInput) { pageJumpInput.max = state.totalPages; pageJumpInput.value = state.page; }
+        renderPageNumbers();
+    }
+
+    // 渲染最多 8 个页码按钮
+    function renderPageNumbers() {
+        if (!pageNumbers) return;
+        const total = state.totalPages || 1;
+        const cur = state.page;
+        let start, end;
+        if (total <= 8) {
+            start = 1;
+            end = total;
+        } else {
+            start = cur - 4;
+            end = cur + 3;
+            if (start < 1) { start = 1; end = 8; }
+            if (end > total) { end = total; start = total - 7; }
+        }
+        let html = '';
+        for (let i = start; i <= end; i++) {
+            const active = i === cur ? ' active' : '';
+            html += `<button class="page-num-btn${active}" data-page="${i}">${i}</button>`;
+        }
+        pageNumbers.innerHTML = html;
+    }
+
+    // 统一翻页（供首页/上一页/下一页/尾页/页码/数字跳转复用）
+    async function goToPage(target) {
+        target = parseInt(target);
+        if (!target || target < 1 || target > state.totalPages || target === state.page) return;
+        state.page = target;
+        await loadRecords(state.currentTabId);
+        renderTable(false);
+        const tw = $('#tableWrapper');
+        if (tw) tw.scrollTop = 0;
     }
 
     function updateAllFilterOptions(records) {
@@ -1081,6 +1119,10 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentTabId = tabId;
         state.selectedRows.clear();
         state.page = 1;
+        // 切换标签时重置关键字跳转搜索
+        state.keywordSearch = { keyword: '', matches: [], index: 0 };
+        if (keywordJumpInput) keywordJumpInput.value = '';
+        clearKeywordHighlight();
         // 切换标签时退出全局搜索模式
         if (state.globalSearchActive) {
             state.globalSearchActive = false;
@@ -6661,60 +6703,161 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- 分页事件 ---
-    firstPageBtn.addEventListener('click', async () => {
-        if (state.page <= 1) return;
-        state.page = 1;
-        await loadRecords(state.currentTabId);
-        renderTable(false);
-        const tw = $('#tableWrapper');
-        if (tw) tw.scrollTop = 0;
-    });
-    prevPageBtn.addEventListener('click', async () => {
-        if (state.page <= 1) return;
-        state.page--;
-        await loadRecords(state.currentTabId);
-        renderTable(false);
-        const tw = $('#tableWrapper');
-        if (tw) tw.scrollTop = 0;
-    });
-    nextPageBtn.addEventListener('click', async () => {
-        if (state.page >= state.totalPages) return;
-        state.page++;
-        await loadRecords(state.currentTabId);
-        renderTable(false);
-        const tw = $('#tableWrapper');
-        if (tw) tw.scrollTop = 0;
-    });
-    lastPageBtn.addEventListener('click', async () => {
-        if (state.page >= state.totalPages) return;
-        state.page = state.totalPages;
-        await loadRecords(state.currentTabId);
-        renderTable(false);
-        const tw = $('#tableWrapper');
-        if (tw) tw.scrollTop = 0;
-    });
+    firstPageBtn.addEventListener('click', () => goToPage(1));
+    prevPageBtn.addEventListener('click', () => goToPage(state.page - 1));
+    nextPageBtn.addEventListener('click', () => goToPage(state.page + 1));
+    lastPageBtn.addEventListener('click', () => goToPage(state.totalPages));
+
     pageSizeSelect.addEventListener('change', async () => {
         state.pageSize = parseInt(pageSizeSelect.value) || 50;
         state.page = 1;
+        // 每页条数变化后，匹配项所在页码失效，重置关键字搜索
+        state.keywordSearch = { keyword: state.keywordSearch.keyword, matches: [], index: 0 };
+        clearKeywordHighlight();
         await loadRecords(state.currentTabId);
         renderTable(false);
         const tw = $('#tableWrapper');
         if (tw) tw.scrollTop = 0;
     });
 
+    // 页码按钮点击（事件委托）
+    if (pageNumbers) {
+        pageNumbers.addEventListener('click', (e) => {
+            const btn = e.target.closest('.page-num-btn');
+            if (!btn) return;
+            const p = parseInt(btn.dataset.page);
+            if (p) goToPage(p);
+        });
+    }
+
     if (pageJumpBtn) {
-        pageJumpBtn.addEventListener('click', async () => {
-            const target = parseInt(pageJumpInput.value);
-            if (target >= 1 && target <= state.totalPages && target !== state.page) {
-                state.page = target;
-                await loadRecords(state.currentTabId);
-                renderTable(false);
-            }
+        pageJumpBtn.addEventListener('click', () => {
+            goToPage(parseInt(pageJumpInput.value));
         });
     }
     if (pageJumpInput) {
-        pageJumpInput.addEventListener('keydown', async (e) => {
+        pageJumpInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && pageJumpBtn) pageJumpBtn.click();
+        });
+    }
+
+    // ============ 关键字跳转搜索 ============
+    // 构建跨所有页的匹配列表：{ recordId, colKey, page }
+    async function buildKeywordMatches(keyword) {
+        const kw = keyword.trim().toLowerCase();
+        if (!kw || !state.currentTabId) return [];
+        const filtersParam = Object.keys(state.filters).length > 0
+            ? '&filters=' + encodeURIComponent(JSON.stringify(state.filters)) : '';
+        const result = await API.get('/records?tabId=' + state.currentTabId + '&page=1&pageSize=0' + filtersParam);
+        const allRecords = result.records || [];
+        const visibleColumns = state.columns.filter(c => c.col_visible !== 0);
+        const matches = [];
+        const ps = state.pageSize || 1;
+        allRecords.forEach((rec, idx) => {
+            visibleColumns.forEach(col => {
+                const dv = getDisplayValue(rec, col);
+                if (dv !== null && dv !== undefined && String(dv).toLowerCase().includes(kw)) {
+                    matches.push({
+                        recordId: rec.id,
+                        colKey: col.col_key,
+                        page: Math.floor(idx / ps) + 1
+                    });
+                }
+            });
+        });
+        return matches;
+    }
+
+    // 清除高亮
+    function clearKeywordHighlight() {
+        document.querySelectorAll('.keyword-match-highlight').forEach(el => el.classList.remove('keyword-match-highlight'));
+    }
+
+    // 跳转到下一个匹配项（循环）
+    async function jumpToNextKeywordMatch() {
+        const keyword = (keywordJumpInput ? keywordJumpInput.value : '').trim();
+        if (!keyword) {
+            state.keywordSearch = { keyword: '', matches: [], index: 0 };
+            clearKeywordHighlight();
+            return;
+        }
+        // 关键字变化时重建匹配列表
+        if (keyword !== state.keywordSearch.keyword) {
+            showTableLoading();
+            try {
+                const matches = await buildKeywordMatches(keyword);
+                state.keywordSearch = { keyword, matches, index: 0 };
+            } catch (err) {
+                setStatus('关键字搜索失败: ' + err.message);
+                hideTableLoading();
+                return;
+            } finally {
+                hideTableLoading();
+            }
+            if (state.keywordSearch.matches.length === 0) {
+                setStatus(`未找到包含"${keyword}"的单元格`);
+                clearKeywordHighlight();
+                return;
+            }
+        }
+        const { matches } = state.keywordSearch;
+        if (matches.length === 0) {
+            setStatus(`未找到包含"${keyword}"的单元格`);
+            clearKeywordHighlight();
+            return;
+        }
+        const match = matches[state.keywordSearch.index % matches.length];
+        state.keywordSearch.index++;
+
+        // 若匹配项不在当前页，先翻页
+        if (state.page !== match.page) {
+            state.page = match.page;
+            await loadRecords(state.currentTabId);
+            renderTable(false);
+        }
+
+        // 渲染后定位行与单元格
+        setTimeout(() => {
+            const tr = document.querySelector(`tr[data-id="${match.recordId}"]`);
+            if (!tr) {
+                // 共享标签中孤立客户行（父服务器不在本页），直接跳到下一个匹配
+                jumpToNextKeywordMatch();
+                return;
+            }
+            const visibleColumns = state.columns.filter(c => c.col_visible !== 0);
+            const colIdx = visibleColumns.findIndex(c => c.col_key === match.colKey);
+            const tdIndex = state.rowManageMode ? colIdx + 1 : colIdx;
+            const tds = tr.querySelectorAll('td');
+            const td = tds[tdIndex];
+            clearKeywordHighlight();
+            if (td) td.classList.add('keyword-match-highlight');
+            // 在表格容器内滚动居中
+            const tw = $('#tableWrapper');
+            if (tw && tr) {
+                const twRect = tw.getBoundingClientRect();
+                const trRect = tr.getBoundingClientRect();
+                const offset = trRect.top - twRect.top - tw.clientHeight / 2 + tr.offsetHeight / 2;
+                tw.scrollTop += offset;
+            }
+            setStatus(`匹配 ${state.keywordSearch.index} / ${matches.length}（第 ${match.page} 页）`);
+        }, 60);
+    }
+
+    if (keywordJumpBtn) {
+        keywordJumpBtn.addEventListener('click', jumpToNextKeywordMatch);
+    }
+    if (keywordJumpInput) {
+        keywordJumpInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') jumpToNextKeywordMatch();
+        });
+        keywordJumpInput.addEventListener('input', () => {
+            // 输入变化时重置索引，下次点击重建匹配列表
+            state.keywordSearch.index = 0;
+            if (!keywordJumpInput.value.trim()) {
+                state.keywordSearch.keyword = '';
+                state.keywordSearch.matches = [];
+                clearKeywordHighlight();
+            }
         });
     }
 
