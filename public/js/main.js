@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
         filters: {},
         filterOptions: {},
         tabFilters: {},
-        tabScrollTops: {},
+        tabViewStates: {}, // { [tabId]: { page, pageSize, scrollTop } }
         isOnline: true,
         tabCache: {},
         tabManageMode: false,
@@ -801,6 +801,19 @@ document.addEventListener('DOMContentLoaded', function() {
     window.addEventListener('online', () => updateNetworkStatus(true));
     window.addEventListener('offline', () => updateNetworkStatus(false));
 
+    // 页面卸载前保存当前标签的视图状态（覆盖最后一次滚动位置）
+    window.addEventListener('beforeunload', () => {
+        if (state.currentTabId) {
+            const tw = document.getElementById('tableWrapper');
+            state.tabViewStates[state.currentTabId] = {
+                page: state.page,
+                pageSize: state.pageSize,
+                scrollTop: tw ? tw.scrollTop : 0
+            };
+            persistTabViewStates();
+        }
+    });
+
     // 流量统计
     const trafficStats = {
         uploadBytes: 0,
@@ -1043,7 +1056,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadDataForTab(tabId, force = false) {
         try {
-            state.page = 1;
+            // 注意：state.page 已由 switchTab 恢复为标签保存的值，不再在此硬编码为 1
             // 并行加载列定义和记录
             const [columns] = await Promise.all([
                 force || !state.columnsCache[tabId]
@@ -1109,16 +1122,23 @@ document.addEventListener('DOMContentLoaded', function() {
     async function switchTab(tabId, force = false) {
         if (tabId === state.currentTabId && !force) return;
         showTableLoading();
-        // 保存当前标签的滚动位置、筛选状态
+        // 保存当前标签的视图状态（页、每页条数、滚动位置）
         if (state.currentTabId) {
             const tw = $('#tableWrapper');
-            if (tw) state.tabScrollTops[state.currentTabId] = tw.scrollTop;
+            state.tabViewStates[state.currentTabId] = {
+                page: state.page,
+                pageSize: state.pageSize,
+                scrollTop: tw ? tw.scrollTop : 0
+            };
             state.tabFilters[state.currentTabId] = { ...state.filters };
             saveTabFiltersToStorage();
         }
         state.currentTabId = tabId;
         state.selectedRows.clear();
-        state.page = 1;
+        // 恢复目标标签的视图状态
+        const savedView = state.tabViewStates[tabId];
+        state.page = savedView ? savedView.page : 1;
+        state.pageSize = savedView ? savedView.pageSize : state.pageSize;
         // 切换标签时重置关键字跳转搜索
         state.keywordSearch = { keyword: '', matches: [], index: 0 };
         if (keywordJumpInput) keywordJumpInput.value = '';
@@ -1127,7 +1147,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (state.globalSearchActive) {
             state.globalSearchActive = false;
             state.globalSearchKeyword = '';
-            state.pageSize = state.savedPageSize;
             if (globalSearchBtn) {
                 globalSearchBtn.textContent = '🔍 全局搜索';
                 globalSearchBtn.classList.remove('active');
@@ -1150,8 +1169,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // 确保服务商选项已加载（避免切换标签后选项为空）
         if (!state.providerOptions.length) await loadProviderOptions();
         renderTable(false);
-        // 恢复目标标签的滚动位置
-        const savedScrollTop = state.tabScrollTops[tabId] || 0;
+        // 恢复目标标签的滚动位置（渲染完成后设置）
+        const savedScrollTop = savedView ? savedView.scrollTop : 0;
         if (savedScrollTop > 0) {
             requestAnimationFrame(() => {
                 const tw = $('#tableWrapper');
@@ -1161,12 +1180,30 @@ document.addEventListener('DOMContentLoaded', function() {
         hideTableLoading();
         const currentTab = state.tabs.find(t => t.id === tabId);
         if (currentTab) document.getElementById('columnModalTabName').textContent = currentTab.name;
+        persistTabViewStates();
     }
 
     function saveTabFiltersToStorage() {
         try {
             if (state.userId) {
                 localStorage.setItem('tabFilters_' + state.userId, JSON.stringify(state.tabFilters));
+            }
+        } catch(e) {}
+    }
+
+    function persistTabViewStates() {
+        try {
+            if (state.userId) {
+                localStorage.setItem('tabViewStates_' + state.userId, JSON.stringify(state.tabViewStates));
+            }
+        } catch(e) {}
+    }
+
+    function loadTabViewStates() {
+        try {
+            if (state.userId) {
+                const raw = localStorage.getItem('tabViewStates_' + state.userId);
+                if (raw) state.tabViewStates = JSON.parse(raw);
             }
         } catch(e) {}
     }
@@ -1191,8 +1228,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 invalidateTabCache(tabId);
                 state.selectedTabs.delete(tabId);
                 delete state.tabFilters[tabId];
+                delete state.tabViewStates[tabId];
             });
             saveTabFiltersToStorage();
+            persistTabViewStates();
             state.tabs = state.tabs.filter(t => !tabIds.includes(t.id));
             const wasCurrentTabDeleted = tabIds.includes(oldCurrentTabId);
             renderTabs();
@@ -6441,9 +6480,21 @@ document.addEventListener('DOMContentLoaded', function() {
         setStatus('');
         if (state.currentTabId) {
             showTableLoading();
-            state.page = 1;
+            // 保留当前页码和滚动位置（刷新数据但视图不动）
+            const tw = $('#tableWrapper');
+            const savedScrollTop = tw ? tw.scrollTop : 0;
             invalidateCurrentTabCache();
-            loadRecords(state.currentTabId).then(() => { renderTable(false); hideTableLoading(); });
+            loadRecords(state.currentTabId).then(() => {
+                renderTable(false);
+                // 渲染后恢复滚动位置
+                if (savedScrollTop > 0) {
+                    requestAnimationFrame(() => {
+                        const tw2 = $('#tableWrapper');
+                        if (tw2) tw2.scrollTop = savedScrollTop;
+                    });
+                }
+                hideTableLoading();
+            });
         } else {
             setStatus('✅ 已清除剪切信息');
         }
@@ -7936,10 +7987,12 @@ document.addEventListener('DOMContentLoaded', function() {
             state.userId = auth.user.id;
             await loadProviderOptions();
             await loadTabs();
-            // 从 localStorage 恢复筛选状态
+            // 从 localStorage 恢复筛选状态、视图状态
             try {
                 const savedFilters = localStorage.getItem('tabFilters_' + auth.user.id);
                 if (savedFilters) state.tabFilters = JSON.parse(savedFilters);
+                const savedViewStates = localStorage.getItem('tabViewStates_' + auth.user.id);
+                if (savedViewStates) state.tabViewStates = JSON.parse(savedViewStates);
                 const savedHidden = localStorage.getItem('statsHidden_' + auth.user.id);
                 if (savedHidden !== null) state.statsHidden = savedHidden === '1';
                 const savedHighlight = localStorage.getItem('focusHighlightColor_' + auth.user.id);
@@ -7949,11 +8002,27 @@ document.addEventListener('DOMContentLoaded', function() {
             else {
                 state.currentTabId = state.tabs[0].id;
                 state.filters = state.tabFilters[state.tabs[0].id] ? { ...state.tabFilters[state.tabs[0].id] } : {};
+                // 恢复首个标签保存的视图状态（page/pageSize），浏览器刷新后保持位置
+                const savedView = state.tabViewStates[state.tabs[0].id];
+                if (savedView) {
+                    state.page = savedView.page || 1;
+                    if (savedView.pageSize) state.pageSize = savedView.pageSize;
+                }
                 await loadDataForTab(state.currentTabId);
             }
             collectProviderOptionsFromRecords();
             renderTabs();
             renderTable(false);
+            // 浏览器硬刷新后恢复首个标签的滚动位置（双重 rAF 确保表格 DOM 已完成布局）
+            const savedScrollTop = state.tabViewStates[state.tabs[0]?.id]?.scrollTop || 0;
+            if (savedScrollTop > 0) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        const tw = $('#tableWrapper');
+                        if (tw) tw.scrollTop = savedScrollTop;
+                    });
+                });
+            }
             setStatus('✅ 加载完成');
             const tab = state.tabs.find(t => t.id === state.currentTabId);
             if (tab) document.getElementById('columnModalTabName').textContent = tab.name;
