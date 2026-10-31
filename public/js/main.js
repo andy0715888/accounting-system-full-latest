@@ -8729,6 +8729,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     handleSftpDownload(msg.data);
                 } else if (msg.type === 'sftp_rename') {
                     handleSftpRename(msg.data);
+                } else if (msg.type === 'sftp_mkdir') {
+                    handleSftpCreate(msg.data, '文件夹');
+                } else if (msg.type === 'sftp_touch') {
+                    handleSftpCreate(msg.data, '文件');
                 } else if (msg.type === 'sftp_error') {
                     handleSftpError(msg.data);
                 } else if (msg.type === 'monitor_data') {
@@ -9055,6 +9059,12 @@ document.addEventListener('DOMContentLoaded', function() {
         fileManagerState.files = data.files || [];
         fileManagerState.currentPath = data.path;
         if (fmPath) fmPath.value = data.path;
+        // 空白处右键：新建文件夹 / 新建文件
+        fmList.oncontextmenu = (e) => {
+            if (e.target.closest('.fm-item')) return;
+            e.preventDefault();
+            showBlankAreaContextMenu(e.clientX, e.clientY);
+        };
         const files = data.files || [];
         if (files.length === 0) {
             fmList.innerHTML = '<div style="text-align:center;color:#999;padding:30px 0;">空目录</div>';
@@ -9396,6 +9406,97 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             document.addEventListener('click', hideFmContextMenu, { once: true });
         }, 0);
+    }
+
+    // 文件列表空白处右键菜单：新建文件夹 / 新建文件
+    function showBlankAreaContextMenu(x, y) {
+        hideFmContextMenu();
+        const menu = document.createElement('div');
+        menu.className = 'fm-context-menu';
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.innerHTML = `
+            <div class="fm-context-item" data-action="new-dir">📁 新建文件夹</div>
+            <div class="fm-context-item" data-action="new-file">📄 新建文件</div>
+        `;
+        document.body.appendChild(menu);
+        fileManagerState.contextMenu = menu;
+
+        menu.querySelector('[data-action="new-dir"]').onclick = () => {
+            hideFmContextMenu();
+            promptCreateEntry(true);
+        };
+        menu.querySelector('[data-action="new-file"]').onclick = () => {
+            hideFmContextMenu();
+            promptCreateEntry(false);
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', hideFmContextMenu, { once: true });
+        }, 0);
+    }
+
+    function promptCreateEntry(isDir) {
+        if (!getActiveWs() || getActiveWs().readyState !== WebSocket.OPEN) {
+            setStatus('⚠️ 请先连接主机');
+            return;
+        }
+        const dirPath = fileManagerState.currentPath || '/';
+        const title = isDir ? '📁 新建文件夹' : '📄 新建文件';
+        const placeholder = isDir ? '文件夹名称' : '文件名称，如 config.json';
+        const html = `
+            <div style="padding:16px;min-width:340px;">
+                <h3 style="margin:0 0 12px;font-size:14px;">${title}</h3>
+                <div style="font-size:12px;color:#909399;margin-bottom:8px;">路径: ${escapeHtml(dirPath)}/</div>
+                <input id="createEntryInput" placeholder="${placeholder}" style="width:100%;padding:8px 10px;border:1px solid #dcdfe6;border-radius:6px;font-size:13px;box-sizing:border-box;outline:none;font-family:monospace;" />
+                <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="tool-btn sm" id="createEntryCancelBtn">取消</button>
+                    <button class="tool-btn sm" id="createEntryOkBtn" style="background:#67c23a;color:#fff;">确定</button>
+                </div>
+            </div>
+        `;
+        showModal(html, 'createEntryModal');
+        const input = document.getElementById('createEntryInput');
+        if (!input) return;
+        input.focus();
+        const submit = () => {
+            const name = input.value.trim();
+            if (!name) { setStatus('⚠️ 名称不能为空'); return; }
+            if (name.indexOf('/') !== -1 || name.indexOf('\\') !== -1 || name === '.' || name === '..'
+                || /[\0\r\n]/.test(name)) {
+                setStatus('⚠️ 名称非法');
+                return;
+            }
+            closeModal('createEntryModal');
+            const fullPath = dirPath.endsWith('/') ? dirPath + name : dirPath + '/' + name;
+            setFmPanelStatus(isDir ? '创建文件夹中...' : '创建文件中...', '#909399');
+            getActiveWs().send(JSON.stringify({
+                type: isDir ? 'sftp_mkdir' : 'sftp_touch',
+                path: fullPath
+            }));
+        };
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            else if (e.key === 'Escape') { closeModal('createEntryModal'); }
+        });
+        const okBtn = document.getElementById('createEntryOkBtn');
+        if (okBtn) okBtn.onclick = submit;
+        const cancelBtn = document.getElementById('createEntryCancelBtn');
+        if (cancelBtn) cancelBtn.onclick = () => closeModal('createEntryModal');
+    }
+
+    function handleSftpCreate(data, label) {
+        const overlay = fileManagerState.overlay;
+        if (overlay) {
+            overlay.querySelector('#fmStatus').style.color = '#67c23a';
+            overlay.querySelector('#fmStatus').textContent = `✅ 已创建${label}`;
+            loadFileList(fileManagerState.currentPath);
+        }
+        const filesTab = document.querySelector('[data-cmd-tab="files"]');
+        if (filesTab && filesTab.classList.contains('active')) {
+            setFmPanelStatus(`✅ 已创建${label}`, '#67c23a');
+            loadFileListPanel(fileManagerState.currentPath);
+        }
     }
 
     function loadFileList(path) {

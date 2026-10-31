@@ -949,6 +949,40 @@ function startHttp() {
                             }
                         });
                     });
+                } else if (msg.type === 'sftp_mkdir') {
+                    const path = sanitizeSftpPath(msg.path, true);
+                    if (!path) { sendSftpError('目录路径不能为空或非法'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        // 已存在同名文件/目录时不覆盖
+                        sftpConn.stat(path, (statErr) => {
+                            if (!statErr) { sendSftpError('同名文件或目录已存在'); return; }
+                            sftpConn.mkdir(path, (err2) => {
+                                if (err2) { sendSftpError('创建目录失败: ' + err2.message); return; }
+                                logAudit(sessionUser.userId, 'sftp_mkdir', path);
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'sftp_mkdir', data: { path, success: true } }));
+                                }
+                            });
+                        });
+                    });
+                } else if (msg.type === 'sftp_touch') {
+                    const path = sanitizeSftpPath(msg.path, true);
+                    if (!path) { sendSftpError('文件路径不能为空或非法'); return; }
+                    ensureSftp((err, sftpConn) => {
+                        if (err) { sendSftpError('SFTP连接失败: ' + err.message); return; }
+                        // 已存在同名文件/目录时不覆盖
+                        sftpConn.stat(path, (statErr) => {
+                            if (!statErr) { sendSftpError('同名文件或目录已存在'); return; }
+                            sftpConn.writeFile(path, '', 'utf-8', (err2) => {
+                                if (err2) { sendSftpError('创建文件失败: ' + err2.message); return; }
+                                logAudit(sessionUser.userId, 'sftp_touch', path);
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    ws.send(JSON.stringify({ type: 'sftp_touch', data: { path, success: true } }));
+                                }
+                            });
+                        });
+                    });
                 }
             } catch (err) {
                 console.error('WebSocket 消息处理错误:', err);
