@@ -3782,6 +3782,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function exportBillAsImage(headers, dataRows, totalAmount, dateStr) {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
+        const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
         const colWidths = [60, 220, 160, 160, 140, 100];
         const rowHeight = 36;
         const padding = 40;
@@ -3791,17 +3792,20 @@ document.addEventListener('DOMContentLoaded', function() {
         const dateHeight = 36;
         const tableWidth = colWidths.reduce((s, w) => s + w, 0);
         const totalRows = dataRows.length;
-        canvas.width = tableWidth + padding * 2;
-        canvas.height = padding * 2 + titleHeight + headerHeight + totalRows * rowHeight + totalHeight + dateHeight + 20;
+        const logicalWidth = tableWidth + padding * 2;
+        const logicalHeight = padding * 2 + titleHeight + headerHeight + totalRows * rowHeight + totalHeight + dateHeight + 20;
+        canvas.width = Math.round(logicalWidth * scale);
+        canvas.height = Math.round(logicalHeight * scale);
+        ctx.scale(scale, scale);
 
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
         ctx.fillStyle = '#303133';
         ctx.font = 'bold 20px "Microsoft YaHei", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('JX网络工作室新开/续费账单', canvas.width / 2, padding + titleHeight / 2);
+        ctx.fillText('JX网络工作室新开/续费账单', logicalWidth / 2, padding + titleHeight / 2);
 
         const tableTop = padding + titleHeight + 10;
         ctx.fillStyle = '#f0f0f0';
@@ -3898,6 +3902,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
+        const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
         const padding = 20;
         const headerHeight = 40;
         const rowHeight = 30;
@@ -3915,20 +3920,21 @@ document.addEventListener('DOMContentLoaded', function() {
             return maxWidth + 20;
         });
 
-        const totalWidth = colWidths.reduce((a, b) => a + b, 0) + padding * 2;
-        const totalHeight = headerHeight + rows.length * rowHeight + padding * 2;
+        const logicalWidth = colWidths.reduce((a, b) => a + b, 0) + padding * 2;
+        const logicalHeight = headerHeight + rows.length * rowHeight + padding * 2;
 
-        canvas.width = totalWidth;
-        canvas.height = totalHeight;
+        canvas.width = Math.round(logicalWidth * scale);
+        canvas.height = Math.round(logicalHeight * scale);
+        ctx.scale(scale, scale);
 
         ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, totalWidth, totalHeight);
+        ctx.fillRect(0, 0, logicalWidth, logicalHeight);
         ctx.strokeStyle = '#ddd';
         ctx.lineWidth = 1;
 
         let x = padding;
         ctx.fillStyle = '#f5f7fa';
-        ctx.fillRect(x, padding, totalWidth - padding * 2, headerHeight);
+        ctx.fillRect(x, padding, logicalWidth - padding * 2, headerHeight);
         ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, sans-serif';
         ctx.fillStyle = '#333';
         colWidths.forEach((w, idx) => {
@@ -6384,6 +6390,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 { key: 'client_name', name: '客户名' },
                 { key: 'price', name: '单价' }
             ];
+            const remarkCheckbox = document.getElementById('exportInfoRemark');
+            if (remarkCheckbox && remarkCheckbox.checked) {
+                infoExportFields.push({ key: 'remark', name: '客户备注' });
+            }
             if (tabType === 'info') {
                 const format = document.querySelector('input[name="exportInfoFormat"]:checked');
                 const fmt = format ? format.value : 'excel';
