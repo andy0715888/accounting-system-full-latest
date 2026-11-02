@@ -6392,7 +6392,7 @@ document.addEventListener('DOMContentLoaded', function() {
             ];
             const remarkCheckbox = document.getElementById('exportInfoRemark');
             if (remarkCheckbox && remarkCheckbox.checked) {
-                infoExportFields.push({ key: 'remark', name: '客户备注' });
+                infoExportFields.push({ key: 'unit_price', name: '客户备注' });
             }
             if (tabType === 'info') {
                 const format = document.querySelector('input[name="exportInfoFormat"]:checked');
