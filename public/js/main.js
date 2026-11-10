@@ -8241,8 +8241,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const title = isEdit ? '编辑主机' : '添加主机';
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay show';
+        // 云平台字段（只有编辑时才显示完整面板）
+        const cloudBaseUrl = isEdit ? (host.cloud_base_url || '') : '';
+        const cloudProductId = isEdit ? (host.cloud_product_id || '') : '';
+        const cloudCookie = isEdit ? (host.cloud_cookie || '') : '';
         overlay.innerHTML = `
-            <div class="modal" style="width:480px;">
+            <div class="modal" style="width:560px;">
                 <div class="modal-header">
                     <h2>${isEdit ? '✏️' : '➕'} ${title}</h2>
                     <button class="modal-close">✕</button>
@@ -8254,6 +8258,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="input-group"><label>用户名</label><input type="text" id="hostUserInput" value="${isEdit ? escapeAttr(host.username) : ''}" placeholder="例如：root" /></div>
                     <div class="input-group"><label>密码</label><input type="password" id="hostPwdInput" value="" placeholder="请输入密码" /></div>
                     <div class="input-group"><label>备注</label><input type="text" id="hostRemarkInput" value="${isEdit ? escapeAttr(host.remark || '') : ''}" placeholder="可选" /></div>
+                    ${isEdit ? `
+                    <hr style="margin:16px 0;border:none;border-top:1px solid #eee;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#409eff;">🌐 云平台流量监控（烟火云等）</div>
+                    <div style="font-size:12px;color:#999;margin-bottom:10px;">填写后可一键从云平台抓取流量、到期时间等实时信息</div>
+                    <div class="input-group" style="margin-bottom:8px;"><label>云平台地址</label><input type="text" id="cloudBaseUrl" value="${escapeAttr(cloudBaseUrl)}" placeholder="https://www.yanhuoidc.com" /></div>
+                    <div class="input-group" style="margin-bottom:8px;"><label>产品ID</label><input type="text" id="cloudProductId" value="${escapeAttr(cloudProductId)}" placeholder="14668（servicedetail?id=xxx 中的数字）" /></div>
+                    <div class="input-group" style="margin-bottom:8px;"><label>登录Cookie</label><textarea id="cloudCookie" rows="3" style="width:100%;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;font-size:12px;font-family:monospace;" placeholder="_ok5_=xxx; ZJMF_xxx=eyJ...">${escapeAttr(cloudCookie)}</textarea>
+                    <div style="font-size:11px;color:#999;margin-top:4px;">复制方法：浏览器登录云平台 → F12 → Application → Cookies → 复制全部 cookie 字符串</div></div>
+                    <div class="cloud-flow-section" style="display:flex;gap:8px;margin-top:8px;">
+                        <button type="button" id="fetchCloudFlowBtn" class="tool-btn" style="flex:1;">🌐 获取流量</button>
+                        ${isEdit && host.cloud_last_fetch ? `<span style="font-size:11px;color:#999;align-self:center;">上次: ${host.cloud_last_fetch}</span>` : ''}
+                    </div>
+                    <div id="cloudFlowResult" style="margin-top:8px;"></div>
+                    ` : ''}
                     <div class="modal-actions">
                         <button class="tool-btn primary" id="saveHostBtn">${isEdit ? '保存' : '添加'}</button>
                         <button class="tool-btn cancel-host-btn">取消</button>
@@ -8266,6 +8284,61 @@ document.addEventListener('DOMContentLoaded', function() {
 
         overlay.querySelector('.modal-close').onclick = () => overlay.remove();
         overlay.querySelector('.cancel-host-btn').onclick = () => overlay.remove();
+
+        // 获取流量按钮（仅编辑模式）
+        const fetchFlowBtn = overlay.querySelector('#fetchCloudFlowBtn');
+        const flowResultEl = overlay.querySelector('#cloudFlowResult');
+        if (fetchFlowBtn) {
+            fetchFlowBtn.onclick = async () => {
+                const baseUrl = overlay.querySelector('#cloudBaseUrl').value.trim();
+                const productId = overlay.querySelector('#cloudProductId').value.trim();
+                const cookie = overlay.querySelector('#cloudCookie').value.trim();
+                if (!baseUrl || !productId || !cookie) {
+                    flowResultEl.innerHTML = '<span style="color:#f56c6c;font-size:12px;">请先填写云平台地址、产品ID和Cookie</span>';
+                    return;
+                }
+                fetchFlowBtn.disabled = true;
+                fetchFlowBtn.textContent = '抓取中...';
+                flowResultEl.innerHTML = '';
+                try {
+                    const res = await fetch(`/api/hosts/${host.id}/cloud-flow`);
+                    const data = await res.json();
+                    if (res.ok && data.success) {
+                        const pct = data.percent || 0;
+                        const pctColor = pct > 90 ? '#f56c6c' : pct > 70 ? '#e6a23c' : '#67c23a';
+                        const expireColor = data.expireDate && new Date(data.expireDate) < new Date(Date.now() + 7*86400000) ? '#f56c6c' : '#606266';
+                        flowResultEl.innerHTML = `
+                            <div style="background:#f5f7fa;border-radius:6px;padding:12px;font-size:12px;border:1px solid #ebeef5;">
+                                <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                                    <span>📦 <b>${escapeHtml(data.productName)}</b></span>
+                                    <span style="color:#999;">${escapeHtml(data.status)}</span>
+                                </div>
+                                <div style="color:#999;margin-bottom:6px;">🖥️ ${escapeHtml(data.ip)} · ${escapeHtml(data.os)} · ID: ${escapeHtml(data.instanceId)}</div>
+                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                                    <span>💧 流量:</span>
+                                    <div style="flex:1;background:#ebeef5;border-radius:4px;height:14px;overflow:hidden;">
+                                        <div style="width:${pct}%;background:${pctColor};height:100%;transition:width .3s;"></div>
+                                    </div>
+                                    <span style="color:${pctColor};font-weight:600;">${pct}%</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;color:#606266;">
+                                    <span>已用: <b>${data.usedText}</b> / 总: ${data.totalText}</span>
+                                    <span>剩余: <b style="color:${pctColor};">${data.remainText}</b></span>
+                                </div>
+                                <div style="color:${expireColor};margin-top:4px;">📅 到期: ${data.expireDate || '未知'}${data.suspendReason ? ' · ⚠️ ' + escapeHtml(data.suspendReason) : ''}</div>
+                            </div>
+                        `;
+                    } else {
+                        flowResultEl.innerHTML = `<span style="color:#f56c6c;font-size:12px;">❌ ${data.error || '获取失败'}</span>`;
+                    }
+                } catch (err) {
+                    flowResultEl.innerHTML = `<span style="color:#f56c6c;font-size:12px;">❌ 请求异常: ${err.message}</span>`;
+                } finally {
+                    fetchFlowBtn.disabled = false;
+                    fetchFlowBtn.textContent = '🌐 获取流量';
+                }
+            };
+        }
 
         overlay.querySelector('#saveHostBtn').onclick = async () => {
             const name = overlay.querySelector('#hostNameInput').value.trim();
@@ -8285,6 +8358,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (isEdit) {
                     const body = { name, host: hostAddr, port, username, remark };
                     if (password) body.password = password;
+                    // 云平台字段（如果填了就一起提交）
+                    if (overlay.querySelector('#cloudBaseUrl')) {
+                        body.cloud_base_url = overlay.querySelector('#cloudBaseUrl').value.trim() || null;
+                        body.cloud_product_id = overlay.querySelector('#cloudProductId').value.trim() || null;
+                        body.cloud_cookie = overlay.querySelector('#cloudCookie').value.trim() || null;
+                    }
                     res = await fetch(`/api/hosts/${host.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 } else {
                     res = await fetch('/api/hosts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, host: hostAddr, port, username, password, remark }) });

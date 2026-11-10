@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const { query, queryOne, execute } = require('../db');
 const { encrypt, decrypt } = require('../crypto');
 const { logAudit } = require('../audit');
@@ -14,9 +15,13 @@ router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hosts = await query(
-            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
+            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite, cloud_base_url, cloud_product_id, cloud_cookie, cloud_last_fetch FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
             [userId]
         );
+        // cookie 需要解密返回
+        for (const h of hosts) {
+            h.cloud_cookie = h.cloud_cookie ? decrypt(h.cloud_cookie) : null;
+        }
         res.json(hosts);
     } catch (err) {
         console.error('获取主机列表错误:', err);
@@ -73,6 +78,16 @@ router.put('/:id', requireAuth, async (req, res) => {
         if (password !== undefined) { updates.push('password = ?'); params.push(encrypt(password || null)); }
         if (remark !== undefined) { updates.push('remark = ?'); params.push(remark || null); }
         if (sort_order !== undefined) { updates.push('sort_order = ?'); params.push(sort_order); }
+        if (req.body.cloud_base_url !== undefined) { updates.push('cloud_base_url = ?'); params.push(req.body.cloud_base_url || null); }
+        if (req.body.cloud_product_id !== undefined) { updates.push('cloud_product_id = ?'); params.push(req.body.cloud_product_id || null); }
+        if (req.body.cloud_cookie !== undefined) {
+            updates.push('cloud_cookie = ?');
+            params.push(req.body.cloud_cookie ? encrypt(req.body.cloud_cookie) : null);
+        }
+        // 更新云平台字段时刷新 cloud_last_fetch
+        if (['cloud_base_url', 'cloud_product_id', 'cloud_cookie'].some(k => req.body[k] !== undefined)) {
+            updates.push('cloud_last_fetch = NULL');
+        }
 
         if (updates.length === 0) return res.status(400).json({ error: '没有要更新的字段' });
 
@@ -212,6 +227,105 @@ router.post('/:id/touch', requireAuth, async (req, res) => {
     } catch (err) {
         console.error('更新主机连接时间错误:', err);
         res.status(500).json({ error: '服务器错误' });
+    }
+});
+
+// 代理：获取云平台流量信息（烟火云/智简魔方等）
+router.get('/:id/cloud-flow', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const hostId = req.params.id;
+        const host = await queryOne(
+            'SELECT id, name, cloud_base_url, cloud_product_id, cloud_cookie FROM hosts WHERE id = ? AND user_id = ?',
+            [hostId, userId]
+        );
+        if (!host) return res.status(404).json({ error: '主机不存在' });
+
+        const baseUrl = (host.cloud_base_url || '').replace(/\/$/, '');
+        const productId = (host.cloud_product_id || '').trim();
+        const cookie = host.cloud_cookie ? decrypt(host.cloud_cookie) : '';
+
+        if (!baseUrl || !productId || !cookie) {
+            return res.status(400).json({ error: '请先在主机编辑里填写云平台地址、产品ID和Cookie' });
+        }
+
+        // 先用 dedicatedserver 接口拿 bwusage/bwlimit
+        const url = `${baseUrl}/host/dedicatedserver?host_id=${encodeURIComponent(productId)}&lite=1`;
+        let data;
+        try {
+            const resp = await axios.get(url, {
+                headers: {
+                    'Cookie': cookie,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Referer': `${baseUrl}/servicedetail?id=${encodeURIComponent(productId)}`
+                },
+                timeout: 10000,
+                maxRedirects: 3,
+                validateStatus: () => true
+            });
+
+            const body = resp.data;
+            if (!body || body.status !== 200) {
+                // 可能是极验拦截（返回 html）
+                if (typeof body === 'string' && body.includes('_guard')) {
+                    return res.status(403).json({ error: '请求被云平台极验安全拦截，请先用相同IP的浏览器登录云平台过一次验证' });
+                }
+                return res.status(400).json({ error: '云平台返回异常：' + (body?.msg || body?.status || 'unknown') });
+            }
+
+            const hd = body.data?.host_data;
+            if (!hd) {
+                return res.status(400).json({ error: '云平台未返回服务器数据' });
+            }
+
+            // 解析流量
+            const bwUsage = Number(hd.bwusage) || 0;      // GB
+            const bwLimit = Number(hd.bwlimit) || 0;      // GB
+            const remain = Math.max(0, bwLimit - bwUsage);
+            const pct = bwLimit > 0 ? Math.round((bwUsage / bwLimit) * 100) : 0;
+            const expireDate = hd.nextduedate ? new Date(hd.nextduedate * 1000).toISOString().slice(0, 10) : null;
+
+            // 格式化
+            const fmt = (gb) => {
+                gb = Number(gb) || 0;
+                return gb > 1024 ? (gb / 1024).toFixed(2) + ' TB' : gb.toFixed(1) + ' GB';
+            };
+
+            data = {
+                success: true,
+                instanceId: hd.domain || host.name,
+                productName: hd.productname || '',
+                ip: hd.dedicatedip || '',
+                os: hd.os || '',
+                type: hd.type || '',
+                // 流量
+                totalGB: bwLimit,
+                usedGB: bwUsage,
+                remainGB: remain,
+                totalText: fmt(bwLimit),
+                usedText: fmt(bwUsage),
+                remainText: fmt(remain),
+                percent: pct,
+                // 到期
+                expireDate,
+                // 状态
+                status: hd.domainstatus || '',
+                suspendReason: hd.suspendreason || '',
+                // 云平台原始数据（调试用）
+                raw: { bwusage: hd.bwusage, bwlimit: hd.bwlimit, nextduedate: hd.nextduedate }
+            };
+        } catch (axiosErr) {
+            return res.status(502).json({ error: '云平台请求失败: ' + (axiosErr.message || '网络异常') });
+        }
+
+        // 更新最近拉取时间
+        await execute('UPDATE hosts SET cloud_last_fetch = CURRENT_TIMESTAMP WHERE id = ?', [hostId]);
+
+        res.json(data);
+    } catch (err) {
+        console.error('获取云平台流量错误:', err);
+        res.status(500).json({ error: '服务器错误: ' + err.message });
     }
 });
 

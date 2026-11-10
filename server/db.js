@@ -184,6 +184,10 @@ function createTables() {
         db.run(`ALTER TABLE records ADD COLUMN sort_order INTEGER DEFAULT 0`, () => {});
         db.run(`ALTER TABLE hosts ADD COLUMN last_connected DATETIME`, () => {});
         db.run(`ALTER TABLE hosts ADD COLUMN is_favorite INTEGER DEFAULT 0`, () => {});
+        db.run(`ALTER TABLE hosts ADD COLUMN cloud_base_url TEXT`, () => {});
+        db.run(`ALTER TABLE hosts ADD COLUMN cloud_product_id TEXT`, () => {});
+        db.run(`ALTER TABLE hosts ADD COLUMN cloud_cookie TEXT`, () => {});
+        db.run(`ALTER TABLE hosts ADD COLUMN cloud_last_fetch DATETIME`, () => {});
 
         // 备忘标签表
         db.run(`CREATE TABLE IF NOT EXISTS memo_tags (
