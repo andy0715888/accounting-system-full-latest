@@ -32,7 +32,7 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
-        let { name, host, port, username, password, remark } = req.body;
+        let { name, host, port, username, password, remark, cloud_base_url, cloud_product_id, cloud_cookie } = req.body;
         if (!name) return res.status(400).json({ error: '请输入主机名称' });
         if (!host) return res.status(400).json({ error: '请输入主机地址' });
         if (!username) return res.status(400).json({ error: '请输入用户名' });
@@ -45,11 +45,13 @@ router.post('/', requireAuth, async (req, res) => {
         const order = 0; // 新添加的始终是 sort_order 最小值（排在最前）
 
         const result = await execute(`
-            INSERT INTO hosts (user_id, name, host, port, username, password, remark, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO hosts (user_id, name, host, port, username, password, remark, sort_order, cloud_base_url, cloud_product_id, cloud_cookie)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             userId, name, host, port || 22, username,
-            encrypt(password || null), remark || null, order
+            encrypt(password || null), remark || null, order,
+            cloud_base_url || null, cloud_product_id || null,
+            cloud_cookie ? encrypt(cloud_cookie) : null
         ]);
 
         logAudit(userId, 'host_create', `${name} (${host}:${port || 22})`);
@@ -138,9 +140,10 @@ router.get('/by-ip/:ip', requireAuth, async (req, res) => {
         const userId = req.session.userId;
         const ip = req.params.ip;
         const host = await queryOne(
-            'SELECT id, name, host, port, username, remark FROM hosts WHERE user_id = ? AND host = ? ORDER BY id DESC LIMIT 1',
+            'SELECT id, name, host, port, username, remark, cloud_base_url, cloud_product_id, cloud_cookie, cloud_last_fetch FROM hosts WHERE user_id = ? AND host = ? ORDER BY id DESC LIMIT 1',
             [userId, ip]
         );
+        if (host && host.cloud_cookie) host.cloud_cookie = decrypt(host.cloud_cookie);
         res.json(host || null);
     } catch (err) {
         console.error('按IP查找主机错误:', err);
