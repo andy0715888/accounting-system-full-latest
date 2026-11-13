@@ -113,6 +113,8 @@ Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
 Environment=PATH=${PATH}
+Environment=ADMIN_USERNAME=admin
+Environment=ADMIN_PASSWORD=abc123
 StandardOutput=append:${PROJECT_DIR}/server.log
 StandardError=append:${PROJECT_DIR}/server.log
 
@@ -143,7 +145,7 @@ echo "  🎉 安装完成！"
 echo "==========================================${NC}"
 echo ""
 echo -e "🌐 访问地址: http://${IP_ADDR}:3000"
-echo -e "📝 默认账号: ${GREEN}abc${NC} / ${GREEN}abc123${NC}"
+echo -e "📝 默认账号: ${GREEN}admin${NC} / ${GREEN}abc123${NC}"
 echo ""
 echo -e "📂 安装目录: $(pwd)"
 echo -e "📄 服务日志: $(pwd)/server.log"
