@@ -5363,9 +5363,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await res.json();
                 if (res.ok && data.success) {
                     const pct = data.percent || 0;
+                    const unlimited = !!data.unlimited;
                     const pctColor = pct > 90 ? '#f56c6c' : pct > 70 ? '#e6a23c' : '#67c23a';
                     const expireMs = data.expireDate ? new Date(data.expireDate).getTime() : 0;
                     const expireColor = expireMs && expireMs < Date.now() + 7*86400000 ? '#f56c6c' : '#606266';
+                    const flowBlock = unlimited
+                        ? `<div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
+                                <span>💧 已用流量: <b>${data.usedText}</b></span>
+                                <span style="color:#67c23a;">不限流量</span>
+                           </div>`
+                        : `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                                <span>💧 流量:</span>
+                                <div style="flex:1;background:#ebeef5;border-radius:4px;height:14px;overflow:hidden;">
+                                    <div style="width:${pct}%;background:${pctColor};height:100%;transition:width .3s;"></div>
+                                </div>
+                                <span style="color:${pctColor};font-weight:600;min-width:36px;text-align:right;">${pct}%</span>
+                           </div>
+                           <div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
+                                <span>已用: <b>${data.usedText}</b> / 总: ${data.totalText}</span>
+                                <span>剩余: <b style="color:${pctColor};">${data.remainText}</b></span>
+                           </div>`;
                     flowResultEl.innerHTML = `
                         <div style="background:#f5f7fa;border-radius:6px;padding:12px;font-size:12px;border:1px solid #ebeef5;">
                             <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
@@ -5373,25 +5390,18 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <span style="color:#999;">${escapeHtml(data.status)}</span>
                             </div>
                             <div style="color:#999;margin-bottom:6px;">🖥️ ${escapeHtml(data.ip)} · ${escapeHtml(data.os)} · ID: ${escapeHtml(data.instanceId)}</div>
-                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                                <span>💧 流量:</span>
-                                <div style="flex:1;background:#ebeef5;border-radius:4px;height:14px;overflow:hidden;">
-                                    <div style="width:${pct}%;background:${pctColor};height:100%;transition:width .3s;"></div>
-                                </div>
-                                <span style="color:${pctColor};font-weight:600;min-width:36px;text-align:right;">${pct}%</span>
-                            </div>
-                            <div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
-                                <span>已用: <b>${data.usedText}</b> / 总: ${data.totalText}</span>
-                                <span>剩余: <b style="color:${pctColor};">${data.remainText}</b></span>
-                            </div>
+                            ${flowBlock}
                             <div style="color:${expireColor};">📅 到期: ${data.expireDate || '未知'}${data.suspendReason ? ' · ⚠️ ' + escapeHtml(data.suspendReason) : ''}</div>
                         </div>
                     `;
                 } else {
                     const err = data.error || '获取失败';
-                    const hint = err.includes('极验')
-                        ? '<div style="color:#999;font-size:11px;margin-top:4px;">💡 解决方法：用部署后端的那台服务器外网IP，浏览器登录烟火云过一次滑块验证 → 重新复制Cookie贴上来</div>'
-                        : '';
+                    let hint = '';
+                    if (err.includes('极验')) {
+                        hint = '<div style="color:#999;font-size:11px;margin-top:4px;">💡 请在浏览器重新登录云平台，过一次滑块验证后重新复制 Cookie</div>';
+                    } else if (err.includes('登录状态已失效') || err.includes('ZJMF_')) {
+                        hint = '<div style="color:#999;font-size:11px;margin-top:4px;">💡 打开云平台重新登录 → F12 → Application → Cookies → 复制全部 Cookie（必须包含 ZJMF_ 开头的那一项）</div>';
+                    }
                     flowResultEl.innerHTML = `<span style="color:#f56c6c;font-size:12px;">❌ ${escapeHtml(err)}</span>${hint}`;
                 }
             } catch (err) {

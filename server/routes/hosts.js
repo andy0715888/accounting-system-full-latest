@@ -252,6 +252,22 @@ router.get('/:id/cloud-flow', requireAuth, async (req, res) => {
             return res.status(400).json({ error: '请先在主机编辑里填写云平台地址、产品ID和Cookie' });
         }
 
+        // 智简魔方前台接口需要 Authorization: Bearer <JWT>
+        // JWT 就是 Cookie 里 ZJMF_* 这个 cookie 的值，自动提取
+        let jwt = '';
+        for (const part of cookie.split(';')) {
+            const idx = part.indexOf('=');
+            if (idx < 0) continue;
+            const name = part.slice(0, idx).trim();
+            if (name.startsWith('ZJMF_')) {
+                jwt = part.slice(idx + 1).trim();
+                break;
+            }
+        }
+        if (!jwt) {
+            return res.status(400).json({ error: 'Cookie 里没有找到 ZJMF_ 开头的登录令牌，请重新从浏览器复制完整 Cookie（需包含 ZJMF_xxx 这一项）' });
+        }
+
         // 先用 dedicatedserver 接口拿 bwusage/bwlimit
         const url = `${baseUrl}/host/dedicatedserver?host_id=${encodeURIComponent(productId)}&lite=1`;
         let data;
@@ -259,6 +275,7 @@ router.get('/:id/cloud-flow', requireAuth, async (req, res) => {
             const resp = await axios.get(url, {
                 headers: {
                     'Cookie': cookie,
+                    'Authorization': 'Bearer ' + jwt,
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'application/json, text/plain, */*',
                     'Referer': `${baseUrl}/servicedetail?id=${encodeURIComponent(productId)}`
@@ -274,7 +291,11 @@ router.get('/:id/cloud-flow', requireAuth, async (req, res) => {
                 if (typeof body === 'string' && body.includes('_guard')) {
                     return res.status(403).json({ error: '请求被云平台极验安全拦截，请先用相同IP的浏览器登录云平台过一次验证' });
                 }
-                return res.status(400).json({ error: '云平台返回异常：' + (body?.msg || body?.status || 'unknown') });
+                const msg = body?.msg || '';
+                if (msg.includes('登陆') || msg.includes('登录') || body?.status === 405 || body?.status === 401) {
+                    return res.status(400).json({ error: '云平台登录状态已失效（' + msg + '），请重新登录云平台并复制新的 Cookie' });
+                }
+                return res.status(400).json({ error: '云平台返回异常：' + (msg || body?.status || 'unknown') });
             }
 
             const hd = body.data?.host_data;
@@ -303,6 +324,7 @@ router.get('/:id/cloud-flow', requireAuth, async (req, res) => {
                 os: hd.os || '',
                 type: hd.type || '',
                 // 流量
+                unlimited: bwLimit <= 0,
                 totalGB: bwLimit,
                 usedGB: bwUsage,
                 remainGB: remain,
