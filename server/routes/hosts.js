@@ -15,7 +15,7 @@ router.get('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const hosts = await query(
-            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite, cloud_base_url, cloud_product_id, cloud_cookie, cloud_last_fetch FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
+            'SELECT id, name, host, port, username, remark, sort_order, created_at, last_connected, is_favorite, cloud_base_url, cloud_product_id, cloud_cookie, cloud_last_fetch, cloud_flow_cache FROM hosts WHERE user_id = ? ORDER BY last_connected IS NULL, last_connected DESC, sort_order, id',
             [userId]
         );
         // cookie 需要解密返回
@@ -140,7 +140,7 @@ router.get('/by-ip/:ip', requireAuth, async (req, res) => {
         const userId = req.session.userId;
         const ip = req.params.ip;
         const host = await queryOne(
-            'SELECT id, name, host, port, username, remark, cloud_base_url, cloud_product_id, cloud_cookie, cloud_last_fetch FROM hosts WHERE user_id = ? AND host = ? ORDER BY id DESC LIMIT 1',
+            'SELECT id, name, host, port, username, remark, cloud_base_url, cloud_product_id, cloud_cookie, cloud_last_fetch, cloud_flow_cache FROM hosts WHERE user_id = ? AND host = ? ORDER BY id DESC LIMIT 1',
             [userId, ip]
         );
         if (host && host.cloud_cookie) host.cloud_cookie = decrypt(host.cloud_cookie);
@@ -344,8 +344,8 @@ router.get('/:id/cloud-flow', requireAuth, async (req, res) => {
             return res.status(502).json({ error: '云平台请求失败: ' + (axiosErr.message || '网络异常') });
         }
 
-        // 更新最近拉取时间
-        await execute('UPDATE hosts SET cloud_last_fetch = CURRENT_TIMESTAMP WHERE id = ?', [hostId]);
+        // 更新最近拉取时间 + 缓存流量数据
+        await execute('UPDATE hosts SET cloud_last_fetch = CURRENT_TIMESTAMP, cloud_flow_cache = ? WHERE id = ?', [JSON.stringify(data), hostId]);
 
         res.json(data);
     } catch (err) {

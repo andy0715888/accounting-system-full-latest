@@ -188,6 +188,7 @@ function createTables() {
         db.run(`ALTER TABLE hosts ADD COLUMN cloud_product_id TEXT`, () => {});
         db.run(`ALTER TABLE hosts ADD COLUMN cloud_cookie TEXT`, () => {});
         db.run(`ALTER TABLE hosts ADD COLUMN cloud_last_fetch DATETIME`, () => {});
+        db.run(`ALTER TABLE hosts ADD COLUMN cloud_flow_cache TEXT`, () => {});
 
         // 备忘标签表
         db.run(`CREATE TABLE IF NOT EXISTS memo_tags (

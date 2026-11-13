@@ -5301,7 +5301,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="input-group" style="margin-bottom:6px;"><label>登录Cookie</label><textarea id="ipCloudCookie" rows="3" style="width:100%;padding:6px 10px;border:1px solid #dcdfe6;border-radius:4px;font-size:12px;font-family:monospace;" placeholder="_ok5_=xxx; ZJMF_xxx=eyJ...">${escapeAttr(cloudCookie)}</textarea>
                     <div style="font-size:11px;color:#999;margin-top:2px;">复制方法：浏览器登录云平台 → F12 → Application → Cookies → 复制全部 cookie 字符串（含极验验证token）</div>
                     <div style="display:flex;gap:8px;margin-top:10px;">
-                        <button type="button" id="fetchCloudFlowBtn" class="tool-btn" style="flex:1;">🌐 一键获取流量</button>
+                        <button type="button" id="fetchCloudFlowBtn" class="tool-btn" style="flex:1;">🌐 获取/更新实时信息</button>
                         ${savedHost && savedHost.cloud_last_fetch ? `<span style="font-size:11px;color:#999;align-self:center;">上次: ${savedHost.cloud_last_fetch}</span>` : ''}
                     </div>
                     <div id="cloudFlowResult" style="margin-top:10px;"></div>
@@ -5329,7 +5329,66 @@ document.addEventListener('DOMContentLoaded', function() {
         cancelBtn.onclick = closeModal;
         overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
 
-        // --- 一键获取流量 ---
+        // 渲染流量卡片（缓存/实时共用）
+        function renderCloudCard(data, timeStr) {
+            if (!data || !data.success) return '';
+            const pct = data.percent || 0;
+            const unlimited = !!data.unlimited;
+            const pctColor = pct > 90 ? '#f56c6c' : pct > 70 ? '#e6a23c' : '#67c23a';
+            const expireMs = data.expireDate ? new Date(data.expireDate).getTime() : 0;
+            const expireColor = expireMs && expireMs < Date.now() + 7*86400000 ? '#f56c6c' : '#606266';
+            const flowBlock = unlimited
+                ? `<div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
+                        <span>💧 已用流量: <b>${data.usedText}</b></span>
+                        <span style="color:#67c23a;">不限流量</span>
+                   </div>`
+                : `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                        <span>💧 流量:</span>
+                        <div style="flex:1;background:#ebeef5;border-radius:4px;height:14px;overflow:hidden;">
+                            <div style="width:${pct}%;background:${pctColor};height:100%;transition:width .3s;"></div>
+                        </div>
+                        <span style="color:${pctColor};font-weight:600;min-width:36px;text-align:right;">${pct}%</span>
+                   </div>
+                   <div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
+                        <span>已用: <b>${data.usedText}</b> / 总: ${data.totalText}</span>
+                        <span>剩余: <b style="color:${pctColor};">${data.remainText}</b></span>
+                   </div>`;
+            const timeTag = timeStr
+                ? `<span style="font-size:11px;color:#999;">⏱ ${timeStr}</span>`
+                : '';
+            return `
+                <div style="background:#f5f7fa;border-radius:6px;padding:12px;font-size:12px;border:1px solid #ebeef5;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:6px;align-items:center;">
+                        <span>📦 <b>${escapeHtml(data.productName)}</b></span>
+                        ${timeTag}
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                        <span style="color:#999;">🖥️ ${escapeHtml(data.ip)} · ${escapeHtml(data.os)} · ID: ${escapeHtml(data.instanceId)}</span>
+                        <span style="color:#999;">${escapeHtml(data.status)}</span>
+                    </div>
+                    ${flowBlock}
+                    <div style="color:${expireColor};">📅 到期: ${data.expireDate || '未知'}${data.suspendReason ? ' · ⚠️ ' + escapeHtml(data.suspendReason) : ''}</div>
+                </div>
+            `;
+        }
+
+        // --- 打开弹窗时自动回显缓存的流量卡片 ---
+        if (savedHost?.cloud_flow_cache) {
+            try {
+                const cache = typeof savedHost.cloud_flow_cache === 'string'
+                    ? JSON.parse(savedHost.cloud_flow_cache)
+                    : savedHost.cloud_flow_cache;
+                const timeStr = savedHost.cloud_last_fetch
+                    ? new Date(savedHost.cloud_last_fetch).toLocaleString('zh-CN', { hour12: false })
+                    : '';
+                flowResultEl.innerHTML = renderCloudCard(cache, timeStr);
+            } catch (e) {
+                // 缓存坏了就忽略，让用户重新获取
+            }
+        } else if (savedHost?.cloud_base_url && savedHost?.cloud_product_id && savedHost?.cloud_cookie) {
+            // 有云平台配置但没缓存，给个提示
+            flowResultEl.innerHTML = '<div style="font-size:12px;color:#999;text-align:center;padding:10px 0;border:1px dashed #dcdfe6;border-radius:6px;">💡 已配置云平台信息，点下方按钮拉取实时流量</div>';
+        }
         overlay.querySelector('#fetchCloudFlowBtn').onclick = async () => {
             const baseUrl = overlay.querySelector('#ipCloudBaseUrl').value.trim();
             const productId = overlay.querySelector('#ipCloudProductId').value.trim();
@@ -5352,7 +5411,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!hostId) {
                     flowResultEl.innerHTML = '<span style="color:#f56c6c;font-size:12px;">❌ 请先点"保存"创建主机记录</span>';
                     btn.disabled = false;
-                    btn.textContent = '🌐 一键获取流量';
+                    btn.textContent = '🌐 获取/更新实时信息';
                     return;
                 }
                 savedHost = { id: hostId };
@@ -5362,38 +5421,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const res = await fetch(`/api/hosts/${hostId}/cloud-flow`);
                 const data = await res.json();
                 if (res.ok && data.success) {
-                    const pct = data.percent || 0;
-                    const unlimited = !!data.unlimited;
-                    const pctColor = pct > 90 ? '#f56c6c' : pct > 70 ? '#e6a23c' : '#67c23a';
-                    const expireMs = data.expireDate ? new Date(data.expireDate).getTime() : 0;
-                    const expireColor = expireMs && expireMs < Date.now() + 7*86400000 ? '#f56c6c' : '#606266';
-                    const flowBlock = unlimited
-                        ? `<div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
-                                <span>💧 已用流量: <b>${data.usedText}</b></span>
-                                <span style="color:#67c23a;">不限流量</span>
-                           </div>`
-                        : `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                                <span>💧 流量:</span>
-                                <div style="flex:1;background:#ebeef5;border-radius:4px;height:14px;overflow:hidden;">
-                                    <div style="width:${pct}%;background:${pctColor};height:100%;transition:width .3s;"></div>
-                                </div>
-                                <span style="color:${pctColor};font-weight:600;min-width:36px;text-align:right;">${pct}%</span>
-                           </div>
-                           <div style="display:flex;justify-content:space-between;color:#606266;margin-bottom:4px;">
-                                <span>已用: <b>${data.usedText}</b> / 总: ${data.totalText}</span>
-                                <span>剩余: <b style="color:${pctColor};">${data.remainText}</b></span>
-                           </div>`;
-                    flowResultEl.innerHTML = `
-                        <div style="background:#f5f7fa;border-radius:6px;padding:12px;font-size:12px;border:1px solid #ebeef5;">
-                            <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-                                <span>📦 <b>${escapeHtml(data.productName)}</b></span>
-                                <span style="color:#999;">${escapeHtml(data.status)}</span>
-                            </div>
-                            <div style="color:#999;margin-bottom:6px;">🖥️ ${escapeHtml(data.ip)} · ${escapeHtml(data.os)} · ID: ${escapeHtml(data.instanceId)}</div>
-                            ${flowBlock}
-                            <div style="color:${expireColor};">📅 到期: ${data.expireDate || '未知'}${data.suspendReason ? ' · ⚠️ ' + escapeHtml(data.suspendReason) : ''}</div>
-                        </div>
-                    `;
+                    flowResultEl.innerHTML = renderCloudCard(data, '刚刚更新');
+                    // 刷新 savedHost.cloud_last_fetch 显示的时间
+                    savedHost.cloud_last_fetch = new Date().toISOString().replace('T', ' ').slice(0, 19);
                 } else {
                     const err = data.error || '获取失败';
                     let hint = '';
@@ -5408,7 +5438,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 flowResultEl.innerHTML = `<span style="color:#f56c6c;font-size:12px;">❌ 请求异常: ${escapeHtml(err.message)}</span>`;
             } finally {
                 btn.disabled = false;
-                btn.textContent = '🌐 一键获取流量';
+                btn.textContent = '🌐 获取/更新实时信息';
             }
         };
 
