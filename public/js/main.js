@@ -5287,13 +5287,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     <button class="modal-close">✕</button>
                 </div>
                 <div class="modal-body">
+                    <div class="ip-tabs" style="display:flex;gap:4px;border-bottom:1px solid #ebeef5;margin-bottom:16px;">
+                        <button type="button" class="ip-tab" data-ip-tab="ssh" style="background:none;border:none;border-bottom:2px solid #409eff;padding:8px 14px;margin-bottom:-1px;cursor:pointer;font-size:14px;font-weight:600;color:#409eff;">🔌 SSH连接</button>
+                        <button type="button" class="ip-tab" data-ip-tab="flow" style="background:none;border:none;border-bottom:2px solid transparent;padding:8px 14px;margin-bottom:-1px;cursor:pointer;font-size:14px;color:#606266;">📊 流量查询</button>
+                    </div>
+                    <div class="ip-tab-pane" data-ip-tab="ssh">
                     <div class="input-group"><label>主机名称（取自客户名）</label><input type="text" id="ipInfoName" value="${escapeAttr(clientName)}" placeholder="主机名称" /></div>
                     <div class="input-group"><label>主机地址（取自IP地址）</label><input type="text" id="ipInfoHost" value="${escapeAttr(ipAddr)}" placeholder="IP地址" /></div>
                     <div class="input-group"><label>密码（取自表格密码列）</label><input type="password" id="ipInfoPwd" value="${escapeAttr(password)}" placeholder="密码" /></div>
                     <div class="input-group"><label>端口</label><input type="number" id="ipInfoPort" value="${savedHost ? savedHost.port : 22}" placeholder="22" /></div>
                     <div class="input-group"><label>用户名</label><input type="text" id="ipInfoUser" value="${savedHost ? escapeAttr(savedHost.username) : ''}" placeholder="root" /></div>
                     <div class="input-group"><label>备注</label><input type="text" id="ipInfoRemark" value="${savedHost ? escapeAttr(savedHost.remark || '') : ''}" placeholder="可选" /></div>
-                    <hr style="margin:16px 0;border:none;border-top:1px solid #eee;">
+                    <div class="modal-actions">
+                        <button class="tool-btn primary" id="ipInfoSaveBtn">💾 保存</button>
+                        <button class="tool-btn" id="ipInfoSaveConnBtn" style="background:#67c23a;color:#fff;">🔌 保存并连接</button>
+                        <button class="tool-btn cancel-ip-info-btn">取消</button>
+                    </div>
+                    <span id="ipInfoStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                    </div>
+
+                    <div class="ip-tab-pane" data-ip-tab="flow" style="display:none;">
                     <div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#409eff;">🌐 云平台流量监控</div>
                     <div style="font-size:11px;color:#999;margin-bottom:10px;">填写后可一键从云平台（烟火云等）抓取已用流量、剩余流量、到期时间</div>
                     <div class="input-group" style="margin-bottom:6px;"><label>云平台地址</label><input type="text" id="ipCloudBaseUrl" value="${escapeAttr(cloudBaseUrl)}" placeholder="https://www.yanhuoidc.com" /></div>
@@ -5305,29 +5318,45 @@ document.addEventListener('DOMContentLoaded', function() {
                         ${savedHost && savedHost.cloud_last_fetch ? `<span style="font-size:11px;color:#999;align-self:center;">上次: ${savedHost.cloud_last_fetch}</span>` : ''}
                     </div>
                     <div id="cloudFlowResult" style="margin-top:10px;"></div>
-                    <div class="modal-actions">
-                        <button class="tool-btn primary" id="ipInfoSaveBtn">💾 保存</button>
-                        <button class="tool-btn" id="ipInfoSaveConnBtn" style="background:#67c23a;color:#fff;">🔌 保存并连接</button>
+                    <div class="modal-actions" style="margin-top:14px;">
+                        <button class="tool-btn" id="ipFlowSaveBtn">💾 保存配置</button>
                         <button class="tool-btn cancel-ip-info-btn">取消</button>
                     </div>
-                    <span id="ipInfoStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                    <span id="ipFlowStatus" style="color:#67c23a;display:block;margin-top:8px;"></span>
+                    </div>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
 
         const closeBtn = overlay.querySelector('.modal-close');
-        const cancelBtn = overlay.querySelector('.cancel-ip-info-btn');
         const saveBtn = overlay.querySelector('#ipInfoSaveBtn');
         const saveConnBtn = overlay.querySelector('#ipInfoSaveConnBtn');
         const status = overlay.querySelector('#ipInfoStatus');
+        const flowStatus = overlay.querySelector('#ipFlowStatus');
         const flowResultEl = overlay.querySelector('#cloudFlowResult');
 
         function closeModal() { overlay.remove(); }
 
         closeBtn.onclick = closeModal;
-        cancelBtn.onclick = closeModal;
+        overlay.querySelectorAll('.cancel-ip-info-btn').forEach(b => { b.onclick = closeModal; });
         overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+        // --- 标签切换：SSH连接 / 流量查询 ---
+        function switchIpTab(name) {
+            overlay.querySelectorAll('.ip-tab').forEach(b => {
+                const on = b.dataset.ipTab === name;
+                b.style.color = on ? '#409eff' : '#606266';
+                b.style.fontWeight = on ? '600' : '400';
+                b.style.borderBottom = on ? '2px solid #409eff' : '2px solid transparent';
+            });
+            overlay.querySelectorAll('.ip-tab-pane').forEach(p => {
+                p.style.display = p.dataset.ipTab === name ? '' : 'none';
+            });
+        }
+        overlay.querySelectorAll('.ip-tab').forEach(b => {
+            b.onclick = () => switchIpTab(b.dataset.ipTab);
+        });
 
         // 渲染流量卡片（缓存/实时共用）
         function renderCloudCard(data, timeStr) {
@@ -5519,6 +5548,24 @@ document.addEventListener('DOMContentLoaded', function() {
             if (result) {
                 setTimeout(closeModal, 800);
                 await loadHosts();
+            }
+        };
+
+        // 流量查询页：只保存云平台配置，不关闭弹窗，方便继续抓取
+        overlay.querySelector('#ipFlowSaveBtn').onclick = async () => {
+            const result = await saveHost();
+            if (result) {
+                flowStatus.style.color = '#67c23a';
+                flowStatus.textContent = '✅ 云平台配置已保存';
+                // 新建后记住 id，避免重复保存时再建一条主机记录
+                if (!savedHost || !savedHost.id) {
+                    savedHost = { ...(savedHost || {}), ...result };
+                }
+                await loadHosts();
+                setTimeout(() => { flowStatus.textContent = ''; }, 2000);
+            } else {
+                flowStatus.style.color = '#f56c6c';
+                flowStatus.textContent = status.textContent || '保存失败';
             }
         };
 
