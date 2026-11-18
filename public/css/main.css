@@ -1175,6 +1175,14 @@ body {
     flex:1;
 }
 .column-item .col-info .col-key { color:#999; font-size:12px; }
+.column-item .col-info .col-owner-select {
+    font-size:12px;
+    padding:2px 4px;
+    border:1px solid #dcdfe6;
+    border-radius:4px;
+    background:#fff;
+    color:#606266;
+}
 .column-item .col-info .income-toggle {
     font-size:12px;
     padding:1px 8px;

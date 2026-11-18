@@ -150,6 +150,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const columnList = $('#columnList');
     const newColName = $('#newColName');
     const newColType = $('#newColType');
+    const newColOwner = $('#newColOwner');
     const importModal = $('#importModal');
     const closeImport = $('#closeImport');
     const importFileInput = $('#importFileInput');
@@ -209,7 +210,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const pageNumbers = $('#pageNumbers');
     const pageSizeSelect = $('#pageSizeSelect');
     // 同步 state.pageSize 与下拉框初始值
-    state.pageSize = parseInt(pageSizeSelect ? pageSizeSelect.value : 1000) || 1000;
+    state.pageSize = parseInt(pageSizeSelect ? pageSizeSelect.value : 100) || 100;
     const pageJumpInput = $('#pageJumpInput');
     const pageJumpBtn = $('#pageJumpBtn');
     const keywordJumpInput = $('#keywordJumpInput');
@@ -900,7 +901,11 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     async function loadTabs() { state.tabs = await API.get('/tabs'); return state.tabs; }
-    async function loadColumns(tabId) { state.columns = await API.get('/columns?tabId=' + tabId); return state.columns; }
+    async function loadColumns(tabId) {
+        state.columns = await API.get('/columns?tabId=' + tabId);
+        state.columnsCache[tabId] = state.columns;
+        return state.columns;
+    }
     async function loadConditionalFormats(tabId) {
         state.conditionalFormats = await API.get('/conditional-formats?tabId=' + tabId);
         return state.conditionalFormats;
@@ -920,10 +925,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const CLIENT_INHERITED_COLS = new Set(['ip_address', 'password', 'domain', 'remark']);
     // 点击编辑后输入框按内容最大长度显示的列（非编辑时居中，编辑时展开）
     const EXPAND_COLS = new Set(['ip_address', 'password', 'domain', 'remark', 'client_name', 'unit_price']);
-    // 服务器字段：服务商,月数,主机购买时间,主机到期时间,主机剩余天数,IP地址,密码,域名,备注,地址,IP信息 + 弹窗顶部持久化单价
-    const SERVER_FIELDS = ['provider', 'months', 'host_purchase', 'host_expire', 'host_remaining', 'ip_address', 'password', 'domain', 'remark', 'address', 'ip_info', 'host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'expense_unit_price', 'income_unit_price'];
-    // 客户字段：客户购买时间,客户到期时间,客户剩余天数,客户名,单价备注 + 弹窗顶部持久化单价
-    const CLIENT_FIELDS = ['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'income_unit_price'];
+    // 内置客户列用于兼容旧缓存；正常数据由后端 col_owner 提供
+    const CLIENT_OWNED_COL_KEYS = new Set(['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'fee']);
+    function getColumnOwner(col) {
+        if (col.col_owner === 'server' || col.col_owner === 'client') return col.col_owner;
+        return CLIENT_OWNED_COL_KEYS.has(col.col_key) ? 'client' : 'server';
+    }
+    // 独享标签按列归属提取；弹窗顶部字段不是表格列，需要单独加入对应分组
+    function getOwnedFields(owner) {
+        const fields = state.columns.filter(col => getColumnOwner(col) === owner).map(col => col.col_key);
+        const modalFields = owner === 'server'
+            ? ['host_expense_unit_price', 'host_expense_extra', 'host_expense_remark', 'expense_unit_price']
+            : ['income_unit_price'];
+        return [...new Set([...fields, ...modalFields])];
+    }
     // Client-only columns (only meaningful for client rows, empty/readonly on server rows)
     // client_purchase, client_expire, client_remaining, client_name, unit_price, fee, is_expired are used by both
 
@@ -948,8 +963,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const confirmInsertMultiRowBtn = $('#confirmInsertMultiRowBtn');
     const cancelInsertMultiRowBtn = $('#cancelInsertMultiRowBtn');
 
+    function normalizePageSize(value) {
+        const size = parseInt(value);
+        return [50, 100, 200, 500, 1000, 5000].includes(size) ? size : 100;
+    }
+
     async function loadRecords(tabId) {
         await flushPendingSaves();
+        // 刷新/切换标签后，下拉框必须与实际请求条数一致；旧的非法缓存值回退为100
+        // 全局搜索使用临时不分页状态，不参与普通分页值校验
+        if (!state.globalSearchActive) {
+            state.pageSize = normalizePageSize(state.pageSize);
+            if (pageSizeSelect) pageSizeSelect.value = String(state.pageSize);
+        }
         // 构建 URL：把 filters 作为 JSON 传给后端
         const filtersParam = Object.keys(state.filters).length > 0
             ? '&filters=' + encodeURIComponent(JSON.stringify(state.filters)) : '';
@@ -4072,6 +4098,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let html = '';
         cols.forEach(col => {
             const isIncome = col.is_income || 0;
+            const owner = getColumnOwner(col);
             let incomeLabel = '';
             if (isIncome === 1) incomeLabel = '💰';
             else if (isIncome === 2) incomeLabel = '💸';
@@ -4084,6 +4111,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         </span>
                         <span class="col-key">(${escapeHtml(col.col_key)})</span>
                         <button class="income-toggle ${isIncome === 1 ? 'active-income' : (isIncome === 2 ? 'active-expense' : '')}" data-id="${col.id}">${incomeLabel || '普通'}</button>
+                        <select class="col-owner-select" data-id="${col.id}" title="提取/粘贴时的信息归属">
+                            <option value="server" ${owner === 'server' ? 'selected' : ''}>服务器信息</option>
+                            <option value="client" ${owner === 'client' ? 'selected' : ''}>客户信息</option>
+                        </select>
                         <span style="color:#999;font-size:12px;">${col.col_visible === 1 ? '👁️' : '🙈'}</span>
                     </div>
                     <div class="col-actions">
@@ -4183,6 +4214,28 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
+        // 调整列归属：独享标签提取/粘贴时按此字段分组
+        columnList.querySelectorAll('.col-owner-select').forEach(select => {
+            select.addEventListener('change', async function() {
+                const id = parseInt(this.dataset.id);
+                const col = state.columns.find(c => c.id === id);
+                if (!col) return;
+                const previousOwner = getColumnOwner(col);
+                const newOwner = this.value;
+                if (newOwner === previousOwner) return;
+                try {
+                    await API.put('/columns/' + id, { col_owner: newOwner });
+                    col.col_owner = newOwner;
+                    state.columnsCache[state.currentTabId] = state.columns;
+                    updateTabCache(state.currentTabId);
+                    setStatus('✅ 列归属已更新');
+                } catch (err) {
+                    this.value = previousOwner;
+                    setStatus('❌ 归属更新失败: ' + err.message);
+                }
+            });
+        });
+
         // 双击列名 → 编辑列名
         columnList.querySelectorAll('.col-name-display').forEach(display => {
             display.addEventListener('dblclick', function(e) {
@@ -4269,6 +4322,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function addColumn() {
         const name = newColName.value.trim();
         const type = newColType.value;
+        const owner = newColOwner.value;
         if (!name) { setStatus('⚠️ 请输入列名称'); return; }
         if (!state.currentTabId) { setStatus('⚠️ 请先选择一个标签'); return; }
 
@@ -4282,6 +4336,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 col_key: key,
                 col_name: name,
                 col_type: type,
+                col_owner: owner,
                 is_income: 0
             });
             if (result.success) {
@@ -7427,9 +7482,9 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch(e) { copiedHostInfo = null; }
         }
         if (isDedicatedTab) {
-            // 独享标签：提取服务器字段（服务商~IP信息 + 弹窗单价），支出明细通过API迁移
+            // 独享标签：只提取“服务器信息”归属的列，支出明细通过API迁移
             const serverData = {};
-            SERVER_FIELDS.forEach(k => { serverData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
+            getOwnedFields('server').forEach(k => { serverData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
             state.copiedServerData = serverData;
             state.copiedServerHostInfo = copiedHostInfo;
             state.copiedServerRecordId = record.id;
@@ -7520,8 +7575,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const updateData = { ...targetRecord.data };
             if (isDedicatedTab) {
-                // 独享标签：只写服务器字段
-                SERVER_FIELDS.forEach(k => {
+                // 独享标签：只写提取时保存的服务器归属字段，客户字段保持目标行原值
+                Object.keys(state.copiedServerData).forEach(k => {
                     updateData[k] = state.copiedServerData[k] !== undefined ? state.copiedServerData[k] : '';
                 });
             } else if (isSimpleTab || isSimpleCut) {
@@ -7602,9 +7657,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!contextTargetId) return;
         const record = state.records.find(r => r.id === contextTargetId);
         if (!record) return;
-        // 客户信息：客户购买时间、客户到期时间、客户剩余天数、客户名、单价备注、收入明细
+        // 只提取“客户信息”归属的列，收入明细通过API迁移
         const clientData = {};
-        CLIENT_FIELDS.forEach(k => { clientData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
+        getOwnedFields('client').forEach(k => { clientData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
         state.extractedClientData = {
             recordId: record.id,
             tabId: state.currentTabId,
@@ -7642,9 +7697,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (src.recordId !== contextTargetId) {
                 try { await API.post('/income/migrate', { from_record_id: src.recordId, to_record_id: contextTargetId }); } catch(e) {}
             }
-            // 2. 将客户字段写入目标行
+            // 2. 只将提取时保存的客户归属字段写入目标行
             const updateData = { ...targetRec.data };
-            CLIENT_FIELDS.forEach(k => {
+            Object.keys(src.data).forEach(k => {
                 updateData[k] = src.data[k] !== undefined ? src.data[k] : '';
             });
             await API.put('/records/' + contextTargetId, { data: updateData });
@@ -7662,7 +7717,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch (e) { srcData = null; }
                 }
                 if (srcData) {
-                    CLIENT_FIELDS.forEach(k => { srcData[k] = ''; });
+                    Object.keys(src.data).forEach(k => { srcData[k] = ''; });
                     try { await API.put('/records/' + src.recordId, { data: srcData }); } catch(e) {}
                 }
             }
@@ -7696,8 +7751,9 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch(e) { copiedHostInfo = null; }
         }
         const bothData = {};
-        SERVER_FIELDS.forEach(k => { bothData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
-        CLIENT_FIELDS.forEach(k => { bothData[k] = record.data[k] !== undefined ? record.data[k] : ''; });
+        [...getOwnedFields('server'), ...getOwnedFields('client')].forEach(k => {
+            bothData[k] = record.data[k] !== undefined ? record.data[k] : '';
+        });
         state.extractedBothData = {
             recordId: record.id,
             tabId: state.currentTabId,
@@ -7742,7 +7798,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             // 2. 将服务器+客户字段写入目标行
             const updateData = { ...targetRec.data };
-            [...SERVER_FIELDS, ...CLIENT_FIELDS].forEach(k => {
+            Object.keys(src.data).forEach(k => {
                 updateData[k] = src.data[k] !== undefined ? src.data[k] : '';
             });
             await API.put('/records/' + contextTargetId, { data: updateData });
@@ -7772,7 +7828,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     } catch (e) { srcData = null; }
                 }
                 if (srcData) {
-                    [...SERVER_FIELDS, ...CLIENT_FIELDS].forEach(k => { srcData[k] = ''; });
+                    Object.keys(src.data).forEach(k => { srcData[k] = ''; });
                     try { await API.put('/records/' + src.recordId, { data: srcData }); } catch(e) {}
                 }
             }

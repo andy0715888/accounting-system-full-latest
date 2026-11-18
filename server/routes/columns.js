@@ -32,9 +32,12 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
-        let { tab_id, col_key, col_name, col_type, col_options, col_width, col_visible, is_income } = req.body;
+        let { tab_id, col_key, col_name, col_type, col_options, col_width, col_visible, is_income, col_owner } = req.body;
         if (!tab_id) return res.status(400).json({ error: '缺少 tab_id' });
         if (!col_name) return res.status(400).json({ error: '列名称不能为空' });
+        if (col_owner !== undefined && !['server', 'client'].includes(col_owner)) {
+            return res.status(400).json({ error: '列归属只能是服务器信息或客户信息' });
+        }
 
         if (!col_key) {
             const ts = Date.now();
@@ -58,8 +61,8 @@ router.post('/', requireAuth, async (req, res) => {
 
         const result = await execute(`
             INSERT INTO column_defs 
-            (user_id, tab_id, col_key, col_name, col_type, col_options, col_width, col_visible, col_order, is_income)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, tab_id, col_key, col_name, col_type, col_options, col_width, col_visible, col_order, is_income, col_owner)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             userId, tab_id, col_key, col_name,
             col_type || 'text',
@@ -67,7 +70,8 @@ router.post('/', requireAuth, async (req, res) => {
             col_width || 150,
             col_visible !== undefined ? (col_visible ? 1 : 0) : 1,
             order,
-            is_income || 0
+            is_income || 0,
+            col_owner || 'server'
         ]);
 
         res.json({ success: true, id: result.lastID, message: '列添加成功' });
@@ -81,7 +85,10 @@ router.put('/:id', requireAuth, async (req, res) => {
     try {
         const userId = req.session.userId;
         const columnId = req.params.id;
-        const { col_name, col_type, col_options, col_width, col_visible, col_order, is_income } = req.body;
+        const { col_name, col_type, col_options, col_width, col_visible, col_order, is_income, col_owner } = req.body;
+        if (col_owner !== undefined && !['server', 'client'].includes(col_owner)) {
+            return res.status(400).json({ error: '列归属只能是服务器信息或客户信息' });
+        }
 
         const existing = await queryOne('SELECT id FROM column_defs WHERE id = ? AND user_id = ?', [columnId, userId]);
         if (!existing) return res.status(404).json({ error: '列不存在' });
@@ -95,6 +102,7 @@ router.put('/:id', requireAuth, async (req, res) => {
         if (col_visible !== undefined) { updates.push('col_visible = ?'); params.push(col_visible ? 1 : 0); }
         if (col_order !== undefined) { updates.push('col_order = ?'); params.push(col_order); }
         if (is_income !== undefined) { updates.push('is_income = ?'); params.push(is_income); }
+        if (col_owner !== undefined) { updates.push('col_owner = ?'); params.push(col_owner); }
 
         if (updates.length === 0) return res.status(400).json({ error: '没有要更新的字段' });
 

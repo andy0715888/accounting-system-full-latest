@@ -148,10 +148,10 @@
                         <select class="page-size-select" id="pageSizeSelect">
                             <option value="50">50</option>
                             <option value="100" selected>100</option>
+                            <option value="200">200</option>
                             <option value="500">500</option>
                             <option value="1000">1000</option>
                             <option value="5000">5000</option>
-                            <option value="10000">10000</option>
                         </select>
                         <span class="page-size-label">条</span>
                     </div>
@@ -534,6 +534,10 @@
                         <option value="boolean">布尔</option>
                         <option value="days_remaining">剩余天数</option>
                         <option value="address_select">地址选择</option>
+                    </select>
+                    <select id="newColOwner" title="列归属">
+                        <option value="server">归属：服务器信息</option>
+                        <option value="client">归属：客户信息</option>
                     </select>
                     <button class="tool-btn primary" id="addColBtn">添加列</button>
                 </div>

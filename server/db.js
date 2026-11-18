@@ -50,6 +50,7 @@ function createTables() {
             col_order INTEGER DEFAULT 0,
             is_system INTEGER DEFAULT 0,
             is_income INTEGER DEFAULT 0,
+            col_owner TEXT DEFAULT 'server',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (tab_id) REFERENCES tabs(id),
@@ -178,6 +179,12 @@ function createTables() {
         // Migration: add tab_type and tab_order to existing tabs table
         db.run(`ALTER TABLE tabs ADD COLUMN tab_type TEXT DEFAULT 'dedicated'`, () => {});
         db.run(`ALTER TABLE tabs ADD COLUMN tab_order INTEGER DEFAULT 0`, () => {});
+        db.run(`ALTER TABLE column_defs ADD COLUMN col_owner TEXT DEFAULT 'server'`, (err) => {
+            // 仅首次新增字段时回填内置客户列，之后允许用户自行调整归属
+            if (!err) {
+                db.run(`UPDATE column_defs SET col_owner = 'client' WHERE col_key IN ('client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'fee')`, () => {});
+            }
+        });
 
         db.run(`ALTER TABLE records ADD COLUMN record_type TEXT DEFAULT 'server'`, () => {});
         db.run(`ALTER TABLE records ADD COLUMN parent_id INTEGER`, () => {});
@@ -344,15 +351,16 @@ function createDefaultColumnsForTab(userId, tabId, tabType) {
 
     const stmt = db.prepare(`
         INSERT OR IGNORE INTO column_defs 
-        (user_id, tab_id, col_key, col_name, col_type, col_options, col_order, is_system, col_width, col_visible, is_income)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, tab_id, col_key, col_name, col_type, col_options, col_order, is_system, col_width, col_visible, is_income, col_owner)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     defaultColumns.forEach(col => {
         stmt.run([
             userId, tabId, col.col_key, col.col_name, col.col_type,
             col.col_options || null, col.col_order || 0,
-            1, 150, 1, col.is_income || 0
+            1, 150, 1, col.is_income || 0,
+            col.col_owner || (['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'fee'].includes(col.col_key) ? 'client' : 'server')
         ]);
     });
     stmt.finalize();

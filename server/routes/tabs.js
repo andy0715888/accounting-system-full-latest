@@ -94,14 +94,15 @@ router.post('/', requireAuth, async (req, res) => {
 
         const stmt = db.prepare(`
             INSERT INTO column_defs 
-            (user_id, tab_id, col_key, col_name, col_type, col_options, col_order, is_system, col_width, col_visible, is_income)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, tab_id, col_key, col_name, col_type, col_options, col_order, is_system, col_width, col_visible, is_income, col_owner)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         defaultColumns.forEach(col => {
             stmt.run([
                 userId, tabId, col.col_key, col.col_name, col.col_type,
                 col.col_options || null, col.col_order || 0,
-                1, 150, 1, col.is_income || 0
+                1, 150, 1, col.is_income || 0,
+                col.col_owner || (['client_purchase', 'client_expire', 'client_remaining', 'client_name', 'unit_price', 'fee'].includes(col.col_key) ? 'client' : 'server')
             ]);
         });
         stmt.finalize();
